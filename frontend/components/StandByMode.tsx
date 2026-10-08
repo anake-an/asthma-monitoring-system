@@ -184,7 +184,7 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
               </svg>
               {data ? (
                 <span className={`text-6xl lg:text-7xl font-semibold tracking-tight ${getAqiInfo(data.pm25_level).color}`}>
-                  {data.pm25_level}
+                  {Number(data.pm25_level).toFixed(1)}
                 </span>
               ) : (
                 <span className="text-6xl text-zinc-600">--</span>
