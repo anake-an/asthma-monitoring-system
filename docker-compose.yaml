@@ -1,0 +1,143 @@
+services:
+  frontend:
+    image: node:20-alpine
+    restart: unless-stopped
+    working_dir: /app
+    command: >
+      sh -c "if [ -f package.json ]; then npm install && npm run dev; else echo 'Waiting' && tail -f /dev/null; fi"
+    ports:
+      - "3005:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+    depends_on:
+      - backend
+
+  backend:
+    image: webdevops/php:8.2-alpine
+    restart: unless-stopped
+    working_dir: /var/www/html
+    command: >
+      sh -c "if [ -f artisan ]; then composer install && php artisan serve --host=0.0.0.0 --port=8000; else echo 'Waiting' && tail -f /dev/null; fi"
+    ports:
+      - "8005:8000"
+    volumes:
+      - ./backend:/var/www/html
+    environment:
+      - TZ=Asia/Kuala_Lumpur
+      - APP_TIMEZONE=Asia/Kuala_Lumpur
+      - DB_CONNECTION=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=asthma_db
+      - DB_USERNAME=${DB_USERNAME:-laravel}
+      - DB_PASSWORD=${DB_PASSWORD:-secret}
+      # SMTP Configuration for Forgot Password
+      - MAIL_MAILER=smtp
+      - MAIL_HOST=smtp-relay.brevo.com
+      - MAIL_PORT=587
+      - MAIL_USERNAME=${MAIL_USERNAME:-}
+      - MAIL_PASSWORD=${MAIL_PASSWORD:-}
+      - MAIL_ENCRYPTION=tls
+      - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS:-noreply@respirosync.local}
+      - MAIL_FROM_NAME="RespiroSync Dashboard"
+    depends_on:
+      - db
+      - mqtt
+
+  mqtt-worker:
+    image: webdevops/php:8.2-alpine
+    restart: unless-stopped
+    working_dir: /var/www/html
+    command: >
+      sh -c "while [ ! -d vendor ]; do sleep 2; done; php artisan mqtt:subscribe"
+    volumes:
+      - ./backend:/var/www/html
+    environment:
+      - TZ=Asia/Kuala_Lumpur
+      - APP_TIMEZONE=Asia/Kuala_Lumpur
+      - DB_CONNECTION=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=asthma_db
+      - DB_USERNAME=${DB_USERNAME:-laravel}
+      - DB_PASSWORD=${DB_PASSWORD:-secret}
+      # SMTP Configuration for Email Alerts
+      - MAIL_MAILER=smtp
+      - MAIL_HOST=smtp-relay.brevo.com
+      - MAIL_PORT=587
+      - MAIL_USERNAME=${MAIL_USERNAME:-}
+      - MAIL_PASSWORD=${MAIL_PASSWORD:-}
+      - MAIL_ENCRYPTION=tls
+      - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS:-noreply@respirosync.local}
+      - MAIL_FROM_NAME="RespiroSync Alerts"
+    depends_on:
+      - db
+      - mqtt
+      - backend
+
+  ai_engine:
+    build: 
+      context: ./ai_engine
+    restart: unless-stopped
+    ports:
+      - "8010:8000"
+    environment:
+      - DB_CONNECTION=mysql
+      - DB_HOST=db
+      - DB_DATABASE=asthma_db
+      - DB_USERNAME=${DB_USERNAME:-laravel}
+      - DB_PASSWORD=${DB_PASSWORD:-secret}
+    depends_on:
+      - db
+
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    ports:
+      - "3307:3306"
+    environment:
+      - TZ=Asia/Kuala_Lumpur
+      - APP_TIMEZONE=Asia/Kuala_Lumpur
+      - MYSQL_DATABASE=asthma_db
+      - MYSQL_USER=${DB_USERNAME:-laravel}
+      - MYSQL_PASSWORD=${DB_PASSWORD:-secret}
+      - MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD:-root}
+    volumes:
+      - dbdata:/var/lib/mysql
+
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    restart: unless-stopped
+    ports:
+      - "1884:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared_tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TOKEN}
+
+  scheduler:
+    image: webdevops/php:8.2-alpine
+    restart: unless-stopped
+    working_dir: /var/www/html
+    command: >
+      sh -c "while [ ! -f artisan ]; do sleep 2; done; php artisan schedule:work"
+    volumes:
+      - ./backend:/var/www/html
+    environment:
+      - TZ=Asia/Kuala_Lumpur
+      - APP_TIMEZONE=Asia/Kuala_Lumpur
+    depends_on:
+      - backend
+
+volumes:
+  dbdata:

@@ -1,0 +1,22 @@
+{
+  "name": "RespiroSync",
+  "short_name": "RespiroSync",
+  "description": "Real-time IoT Patient Telemetry Dashboard",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0f",
+  "theme_color": "#12121e",
+  "icons": [
+    {
+      "src": "/icon.jpg",
+      "sizes": "192x192 512x512",
+      "type": "image/jpeg"
+    },
+    {
+      "src": "/icon.jpg",
+      "sizes": "any",
+      "purpose": "maskable",
+      "type": "image/jpeg"
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+# System Files
+.DS_Store
+Thumbs.db
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# Node.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build
+npm-debug.log*
+
+# Laravel / PHP
+backend/vendor/
+backend/public/storage
+backend/storage/*.key
+backend/storage/framework/cache/data/*
+backend/storage/framework/cache/data/**/*.php
+backend/storage/framework/sessions/*
+backend/storage/framework/testing/*
+backend/storage/framework/views/*
+backend/storage/logs/*
+backend/storage/logs/**/*.log
+*.sqlite
+*.sqlite3
+
+# Mosquitto / Database Data Volumes
+mosquitto/data/*
+mosquitto/log/*
+dbdata/
+
+# Python / AI Engine
+ai_engine/__pycache__/
+ai_engine/*.pkl
+ai_engine/venv/
+ai_engine/.env
+
+# Hardware / Firmware
+hardware/**/build/
+hardware/**/*.bin
+hardware/**/*.elf
+hardware/esp32_firmware/esp32_firmware.ino
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
