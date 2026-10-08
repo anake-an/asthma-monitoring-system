@@ -4,14 +4,14 @@ services:
     restart: unless-stopped
     working_dir: /app
     command: >
-      sh -c "if [ -f package.json ]; then npm install && npm run dev; else echo 'Waiting' && tail -f /dev/null; fi"
+      sh -c "if [ -f package.json ]; then npm ci --include=dev && npm run build && npm start; else echo 'Waiting' && tail -f /dev/null; fi"
     ports:
       - "127.0.0.1:3005:3000"
     volumes:
       - ./frontend:/app
       - /app/node_modules
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
     depends_on:
       - backend
 
