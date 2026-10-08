@@ -27,6 +27,7 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError("");
+    let success = false;
 
     try {
       const res = await fetch("/api/login", {
@@ -46,7 +47,6 @@ export default function LoginPage() {
         } catch (e) {
           setError(`Server Error (${res.status}): Please check backend logs.`);
         }
-        setLoading(false);
         return;
       }
 
@@ -62,14 +62,20 @@ export default function LoginPage() {
           localStorage.removeItem("respirosync_remembered_email");
         }
 
-        router.push("/");
+        success = true;
+        // Small artificial delay so the loading spinner doesn't flash off instantly
+        setTimeout(() => {
+          router.push("/");
+        }, 300);
       } else {
         setError(data.message || "Invalid credentials");
       }
     } catch (err) {
       setError("Failed to connect to the server.");
     } finally {
-      setLoading(false);
+      if (!success) {
+        setLoading(false);
+      }
     }
   };
 

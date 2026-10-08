@@ -33,6 +33,7 @@ export default function RegisterPage() {
 
     setLoading(true);
     setError("");
+    let success = false;
 
     try {
       const res = await fetch("/api/register", {
@@ -53,20 +54,25 @@ export default function RegisterPage() {
 
       if (!res.ok) {
         setError(data.message || "Registration failed. Please try again.");
-        setLoading(false);
         return;
       }
 
       if (data.access_token) {
         localStorage.setItem("auth_token", data.access_token);
-        router.push("/");
+        success = true;
+        // Small artificial delay so the loading spinner doesn't flash off instantly
+        setTimeout(() => {
+          router.push("/");
+        }, 300);
       } else {
         setError("Account created, but failed to automatically log in.");
       }
     } catch (err) {
       setError("Failed to connect to the server.");
     } finally {
-      setLoading(false);
+      if (!success) {
+        setLoading(false);
+      }
     }
   };
 
