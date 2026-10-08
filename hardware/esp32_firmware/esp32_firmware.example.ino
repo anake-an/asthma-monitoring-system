@@ -5,6 +5,8 @@
 #include "mqtt_client.h" // Native ESP-IDF MQTT Client (Supports WebSockets & SSL)
 #include <esp_crt_bundle.h> // Include root certificates for Cloudflare SSL
 #include <DHT.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h> // https://github.com/johnrickman/LiquidCrystal_I2C
 
 // --- Sensors (Adjust pins for your setup) ---
 #define DHTPIN 4
@@ -15,6 +17,11 @@ DHT dht(DHTPIN, DHTTYPE);
 #define DUST_LED_PIN 5
 #define DUST_OUT_PIN 35
 #define BUZZER_PIN 18
+#define GREEN_LED_PIN 19
+#define RED_LED_PIN 23
+
+// --- I2C LCD Setup ---
+LiquidCrystal_I2C lcd(0x27, 16, 2); // Change 0x27 to 0x3F if your screen is blank
 
 // --- MQTT Settings ---
 const char* mqtt_uri = "wss://YOUR_SERVER_URL.com:443"; // WSS = Secure WebSockets
@@ -70,8 +77,16 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                         ESP.restart();
                     } else if (doc["command"] == "buzzer_on") {
                         digitalWrite(BUZZER_PIN, HIGH);
+                        digitalWrite(RED_LED_PIN, HIGH);
+                        digitalWrite(GREEN_LED_PIN, LOW);
+                        lcd.clear();
+                        lcd.setCursor(0, 0);
+                        lcd.print("! CLOUD ALERT !");
                     } else if (doc["command"] == "buzzer_off") {
                         digitalWrite(BUZZER_PIN, LOW);
+                        digitalWrite(RED_LED_PIN, LOW);
+                        digitalWrite(GREEN_LED_PIN, HIGH);
+                        lcd.clear();
                     }
                 }
             }
@@ -132,8 +147,20 @@ void setup() {
   // Initialize Pins
   pinMode(DUST_LED_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(GREEN_LED_PIN, OUTPUT);
+  pinMode(RED_LED_PIN, OUTPUT);
+  
   digitalWrite(DUST_LED_PIN, HIGH); // Dust LED is active LOW, so start HIGH
   digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(GREEN_LED_PIN, LOW);
+  digitalWrite(RED_LED_PIN, HIGH); // Red means not connected yet
+  
+  // Initialize I2C LCD
+  Wire.begin(21, 22); // SDA = 21, SCL = 22
+  lcd.init();
+  lcd.backlight();
+  lcd.setCursor(0, 0);
+  lcd.print("RespiroSync Boot");
   
   // Initialize DHT Sensor
   dht.begin();
@@ -182,6 +209,13 @@ void setup() {
   mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
   esp_mqtt_client_register_event(mqtt_client, (esp_mqtt_event_id_t)ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
   esp_mqtt_client_start(mqtt_client);
+
+  // Connection successful, set LED to green
+  digitalWrite(RED_LED_PIN, LOW);
+  digitalWrite(GREEN_LED_PIN, HIGH);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("WiFi Connected!");
 }
 
 unsigned long lastTelemetryMillis = 0;
@@ -211,10 +245,19 @@ void loop() {
       serializeJson(coughDoc, coughBuffer);
       esp_mqtt_client_publish(mqtt_client, "respirosync/telemetry", coughBuffer, 0, 0, 0);
       
-      // Quick beep to indicate Cough Event received
+      // Quick beep & red LED to indicate Cough Event received
       digitalWrite(BUZZER_PIN, HIGH);
-      delay(100);
+      digitalWrite(RED_LED_PIN, HIGH);
+      digitalWrite(GREEN_LED_PIN, LOW);
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.print("Cough Detected!");
+      
+      delay(300);
+      
       digitalWrite(BUZZER_PIN, LOW);
+      digitalWrite(RED_LED_PIN, LOW);
+      digitalWrite(GREEN_LED_PIN, HIGH);
     }
   }
 
@@ -254,5 +297,15 @@ void loop() {
     
     Serial.print("Sent over WSS: ");
     Serial.println(jsonBuffer);
+
+    // Update LCD with Live Data
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("PM2.5: ");
+    lcd.print(pm25, 1);
+    lcd.setCursor(0, 1);
+    lcd.print("Temp: ");
+    lcd.print(temp, 1);
+    lcd.print("C");
   }
 }

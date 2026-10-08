@@ -62,3 +62,16 @@ The ESP32 handles environmental sensors, triggers alarms, and talks to the Cloud
 *   **VCC** ➔ ESP32 **3.3V** or **5V**
 *   **GND** ➔ ESP32 **GND**
 *   **I/O (Signal)** ➔ ESP32 **GPIO 18**
+
+### I2C LCD Display (16x2)
+*Displays live status and alerts.*
+*   **VCC** ➔ ESP32 **5V (VIN)** *(Most I2C backpacks need 5V)*
+*   **GND** ➔ ESP32 **GND**
+*   **SDA** ➔ ESP32 **GPIO 21**
+*   **SCL** ➔ ESP32 **GPIO 22**
+
+### Status LEDs
+*Visual indication of system health.*
+*   **Green LED (Anode +)** ➔ ESP32 **GPIO 19** *(Use 220Ω Resistor)*
+*   **Red LED (Anode +)** ➔ ESP32 **GPIO 23** *(Use 220Ω Resistor)*
+*   **LED Cathodes (-)** ➔ ESP32 **GND**
