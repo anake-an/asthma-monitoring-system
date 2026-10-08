@@ -121,7 +121,9 @@ export default function CommandCenter() {
             }
           });
           localStorage.removeItem("auth_token");
-          window.location.href = "/login";
+          setTimeout(() => {
+            window.location.href = "/login";
+          }, 300);
         } catch(e) {
           showToast("Logout failed", "error");
         }
