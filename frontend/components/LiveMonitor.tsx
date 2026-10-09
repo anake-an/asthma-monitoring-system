@@ -38,11 +38,11 @@ export default function LiveMonitor() {
             const latestLog = logs[0];
             setData(latestLog);
             
-            // Offline Detection: If the data is older than 90 seconds, mark as offline
+            // Offline Detection: the ESP32 sends every 5 s, so 30 s without data (6 missed readings) = offline
             // We append 'Z' to tell JavaScript the timestamp is UTC (not local time)
             const recordedAtUtc = latestLog.recorded_at.endsWith('Z') ? latestLog.recorded_at : latestLog.recorded_at + 'Z';
             const diffSeconds = (new Date().getTime() - new Date(recordedAtUtc).getTime()) / 1000;
-            setIsOffline(diffSeconds > 90);
+            setIsOffline(diffSeconds > 30);
           } else {
             setData(null);
             setIsOffline(true);
