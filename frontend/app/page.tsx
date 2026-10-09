@@ -47,7 +47,7 @@ export default function Home() {
               <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">RespiroSync Dashboard</h1>
             </div>
             <p className="text-sm text-zinc-600 dark:text-zinc-400 font-light">
-              Live Edge AI & Telemetry Monitor
+              Live Environment & Cough Monitor
             </p>
           </div>
         </div>

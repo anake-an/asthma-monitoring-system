@@ -143,7 +143,7 @@ export default function ReportPage() {
                 <span className="text-xs font-bold tracking-widest text-blue-400 print:text-blue-700 uppercase">RespiroSync System</span>
               </div>
               <h1 className="text-3xl md:text-5xl font-semibold tracking-tight text-zinc-900 dark:text-white print:text-black mb-2">Weekly Activity Log</h1>
-              <p className="text-sm text-zinc-600 dark:text-zinc-400 print:text-zinc-600 font-light">Edge-AI Environment & Respiratory Monitoring</p>
+              <p className="text-sm text-zinc-600 dark:text-zinc-400 print:text-zinc-600 font-light">Environment & Cough Monitoring</p>
             </div>
             <div className="mt-6 md:mt-0 text-left md:text-right bg-zinc-100 dark:bg-white/5 print:bg-transparent px-5 py-4 rounded-2xl border border-zinc-200 dark:border-white/5 print:border-none print:p-0">
               <p className="text-sm text-zinc-600 dark:text-zinc-400 print:text-zinc-600 dark:text-zinc-400 uppercase tracking-widest mb-1 font-medium text-[10px]">Account Profile</p>
@@ -272,12 +272,12 @@ export default function ReportPage() {
             <div className="bg-blue-500/5 print:bg-white border border-blue-500/20 print:border-gray-200 rounded-2xl p-8">
               <div className="flex items-center gap-2 mb-5">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-blue-400"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path></svg>
-                <h2 className="text-sm font-semibold text-blue-400 print:text-black uppercase tracking-widest">AI Environmental Insights</h2>
+                <h2 className="text-sm font-semibold text-blue-400 print:text-black uppercase tracking-widest">Summary of Recorded Events</h2>
               </div>
               <div className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-300 print:text-gray-700 space-y-4">
                 <p>
                   <strong className="text-zinc-900 dark:text-white print:text-black font-semibold block mb-1">Observation:</strong> 
-                  During this reporting period, the system detected a total of {data.total_events} cough events, with {data.high_severity_events} classified as high severity by the acoustic AI model.
+                  During this reporting period, the device recorded {data.total_events} cough-like sounds (a loudness detector, not a diagnosis), of which {data.high_severity_events} met the alert rule (3 within 10 minutes, or 2 with a strong detection).
                 </p>
                 <p>
                   <strong className="text-zinc-900 dark:text-white print:text-black font-semibold block mb-1">Medication Analysis:</strong> 

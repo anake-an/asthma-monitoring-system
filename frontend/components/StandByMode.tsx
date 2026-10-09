@@ -221,7 +221,7 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
             </span>
             <p className="text-sm font-medium tracking-wide text-zinc-800 dark:text-zinc-200">
               {coughDetected 
-                ? "AI Alert: Cough Detected" 
+                ? "Cough-like Sound Detected" 
                 : !data 
                   ? "Awaiting Sensor Data"
                   : "Monitoring Active"}

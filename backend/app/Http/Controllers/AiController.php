@@ -22,6 +22,17 @@ class AiController extends Controller
                 return response()->json($response->json());
             }
 
+            // 400 = no model yet / no recent telemetry, 404 = no paired device: a normal
+            // state while the account collects data, not an error for the dashboard.
+            if (in_array($response->status(), [400, 404], true)) {
+                return response()->json([
+                    'learning' => true,
+                    'model_stage' => 'Learning mode',
+                    'probability_of_attack' => null,
+                    'reason' => $response->json('detail') ?? 'Not enough data yet.',
+                ]);
+            }
+
             return response()->json([
                 'error' => 'AI Engine returned an error.',
                 'details' => $response->json('detail') ?? $response->body(),
