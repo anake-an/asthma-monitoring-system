@@ -129,11 +129,6 @@ export default function AiRiskAssessment() {
                   ? "Room compared with its usual readings"
                   : "Risk of an asthma flare-up in the next hour (model estimate)"}
             </div>
-            {isStage1 && (
-              <div className="text-[11px] text-zinc-500 dark:text-zinc-500 mt-1 font-light">
-                Personal risk prediction starts after about 2 asthma flare-ups are recorded (rescue inhaler dose or 2+ coughs in an hour).
-              </div>
-            )}
             {!isLearning && !isStage1 && activePrediction.model && (
               <div className="text-[11px] text-zinc-500 dark:text-zinc-500 mt-1 font-light">
                 {MODEL_NAME[activePrediction.model.model_type]} · learned from about {Math.max(1, Math.round(activePrediction.model.episode_windows / 6))} flare-ups ·{" "}

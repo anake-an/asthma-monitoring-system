@@ -70,6 +70,13 @@ LIMIT_RANGE = {
 ROOM_FEATURE = {"pm25_threshold": "pm25_level", "temperature_threshold": "temperature", "humidity_threshold": "humidity"}
 
 
+def room_normal_limits(baseline: dict | None) -> dict | None:
+    """Top of the room's normal range (mean + 2 std) for each limit that has a room reading."""
+    if not baseline:
+        return None
+    return {key: round(baseline[f"{feat}_mean"] + 2 * baseline[f"{feat}_std"], 1) for key, feat in ROOM_FEATURE.items()}
+
+
 def respect_room_normal(thresholds: dict, baseline: dict | None) -> dict:
     """The AI may tighten limits, but never below the room's own normal range (learned mean + 2 std):
     a limit inside the normal range alarms all the time. Every limit also stays within LIMIT_RANGE.
@@ -359,6 +366,8 @@ def predict_attack(user_id: int = Query(..., ge=1)):
         "model": (joblib.load(meta_path(user_id)) if has_stage2 and os.path.exists(meta_path(user_id)) else None),
         "probability_of_attack": round(probability, 2),
         "suggested_thresholds": thresholds,
+        # Top of the room's normal range per reading (mean + 2 std): a user limit below it will alarm often.
+        "room_normal_limits": room_normal_limits(room),
         "current_inputs": {
             "pm25": round(pm25, 1), "temperature": round(temp, 1), "humidity": round(hum, 1),
             "coughs_last_10_min": cough_count, "coughs_last_hour": coughs_last_hour,

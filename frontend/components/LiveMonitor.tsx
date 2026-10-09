@@ -12,13 +12,24 @@ type Telemetry = {
   recorded_at: string;
 };
 
+type LimitName = "pm25" | "temperature" | "humidity" | "mq135";
+const LIMIT_NAMES: LimitName[] = ["pm25", "temperature", "humidity", "mq135"];
+const round1 = (v: number) => Math.round(v * 10) / 10;
+
 export default function LiveMonitor() {
   const [data, setData] = useState<Telemetry | null>(null);
   const [coughDetected, setCoughDetected] = useState(false);
   const [isOffline, setIsOffline] = useState(true);
-  const [config, setConfig] = useState({ pm25_threshold: 35, temperature_threshold: 35, humidity_threshold: 60, mq135_threshold: 1000, ai_optimization_enabled: true });
+  // *_threshold = effective limit (what the device uses); caps = the user's own values; locked = AI never changes it.
+  const [config, setConfig] = useState({
+    pm25_threshold: 35, temperature_threshold: 35, humidity_threshold: 75, mq135_threshold: 1000, ai_optimization_enabled: true,
+    caps: {} as Partial<Record<LimitName, number>>,
+    locked: {} as Partial<Record<LimitName, boolean>>,
+  });
   // Stage of the AI model ("Stage 1 (Anomaly Detection)" / "Stage 2 (Personalised)"), or null while learning.
   const [aiStage, setAiStage] = useState<string | null>(null);
+  // Top of the room's normal range per limit (from the AI engine), e.g. { humidity_threshold: 73.6 }.
+  const [roomNormal, setRoomNormal] = useState<Record<string, number> | null>(null);
 
   useEffect(() => {
     const fetchAiStage = async () => {
@@ -27,11 +38,13 @@ export default function LiveMonitor() {
         const res = await fetch("/api/ai/predict", {
           headers: { "Authorization": `Bearer ${token}`, "Accept": "application/json" }
         });
-        if (!res.ok) { setAiStage(null); return; }
+        if (!res.ok) { setAiStage(null); setRoomNormal(null); return; }
         const p = await res.json();
         setAiStage(p.learning || p.probability_of_attack == null ? null : (p.model_stage ?? "AI model"));
+        setRoomNormal(p.room_normal_limits ?? null);
       } catch {
         setAiStage(null);
+        setRoomNormal(null);
       }
     };
     fetchAiStage();
@@ -102,12 +115,20 @@ export default function LiveMonitor() {
         const confRes = await fetch("/api/config", { headers });
         if (confRes.ok) {
           const confData = await confRes.json();
+          const caps: Partial<Record<LimitName, number>> = {};
+          const locked: Partial<Record<LimitName, boolean>> = {};
+          for (const name of LIMIT_NAMES) {
+            if (confData[`${name}_cap`] != null) caps[name] = round1(confData[`${name}_cap`]);
+            locked[name] = !!confData[`${name}_locked`];
+          }
           setConfig({
-            pm25_threshold: Math.round(confData.pm25_threshold || 35),
-            temperature_threshold: Math.round(confData.temperature_threshold || 35),
-            humidity_threshold: Math.round(confData.humidity_threshold || 60),
+            pm25_threshold: round1(confData.pm25_threshold || 35),
+            temperature_threshold: round1(confData.temperature_threshold || 35),
+            humidity_threshold: round1(confData.humidity_threshold || 75),
             mq135_threshold: Math.round(confData.mq135_threshold || 1000),
-            ai_optimization_enabled: confData.ai_optimization_enabled !== undefined ? confData.ai_optimization_enabled : true
+            ai_optimization_enabled: confData.ai_optimization_enabled !== undefined ? confData.ai_optimization_enabled : true,
+            caps,
+            locked,
           });
         }
     };
@@ -146,12 +167,34 @@ export default function LiveMonitor() {
 
   // "AI" only when AI optimisation is on and the engine has a model: ai:optimize then applies its
   // limits every 5 minutes. While the engine is learning, the limits are the user's or the defaults.
-  const aiBadge = config.ai_optimization_enabled && aiStage ? (
-    <span
-      className="bg-blue-500/20 text-blue-400 text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider"
-      title={`Set by the AI engine (${aiStage}), updated every 5 minutes`}
-    >AI</span>
-  ) : null;
+  // Badges next to each limit:
+  //   "AI"     the AI engine lowered this limit below the user's own value (cap)
+  //   "locked" the user locked it; the AI never changes it
+  //   "!"      the limit is inside the room's usual range, so it will alarm often
+  const badgeClass = "text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider";
+  const limitBadges = (name: LimitName) => {
+    const effective = config[`${name}_threshold` as `${LimitName}_threshold`];
+    const cap = config.caps[name] ?? effective;
+    const roomTop = roomNormal?.[`${name}_threshold`];
+    return (
+      <>
+        {config.locked[name] ? (
+          <span className={`${badgeClass} bg-zinc-500/20 text-zinc-400`} title="Locked: the AI never changes this limit">locked</span>
+        ) : config.ai_optimization_enabled && aiStage && effective < cap ? (
+          <span className={`${badgeClass} bg-blue-500/20 text-blue-400`} title={`Lowered by the AI engine (${aiStage}) from your limit of ${cap}`}>AI</span>
+        ) : null}
+        {roomTop != null && effective < roomTop && (
+          <span className={`${badgeClass} bg-amber-500/20 text-amber-400`} title={`Your room usually reaches ${roomTop}, above this limit: expect frequent alerts`}>!</span>
+        )}
+      </>
+    );
+  };
+
+  // Bars show each reading against its own limit: full at the limit, amber from 80 %, red above it.
+  const barWidth = (value: number | null | undefined, limit: number) =>
+    isOffline || value == null || limit <= 0 ? 0 : Math.min((value / limit) * 100, 100);
+  const barColor = (value: number | null | undefined, limit: number, normal: string) =>
+    isOffline || value == null ? "bg-transparent" : value > limit ? "bg-red-400" : value >= limit * 0.8 ? "bg-amber-400" : normal;
 
   return (
     <section className="flex flex-col gap-6">
@@ -186,14 +229,14 @@ export default function LiveMonitor() {
               </div>
               <div className="w-full h-1.5 bg-zinc-200 dark:bg-white/10 rounded-full overflow-hidden mb-2">
                 <div 
-                  className={`h-full transition-all duration-1000 ${isOffline ? 'bg-transparent' : (data ? getAqiInfo(data.pm25_level).bar : 'bg-transparent')}`} 
-                  style={{ width: `${isOffline ? 0 : Math.min(((data?.pm25_level || 0) / 60) * 100, 100)}%` }}
+                  className={`h-full rounded-full transition-all duration-1000 ${barColor(data?.pm25_level, config.pm25_threshold, "bg-emerald-400")}`} 
+                  style={{ width: `${barWidth(data?.pm25_level, config.pm25_threshold)}%` }}
                 ></div>
               </div>
               <div className="flex justify-between items-center mt-1">
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium" title={DUST_BANDS_NOTE}>PM2.5</p>
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium flex items-center whitespace-nowrap">
-                  Limit: {config.pm25_threshold} {aiBadge}
+                  Limit: {config.pm25_threshold} {limitBadges("pm25")}
                 </p>
               </div>
             </div>
@@ -207,14 +250,14 @@ export default function LiveMonitor() {
               </div>
               <div className="w-full h-1.5 bg-zinc-200 dark:bg-white/10 rounded-full overflow-hidden mb-2">
                 <div 
-                  className={`h-full bg-indigo-400 rounded-full transition-all duration-1000 ${isOffline ? 'opacity-0' : 'opacity-100'}`}
-                  style={{ width: `${isOffline ? 0 : Math.min(((data?.mq135_level || 0) / 2000) * 100, 100)}%` }}
+                  className={`h-full rounded-full transition-all duration-1000 ${barColor(data?.mq135_level, config.mq135_threshold, "bg-indigo-400")}`}
+                  style={{ width: `${barWidth(data?.mq135_level, config.mq135_threshold)}%` }}
                 ></div>
               </div>
               <div className="flex justify-between items-center mt-1">
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium" title={GAS_NOTE}>Gas</p>
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium flex items-center whitespace-nowrap">
-                  Limit: {config.mq135_threshold} {aiBadge}
+                  Limit: {config.mq135_threshold} {limitBadges("mq135")}
                 </p>
               </div>
             </div>
@@ -248,12 +291,12 @@ export default function LiveMonitor() {
                 <span className="text-zinc-600 dark:text-zinc-400 font-medium mb-1">°C</span>
               </div>
               <div className="w-full h-1.5 bg-zinc-200 dark:bg-white/10 rounded-full overflow-hidden mb-2">
-                <div className={`h-full bg-blue-400 rounded-full transition-all duration-1000 ${isOffline ? 'opacity-0' : 'opacity-100'}`} style={{ width: `${isOffline ? 0 : Math.min(((data?.temperature || 0) / 40) * 100, 100)}%` }}></div>
+                <div className={`h-full rounded-full transition-all duration-1000 ${barColor(data?.temperature, config.temperature_threshold, "bg-blue-400")}`} style={{ width: `${barWidth(data?.temperature, config.temperature_threshold)}%` }}></div>
               </div>
               <div className="flex justify-between items-center mt-1">
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium">Temperature</p>
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium flex items-center whitespace-nowrap">
-                  Limit: {config.temperature_threshold}°C {aiBadge}
+                  Limit: {config.temperature_threshold}°C {limitBadges("temperature")}
                 </p>
               </div>
             </div>
@@ -265,12 +308,12 @@ export default function LiveMonitor() {
                 <span className="text-zinc-600 dark:text-zinc-400 font-medium mb-1">%</span>
               </div>
               <div className="w-full h-1.5 bg-zinc-200 dark:bg-white/10 rounded-full overflow-hidden mb-2">
-                <div className={`h-full bg-blue-400 rounded-full transition-all duration-1000 ${isOffline ? 'opacity-0' : 'opacity-100'}`} style={{ width: `${isOffline ? 0 : Math.min(((data?.humidity || 0) / 100) * 100, 100)}%` }}></div>
+                <div className={`h-full rounded-full transition-all duration-1000 ${barColor(data?.humidity, config.humidity_threshold, "bg-blue-400")}`} style={{ width: `${barWidth(data?.humidity, config.humidity_threshold)}%` }}></div>
               </div>
               <div className="flex justify-between items-center mt-1">
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium">Humidity</p>
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium flex items-center whitespace-nowrap">
-                  Limit: {config.humidity_threshold}% {aiBadge}
+                  Limit: {config.humidity_threshold}% {limitBadges("humidity")}
                 </p>
               </div>
             </div>

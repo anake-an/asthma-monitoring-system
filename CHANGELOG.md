@@ -4,7 +4,12 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Added
+- **Your limit is a cap, with an optional lock (all four limits):** the value set in Smart Alerts is the maximum; with AI optimization on, the AI may lower the effective limit when the room is unusual, never raise it above your value, and never changes a locked limit. Sliders stay usable with AI on. The dashboard marks limits the AI lowered ("AI"), locked limits ("locked") and limits inside the room's usual range ("!": expect frequent alerts). Existing limits become caps on upgrade. `ai:optimize` re-publishes to devices only when a limit changes.
+
 ### Changed
+- **Bars show each reading against its own limit:** full at the limit, amber from 80 %, red above it (they used fixed scales, so 1006 ppm over a 1000 ppm limit showed a half-full bar).
+- Default humidity limit for new accounts 75 % (was 60 %, which alarmed constantly in Malaysian indoor air).
 - **ESP32 firmware drives a passive buzzer** with a 2.7 kHz `tone()` (alarm, cough chirp, cloud `buzzer_on`); idles low so no DC flows through a magnetic coil.
 - **Dust sensor self-calibrates:** the clean-air baseline is learned as the lowest reading since boot, readings average 25 LED pulses, and the rise is converted with the datasheet's typical sensitivity. The fixed formula reported 0.0 on sensors with a low clean-air output.
 - **Gas is an estimated CO₂-equivalent ppm** instead of the raw ADC value: the firmware applies the MQ-135 datasheet curve, calibrated against the cleanest air seen since power-on (420 ppm). Default gas limit 1000 ppm everywhere (firmware, backend, AI engine, dashboard); a migration resets existing gas limits, which were on the raw scale. Shown as "ppm"; hover text on the label and "ppm (est.)" in Smart Alerts explain that it is an estimate. **Re-flash the ESP32.**

@@ -16,7 +16,7 @@ Schedule::call(function () {
     });
 })->everyFourHours()->name('ai-train-per-user')->withoutOverlapping();
 
-// Every 5 minutes, apply each account's AI-suggested thresholds and push them to that
-// account's devices. Only affects accounts with "AI optimization" enabled; while it is on,
-// manual threshold edits are overwritten on the next run.
+// Every 5 minutes, apply each account's AI-suggested thresholds and push changes to that
+// account's devices. Only accounts with "AI optimization" enabled; the AI may tighten a limit
+// below the user's own value (cap) but never raise it above, and never touches locked limits.
 Schedule::command('ai:optimize')->everyFiveMinutes()->withoutOverlapping();

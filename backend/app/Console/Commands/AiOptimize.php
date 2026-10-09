@@ -11,8 +11,9 @@ use Illuminate\Support\Facades\Http;
  * Applies the AI engine's suggested thresholds to each account that has
  * "AI optimization" enabled, then pushes them to that account's devices.
  *
- * Scheduled every 5 minutes in routes/console.php. While an account has AI
- * optimization enabled, this overwrites that account's manual thresholds.
+ * Scheduled every 5 minutes in routes/console.php. The AI may only tighten a limit below the
+ * user's own value (cap), never above it, and leaves locked limits at the cap. Devices are
+ * only re-published when a limit actually changes.
  */
 class AiOptimize extends Command
 {
@@ -44,12 +45,13 @@ class AiOptimize extends Command
                 continue;
             }
 
-            $config->update([
-                'pm25_threshold' => $thresholds['pm25_threshold'],
-                'temperature_threshold' => $thresholds['temperature_threshold'],
-                'humidity_threshold' => $thresholds['humidity_threshold'],
-                'mq135_threshold' => $thresholds['mq135_threshold'],
-            ]);
+            // Never above the user's own value, exactly that value when locked.
+            $config->fill($config->limitsFromSuggestion($thresholds));
+            if (!$config->isDirty()) {
+                $this->line("User {$userId}: limits unchanged.");
+                continue;
+            }
+            $config->save();
 
             foreach ($config->user->devices as $device) {
                 try {
