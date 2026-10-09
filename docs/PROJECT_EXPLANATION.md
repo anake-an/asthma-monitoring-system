@@ -32,11 +32,11 @@ The Pico heuristic above. It produces candidate events and a strength value; it 
 
 ### B. Cloud risk model (`ai_engine/main.py`, FastAPI + scikit-learn)
 *   **Per account:** every call carries `user_id`; the engine reads only that user's devices and inhaler logs and stores `user_<id>_model.pkl` / `user_<id>_baseline.pkl` in the `ai_models` volume.
-*   **Data:** 10-minute windows of average PM2.5, temperature and humidity plus cough count. Gaps up to 30 minutes are interpolated; longer gaps (device offline) are dropped rather than invented. Cough events the caregiver marked as **false alarm** are excluded.
-*   **Label:** "an inhaler dose or 2+ coughs within the next 60 minutes".
-*   **Stage 1 (no events yet):** z-score of the current readings against the room's own baseline → low / moderate / high risk.
+*   **Data:** 10-minute windows of average PM2.5, temperature and humidity, cough count, and whether a controller (daily) dose was logged in the last 24 h. Gaps up to 30 minutes are interpolated; longer gaps (device offline) are dropped rather than invented. Cough events the caregiver marked as **false alarm** are excluded.
+*   **Label:** "a rescue inhaler dose or 2+ coughs within the next 60 minutes". Controller (daily, preventive) doses are not episodes; they are the input above.
+*   **Stage 1 (no events yet):** z-score of the current readings against the room's own baseline → one of three fixed levels (shown as Normal / Unusual / Very unusual). An anomaly level, not a probability.
 *   **Stage 2 (events exist):** Random Forest (balanced class weights). Accuracy is reported on the most recent 25% of windows, which the model did not train on; with too little data, no accuracy is claimed.
-*   **Threshold suggestions:** `/predict` returns suggested thresholds. The scheduler runs `php artisan ai:optimize` every 5 minutes, which applies them for every account with "AI optimization" enabled (overwriting that account's manual thresholds) and pushes them to its devices.
+*   **Threshold suggestions:** `/predict` returns suggested thresholds, never below the room's own normal range (mean + 2 std) and always within a safety range. The scheduler runs `php artisan ai:optimize` every 5 minutes, which applies them for every account with "AI optimization" enabled (overwriting that account's manual thresholds) and pushes them to its devices.
 
 ---
 

@@ -39,7 +39,10 @@ engine = create_engine(DB_URL, pool_pre_ping=True)
 MODEL_DIR = os.getenv("MODEL_DIR", "/app/models")
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-FEATURES = ["pm25_level", "temperature", "humidity", "cough_count"]
+# controller_24h: 1 if a controller (daily, preventive) dose was logged in the 24 h up to this window.
+# It is an input, not a label: only rescue doses mark an episode.
+FEATURES = ["pm25_level", "temperature", "humidity", "cough_count", "controller_24h"]
+CONTROLLER_WINDOWS = 144  # 24 h of 10-minute windows
 WINDOW = "10min"
 HORIZON = 6  # windows = 60 minutes
 MAX_INTERPOLATE_WINDOWS = 3  # bridge gaps up to 30 min; longer gaps (device offline) are dropped
@@ -136,11 +139,15 @@ def fetch_user_data(user_id: int):
         engine,
     )
     inhaler = pd.read_sql(
-        text("SELECT administered_at AS recorded_at FROM inhaler_logs WHERE user_id = :u"), engine, params={"u": user_id}
+        text("SELECT administered_at AS recorded_at, type FROM inhaler_logs WHERE user_id = :u"), engine, params={"u": user_id}
     )
     for df in (telemetry, coughs, inhaler):
         df["recorded_at"] = pd.to_datetime(df["recorded_at"])
-    return telemetry, coughs, inhaler
+    # Rescue doses mark episodes. Controller (daily) doses are preventive: counting them as
+    # episodes taught the model that every daily dose was an attack.
+    rescue = inhaler.loc[inhaler["type"] != "controller", ["recorded_at"]]
+    controller = inhaler.loc[inhaler["type"] == "controller", ["recorded_at"]]
+    return telemetry, coughs, rescue, controller
 
 
 def forward_window(series: pd.Series, n: int, how: str) -> pd.Series:
@@ -150,16 +157,23 @@ def forward_window(series: pd.Series, n: int, how: str) -> pd.Series:
     return agg[::-1].shift(-1)
 
 
-def build_dataset(telemetry, coughs, inhaler) -> pd.DataFrame:
+def per_window(events: pd.DataFrame, index: pd.DatetimeIndex) -> pd.Series:
+    """Number of events in each 10-minute window of `index` (0 where none)."""
+    if events.empty:
+        return pd.Series(0, index=index)
+    return events.set_index("recorded_at").resample(WINDOW).size().reindex(index).fillna(0)
+
+
+def build_dataset(telemetry, coughs, rescue, controller) -> pd.DataFrame:
     tel = telemetry.set_index("recorded_at").sort_index()
     df = tel.resample(WINDOW).mean()
     # Bridge short gaps only. Long gaps stay NaN and are dropped: no invented readings.
     df = df.interpolate(limit=MAX_INTERPOLATE_WINDOWS, limit_area="inside")
 
-    df["cough_count"] = coughs.set_index("recorded_at").resample(WINDOW).size().reindex(df.index).fillna(0) \
-        if not coughs.empty else 0
-    inh = (inhaler.set_index("recorded_at").resample(WINDOW).size() > 0).astype(int).reindex(df.index).fillna(0) \
-        if not inhaler.empty else pd.Series(0, index=df.index)
+    df["cough_count"] = per_window(coughs, df.index)
+    inh = (per_window(rescue, df.index) > 0).astype(int)
+    # Was a controller dose logged in the last 24 h (this window included)?
+    df["controller_24h"] = (per_window(controller, df.index).rolling(CONTROLLER_WINDOWS, min_periods=1).sum() > 0).astype(int)
 
     future_inhaler = forward_window(inh, HORIZON, "max")
     future_coughs = forward_window(df["cough_count"], HORIZON, "sum")
@@ -172,11 +186,11 @@ def build_dataset(telemetry, coughs, inhaler) -> pd.DataFrame:
 
 @app.get("/train")
 def train_model(user_id: int = Query(..., ge=1)):
-    telemetry, coughs, inhaler = fetch_user_data(user_id)
+    telemetry, coughs, rescue, controller = fetch_user_data(user_id)
     if telemetry.empty:
         raise HTTPException(status_code=400, detail="Not enough data to train.")
 
-    df = build_dataset(telemetry, coughs, inhaler)
+    df = build_dataset(telemetry, coughs, rescue, controller)
     if len(df) == 0:
         raise HTTPException(status_code=400, detail="Not enough valid data after preprocessing. Please wait for more telemetry.")
 
@@ -249,8 +263,20 @@ def predict_attack(user_id: int = Query(..., ge=1)):
     if recent[["pm25", "temp", "hum"]].isnull().any(axis=None):
         raise HTTPException(status_code=400, detail="No complete telemetry in the last 10 minutes.")
 
+    controller_24h = int(pd.read_sql(
+        text("SELECT COUNT(*) AS c FROM inhaler_logs WHERE user_id = :u AND type = 'controller' AND administered_at >= :since"),
+        engine, params={"u": user_id, "since": now - timedelta(hours=24)},
+    )["c"][0] > 0)
+
     pm25, temp, hum = (float(recent[c][0]) for c in ("pm25", "temp", "hum"))
-    X_new = pd.DataFrame([[pm25, temp, hum, cough_count]], columns=FEATURES)
+    X_new = pd.DataFrame([[pm25, temp, hum, cough_count, controller_24h]], columns=FEATURES)
+
+    # A model saved before the feature list changed cannot score the new inputs: fall back to
+    # Stage 1 (or Learning mode) until the next training run replaces it.
+    if has_stage2 and getattr(joblib.load(model_path(user_id)), "n_features_in_", len(FEATURES)) != len(FEATURES):
+        has_stage2 = False
+        if not has_stage1:
+            raise HTTPException(status_code=400, detail="Model is outdated; it will be retrained on the next run.")
     thresholds = dict(DEFAULT_THRESHOLDS)
 
     if has_stage2:
@@ -286,5 +312,6 @@ def predict_attack(user_id: int = Query(..., ge=1)):
         "current_inputs": {
             "pm25": round(pm25, 1), "temperature": round(temp, 1), "humidity": round(hum, 1),
             "coughs_last_10_min": cough_count, "coughs_last_hour": coughs_last_hour,
+            "controller_dose_last_24h": bool(controller_24h),
         },
     }

@@ -187,6 +187,11 @@ jobs:
           MODEL_DIR: /tmp/models
         run: python test_thresholds.py
 
+      - name: Only rescue doses are episodes; controller doses are an input
+        env:
+          MODEL_DIR: /tmp/models
+        run: python test_dataset.py
+
       # Regression test: a password with '@' once made the engine connect to host '...@db'.
       - name: Database URL keeps special characters in the password
         env:
