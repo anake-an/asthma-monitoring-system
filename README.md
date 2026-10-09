@@ -115,9 +115,15 @@ asthma-monitoring-system/
    ```
    The backend runs `php artisan migrate --force` on every start, so schema changes apply automatically on deploy.
 
-4. **Run the tests** (in-memory SQLite, never touches the real database)
+4. **Run the tests** (in-memory SQLite). **Never run them inside the running `backend` container.**
+   Docker sets `DB_CONNECTION=mysql` there, which overrides `phpunit.xml`, and `RefreshDatabase` would drop every table in the live database. `tests/TestCase.php` refuses to start unless the connection is in-memory SQLite, but don't rely on that alone.
+   On a development machine:
    ```bash
-   docker compose exec backend php artisan test
+   cd backend && php artisan test
+   ```
+   On the server, use a throwaway container with no network (it cannot reach MySQL even by mistake):
+   ```bash
+   docker run --rm --network none -v "$PWD/backend:/app" -w /app webdevops/php:8.2-alpine php artisan test
    ```
 
 The dashboard is served on `127.0.0.1:3005` and published through the Cloudflare Tunnel.

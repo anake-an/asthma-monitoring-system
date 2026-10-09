@@ -75,6 +75,7 @@ docker compose exec mqtt mosquitto_pub -u respirosync_backend -P 'BACKEND_PASSWO
 *(Replace `YOUR_TOKEN` with the device token and `BACKEND_PASSWORD` with the broker password from `.env`.)*
 
 ## 7. Run the backend tests
+**Never** use `docker compose exec backend php artisan test`: the container's `DB_CONNECTION=mysql` overrides `phpunit.xml` and the tests would wipe the live database. Use a throwaway container with no network instead:
 ```bash
-docker compose exec backend php artisan test
+docker run --rm --network none -v "$PWD/backend:/app" -w /app webdevops/php:8.2-alpine php artisan test
 ```

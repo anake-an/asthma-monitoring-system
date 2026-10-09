@@ -10,6 +10,34 @@ abstract class TestCase extends BaseTestCase
     /** Messages "published" during the test: [topic, payload, retain]. */
     protected array $published = [];
 
+    /**
+     * Refuse to boot unless the tests are on in-memory SQLite.
+     *
+     * RefreshDatabase drops every table. Environment variables set by Docker
+     * (DB_CONNECTION=mysql in the backend container) take precedence over
+     * phpunit.xml, so running the tests inside the production container once
+     * wiped the live database. This runs before RefreshDatabase touches anything.
+     */
+    public function createApplication()
+    {
+        $app = parent::createApplication();
+
+        $config = $app['config'];
+        $connection = $config->get('database.default');
+        $driver = $config->get("database.connections.{$connection}.driver");
+        $database = $config->get("database.connections.{$connection}.database");
+
+        if ($driver !== 'sqlite' || $database !== ':memory:') {
+            throw new \RuntimeException(
+                "Refusing to run tests against the '{$connection}' connection (database '{$database}'). "
+                . 'Tests must use in-memory SQLite: run them on a development machine or in an isolated '
+                . 'container (see README), never inside the production backend container.'
+            );
+        }
+
+        return $app;
+    }
+
     protected function setUp(): void
     {
         parent::setUp();

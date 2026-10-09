@@ -52,7 +52,7 @@ The Pico heuristic above. It produces candidate events and a strength value; it 
 *   **Alert email:** `resources/views/emails/cough_alert.blade.php` shows the cough count and the device-reported strength, or "Not reported by device". It never shows an invented confidence.
 *   **Per-account data:** thresholds (`hardware_configs.user_id`), inhaler logs (`inhaler_logs.user_id`), cough events and telemetry (through the user's devices), reports and AI calls are all scoped to the signed-in user.
 *   **REST API:** `routes/api.php`, protected by Sanctum tokens.
-*   **Tests:** `backend/tests/` (`php artisan test`).
+*   **Tests:** `backend/tests/` (`php artisan test` on a development machine or an isolated container; never inside the production backend container, see README).
 
 ---
 
