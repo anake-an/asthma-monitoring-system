@@ -191,8 +191,8 @@ export default function LiveMonitor() {
                 ></div>
               </div>
               <div className="flex justify-between items-center mt-1">
-                <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium" title={DUST_BANDS_NOTE}>PM2.5 (est.)</p>
-                <p className="text-[10px] sm:text-xs text-zinc-600 font-medium flex items-center whitespace-nowrap">
+                <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium" title={DUST_BANDS_NOTE}>PM2.5</p>
+                <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium flex items-center whitespace-nowrap">
                   Limit: {config.pm25_threshold} {aiBadge}
                 </p>
               </div>
@@ -212,8 +212,8 @@ export default function LiveMonitor() {
                 ></div>
               </div>
               <div className="flex justify-between items-center mt-1">
-                <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium" title={GAS_NOTE}>Gas (est.)</p>
-                <p className="text-[10px] sm:text-xs text-zinc-600 font-medium flex items-center whitespace-nowrap">
+                <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium" title={GAS_NOTE}>Gas</p>
+                <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium flex items-center whitespace-nowrap">
                   Limit: {config.mq135_threshold} {aiBadge}
                 </p>
               </div>
