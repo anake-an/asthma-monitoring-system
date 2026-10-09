@@ -5,7 +5,7 @@ This directory contains the firmware source code for the physical IoT hardware u
 ## 1. ESP32 Master Gateway (`esp32_firmware/esp32_firmware.ino`)
 The ESP32 is the central brain of the hardware system. 
 *   **Connectivity:** Uses `WiFiManager` to broadcast a "RespiroSync-Setup" Hotspot if it can't find WiFi. Securely connects to Cloudflare WebSockets (WSS).
-*   **Environment:** Polls the DHT22 (Climate), Sharp GP2Y1010AU0F (Dust/PM2.5), and MQ-135 (Gas) sensors every 5 seconds.
+*   **Environment:** Polls the DHT22 (Climate), Sharp GP2Y1010AU0F (Dust/PM2.5), and MQ-135 (Gas, estimated ppm) sensors every 3 seconds.
 *   **Comms:** Listens to UART2 (Serial2) for acoustic triggers from the Raspberry Pi Pico.
 *   **Broker:** connects as the `respirosync_device` account with client id = its pairing token, and only uses `respirosync/devices/<token>/...` topics.
 *   **Local alarm:** applies the thresholds it receives from the dashboard (retained `config` topic) and beeps/turns the red LED on when a reading crosses one, even when offline.

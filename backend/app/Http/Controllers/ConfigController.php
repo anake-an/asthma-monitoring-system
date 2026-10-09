@@ -20,7 +20,7 @@ class ConfigController extends Controller
             'pm25_threshold' => 'numeric|min:0|max:500',
             'temperature_threshold' => 'numeric|min:0|max:60',
             'humidity_threshold' => 'numeric|min:0|max:100',
-            'mq135_threshold' => 'numeric|min:0|max:4095',
+            'mq135_threshold' => 'numeric|min:0|max:10000', // estimated ppm
             'is_buzzer_muted' => 'boolean',
             'ai_optimization_enabled' => 'boolean',
         ]);

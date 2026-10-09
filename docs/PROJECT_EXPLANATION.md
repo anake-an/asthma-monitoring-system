@@ -17,7 +17,7 @@ How the hardware, AI, backend and frontend fit together, what each part really d
 ### 📡 ESP32: gateway and environment monitor
 *   **Hardware:** ESP32 + DHT22 + MQ-135 + Sharp GP2Y1010AU0F (or the pin-compatible GP2Y1014AU0F), passive buzzer, red/green LEDs, 16x2 I2C LCD behind a BSS138 level shifter, MB-102 5 V supply for the sensors.
 *   **How it works:**
-    *   Reads the sensors every 5 s and publishes them to `respirosync/devices/<token>/telemetry`. A failed DHT22 read is sent as `null`, never as 0.
+    *   Reads the sensors every 3 s and publishes them to `respirosync/devices/<token>/telemetry`. Dust and gas are averaged over the last 4 readings (~12 s); the same smoothed values drive the local alarm, so the device and dashboard agree. A failed DHT22 read is sent as `null`, never as 0. Gas is an estimated CO₂-equivalent ppm (MQ-135 datasheet curve, calibrated against the cleanest air seen since power-on taken as 420 ppm), not a measured CO₂ value.
     *   Forwards each Pico detection to `respirosync/devices/<token>/events`.
     *   Receives its owner's thresholds on `respirosync/devices/<token>/config` (a retained message, so they arrive again after every reconnect) and sounds the buzzer/red LED when a reading crosses a threshold. This works offline too, using the last thresholds received. The dashboard can mute the buzzer.
     *   Obeys `factory_reset`, `buzzer_on` and `buzzer_off` on `respirosync/devices/<token>/commands`.

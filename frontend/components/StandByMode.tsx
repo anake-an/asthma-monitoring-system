@@ -53,7 +53,7 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
     const fetchData = async () => {
       try {
         const token = localStorage.getItem("auth_token");
-        const res = await fetch("/api/telemetry", {
+        const res = await fetch("/api/telemetry?limit=1", {
           headers: { 
             "Authorization": `Bearer ${token}`,
             "Accept": "application/json"

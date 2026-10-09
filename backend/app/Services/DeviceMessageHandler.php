@@ -75,7 +75,7 @@ class DeviceMessageHandler
             'pm25_level' => $pm25,
             'temperature' => self::number($data['temperature'] ?? null, -40, 85),
             'humidity' => self::number($data['humidity'] ?? null, 0, 100),
-            'mq135_level' => self::number($data['mq135_level'] ?? null, 0, 4095),
+            'mq135_level' => self::number($data['mq135_level'] ?? null, 0, 10000), // estimated ppm (CO2-equivalent)
             // Set by PHP, not the DB default: the time windows below compare against now() in the
             // app timezone, and the DB clock may run in another one (SQLite's is always UTC).
             'recorded_at' => now(),

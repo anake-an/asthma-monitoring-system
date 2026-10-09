@@ -1,7 +1,7 @@
 /*
  * RespiroSync - ESP32 gateway firmware
  *
- * - Reads DHT22, Sharp GP2Y1010AU0F / GP2Y1014AU0F (dust) and MQ-135 every 5 s
+ * - Reads DHT22, Sharp GP2Y1010AU0F / GP2Y1014AU0F (dust) and MQ-135 (estimated ppm) every 3 s
  * - Receives cough detections from the Raspberry Pi Pico over UART2
  * - Publishes to   respirosync/devices/<token>/telemetry and /events
  * - Subscribes to  respirosync/devices/<token>/config   (retained thresholds)
@@ -78,7 +78,7 @@ struct Thresholds {
   float pm25 = 35.0f;
   float temperature = 35.0f;
   float humidity = 60.0f;
-  float mq135 = 300.0f;
+  float mq135 = 1000.0f;  // estimated ppm (CO2-equivalent)
   bool muted = false;
 };
 Thresholds thresholds;
@@ -194,6 +194,53 @@ float readDustSensor() {
   return (sensorVolts - dustBaselineV) / DUST_SENSITIVITY_V_PER_UG;
 }
 
+// --- MQ-135, returns an estimated CO2-equivalent ppm (NAN if there is no signal) ---
+// Datasheet-curve method used by the common MQ135 Arduino library: ppm = a * (Rs/R0)^b with
+// b = -2.769. The module's load resistor cancels out of Rs/R0, so it does not need to be known.
+// R0 is learned like the dust baseline: the cleanest air seen since boot (highest Rs) is taken
+// as fresh air at MQ135_CLEAN_AIR_PPM. Indoor air is usually above that, the sensor reacts to
+// many gases, and it drifts with temperature and humidity: an estimate, not a CO2 measurement.
+const float MQ135_SUPPLY_V = 5.0f;          // MB-102 5 V rail
+const float MQ135_DIVIDER_RATIO = 1.5f;     // same 10k/20k divider as the dust sensor
+const float MQ135_CLEAN_AIR_PPM = 420.0f;   // outdoor CO2, the calibration point
+const float MQ135_CURVE_EXP = -2.769034857f;
+const int MQ135_SAMPLES = 10;
+float mq135CleanRsRatio = -1.0f;  // Rs/RL in the cleanest air seen since boot
+int lastMq135Raw = 0;             // averaged ADC value (Serial log)
+
+float readMq135Ppm() {
+  uint32_t sumMv = 0, sumRaw = 0;
+  for (int i = 0; i < MQ135_SAMPLES; i++) {
+    sumMv += analogReadMilliVolts(MQ135PIN);
+    sumRaw += analogRead(MQ135PIN);
+    delay(2);
+  }
+  lastMq135Raw = sumRaw / MQ135_SAMPLES;
+  float v = (sumMv / (float)MQ135_SAMPLES / 1000.0f) * MQ135_DIVIDER_RATIO;  // voltage at AO
+  if (v < 0.05f) return NAN;                                  // no signal (unpowered / unwired)
+  if (v > MQ135_SUPPLY_V - 0.01f) v = MQ135_SUPPLY_V - 0.01f;
+  float rsRatio = (MQ135_SUPPLY_V - v) / v;                   // Rs / RL
+  if (mq135CleanRsRatio < 0 || rsRatio > mq135CleanRsRatio) mq135CleanRsRatio = rsRatio;
+  return MQ135_CLEAN_AIR_PPM * powf(rsRatio / mq135CleanRsRatio, MQ135_CURVE_EXP);
+}
+
+// Rolling average of the last few readings. Both the published value and the local alarm use it,
+// so a single noisy reading neither beeps nor disagrees with the dashboard.
+const int SMOOTH_N = 4;  // 4 readings x 3 s = ~12 s
+struct Smoother {
+  float values[SMOOTH_N];
+  int count = 0, next = 0;
+  float add(float v) {
+    values[next] = v;
+    next = (next + 1) % SMOOTH_N;
+    if (count < SMOOTH_N) count++;
+    float sum = 0;
+    for (int i = 0; i < count; i++) sum += values[i];
+    return sum / count;
+  }
+};
+Smoother pm25Smoother, gasSmoother;
+
 void factoryReset() {
   Serial.println("Factory reset: wiping token and Wi-Fi settings");
   lcd.clear();
@@ -294,6 +341,7 @@ void setup() {
 }
 
 unsigned long lastTelemetryMillis = 0;
+const unsigned long TELEMETRY_INTERVAL_MS = 3000;  // DHT22 needs >= 2 s between reads
 unsigned long coughDisplayUntil = 0;
 bool envAlarm = false;
 char alarmReason[17] = "";
@@ -328,15 +376,17 @@ void handlePicoMessage() {
 void readAndPublishTelemetry() {
   float hum = dht.readHumidity();
   float temp = dht.readTemperature();
-  float pm25 = readDustSensor();
-  int mq135 = analogRead(MQ135PIN);
+  float pm25 = pm25Smoother.add(readDustSensor());
+  float gasPpm = readMq135Ppm();
+  if (!isnan(gasPpm)) gasPpm = gasSmoother.add(gasPpm);
   // Raw values for wiring checks and calibration.
-  Serial.printf("Dust: %u mV at pin (%.2f V at sensor, clean-air baseline %.2f V) -> %.1f ug/m3 | MQ-135 raw %d\n",
-                (unsigned)lastDustPinMv, lastDustPinMv / 1000.0f * DUST_DIVIDER_RATIO, dustBaselineV, pm25, mq135);
+  Serial.printf("Dust: %u mV at pin (%.2f V at sensor, clean-air baseline %.2f V) -> %.1f ug/m3 | MQ-135 raw %d -> %.0f ppm est.\n",
+                (unsigned)lastDustPinMv, lastDustPinMv / 1000.0f * DUST_DIVIDER_RATIO, dustBaselineV, pm25, lastMq135Raw, gasPpm);
 
   Doc doc;
   doc["pm25_level"] = pm25;
-  doc["mq135_level"] = mq135;
+  if (isnan(gasPpm)) doc["mq135_level"] = (const char *)nullptr;  // JSON null: no gas signal
+  else doc["mq135_level"] = roundf(gasPpm);
   if (isnan(temp) || isnan(hum)) {
     Serial.println("DHT22 read failed: sending null");
     doc["temperature"] = (const char *)nullptr;  // JSON null
@@ -354,7 +404,7 @@ void readAndPublishTelemetry() {
 
   alarmReason[0] = '\0';
   if (pm25 > t.pm25) strcpy(alarmReason, "PM2.5 high");
-  else if (mq135 > t.mq135) strcpy(alarmReason, "Gas high");
+  else if (!isnan(gasPpm) && gasPpm > t.mq135) strcpy(alarmReason, "Gas high");
   else if (!isnan(temp) && temp > t.temperature) strcpy(alarmReason, "Too hot");
   else if (!isnan(hum) && hum > t.humidity) strcpy(alarmReason, "Too humid");
   envAlarm = alarmReason[0] != '\0';
@@ -405,7 +455,7 @@ void loop() {
 
   handlePicoMessage();
 
-  if (millis() - lastTelemetryMillis >= 5000) {
+  if (millis() - lastTelemetryMillis >= TELEMETRY_INTERVAL_MS) {
     lastTelemetryMillis = millis();
     readAndPublishTelemetry();
   }

@@ -2,12 +2,13 @@
 import { useEffect, useState } from "react";
 import InhalerTracker from "./InhalerTracker";
 import { dustLevel, DUST_LABEL, DUST_BANDS_NOTE } from "@/lib/dustBands";
+import { GAS_NOTE } from "@/lib/gas";
 
 type Telemetry = {
   pm25_level: number;
   temperature: number | null; // null when the DHT22 read failed
   humidity: number | null;
-  mq135_level?: number;
+  mq135_level?: number | null; // estimated ppm (CO2-equivalent); null = no gas signal
   recorded_at: string;
 };
 
@@ -15,7 +16,7 @@ export default function LiveMonitor() {
   const [data, setData] = useState<Telemetry | null>(null);
   const [coughDetected, setCoughDetected] = useState(false);
   const [isOffline, setIsOffline] = useState(true);
-  const [config, setConfig] = useState({ pm25_threshold: 35, temperature_threshold: 35, humidity_threshold: 60, mq135_threshold: 300, ai_optimization_enabled: true });
+  const [config, setConfig] = useState({ pm25_threshold: 35, temperature_threshold: 35, humidity_threshold: 60, mq135_threshold: 1000, ai_optimization_enabled: true });
   // Stage of the AI model ("Stage 1 (Anomaly Detection)" / "Stage 2 (Personalised)"), or null while learning.
   const [aiStage, setAiStage] = useState<string | null>(null);
 
@@ -39,45 +40,55 @@ export default function LiveMonitor() {
   }, []);
 
   useEffect(() => {
+    let inFlight = false;
+    let tick = 0;
+
+    const fetchTelemetry = async (headers: HeadersInit) => {
+      // Only the newest reading is needed here.
+      const res = await fetch("/api/telemetry?limit=1", { headers });
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      if (!res.ok) return;
+      const logs = await res.json();
+      if (logs.length === 0) {
+        setData(null);
+        setIsOffline(true);
+        return;
+      }
+      const latestLog = logs[0];
+      setData(latestLog);
+
+      // Offline = no reading for 20 s (the ESP32 sends every 3 s). Measured against the server's
+      // clock (X-Server-Time, else the Date header) so a wrong clock on the viewer's computer
+      // cannot make the device flicker between online and offline.
+      const serverNow = Number(res.headers.get("X-Server-Time")) || Date.parse(res.headers.get("Date") ?? "") || Date.now();
+      const recordedAtUtc = latestLog.recorded_at.endsWith('Z') ? latestLog.recorded_at : latestLog.recorded_at + 'Z';
+      setIsOffline((serverNow - new Date(recordedAtUtc).getTime()) / 1000 > 20);
+    };
+
     const fetchData = async () => {
+      if (inFlight) return; // never stack requests if the network is slow
+      inFlight = true;
       try {
         const token = localStorage.getItem("auth_token");
-        const res = await fetch("/api/telemetry", {
-          headers: { 
-            "Authorization": `Bearer ${token}`,
-            "Accept": "application/json"
-          }
-        });
-        
-        if (res.status === 401) {
-          window.location.href = "/login";
-          return;
-        }
+        const headers = { "Authorization": `Bearer ${token}`, "Accept": "application/json" };
+        // Live values every 2 s; cough status and limits change rarely, so every 6 s.
+        const slow = tick++ % 3 === 0;
+        await Promise.all([
+          fetchTelemetry(headers),
+          slow ? fetchSlow(headers) : Promise.resolve(),
+        ]);
+      } catch (err) {
+      } finally {
+        inFlight = false;
+      }
+    };
 
-        if (res.ok) {
-          const logs = await res.json();
-          if (logs.length > 0) {
-            const latestLog = logs[0];
-            setData(latestLog);
-            
-            // Offline Detection: the ESP32 sends every 5 s, so 30 s without data (6 missed readings) = offline
-            // We append 'Z' to tell JavaScript the timestamp is UTC (not local time)
-            const recordedAtUtc = latestLog.recorded_at.endsWith('Z') ? latestLog.recorded_at : latestLog.recorded_at + 'Z';
-            const diffSeconds = (new Date().getTime() - new Date(recordedAtUtc).getTime()) / 1000;
-            setIsOffline(diffSeconds > 30);
-          } else {
-            setData(null);
-            setIsOffline(true);
-          }
-        }
-
+    const fetchSlow = async (headers: HeadersInit) => {
         // Fetch Cough Events to set AI Status
-        const coughRes = await fetch("/api/cough-events?per_page=1", {
-          headers: { 
-            "Authorization": `Bearer ${token}`,
-            "Accept": "application/json"
-          }
-        });
+        const coughRes = await fetch("/api/cough-events?per_page=1", { headers });
         if (coughRes.ok) {
           const coughData = await coughRes.json();
           if (coughData.data && coughData.data.length > 0) {
@@ -88,27 +99,21 @@ export default function LiveMonitor() {
         }
 
         // Fetch thresholds from config API
-        const confRes = await fetch("/api/config", {
-          headers: { 
-            "Authorization": `Bearer ${token}`,
-            "Accept": "application/json"
-          }
-        });
+        const confRes = await fetch("/api/config", { headers });
         if (confRes.ok) {
           const confData = await confRes.json();
           setConfig({
             pm25_threshold: Math.round(confData.pm25_threshold || 35),
             temperature_threshold: Math.round(confData.temperature_threshold || 35),
             humidity_threshold: Math.round(confData.humidity_threshold || 60),
-            mq135_threshold: Math.round(confData.mq135_threshold || 300),
+            mq135_threshold: Math.round(confData.mq135_threshold || 1000),
             ai_optimization_enabled: confData.ai_optimization_enabled !== undefined ? confData.ai_optimization_enabled : true
           });
         }
-
-      } catch (err) {}
     };
+
     fetchData();
-    const interval = setInterval(fetchData, 3000);
+    const interval = setInterval(fetchData, 2000);
     return () => clearInterval(interval);
   }, []);
 
@@ -121,8 +126,8 @@ export default function LiveMonitor() {
   };
 
   // Card status: gas over its limit takes priority over the dust level.
-  const getAirInfo = (pm25: number, gas?: number) => {
-    if (gas !== undefined && gas > config.mq135_threshold) return { text: "Gas High", color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20", bar: "bg-orange-400" };
+  const getAirInfo = (pm25: number, gas?: number | null) => {
+    if (gas != null && gas > config.mq135_threshold) return { text: "Gas High", color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20", bar: "bg-orange-400" };
     return getAqiInfo(pm25);
   };
 
@@ -135,7 +140,7 @@ export default function LiveMonitor() {
     return { text: "Comfortable", color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", bar: "bg-emerald-400" };
   };
 
-  const isAqiBreached = data ? data.pm25_level > config.pm25_threshold || (data.mq135_level !== undefined && data.mq135_level > config.mq135_threshold) : false;
+  const isAqiBreached = data ? data.pm25_level > config.pm25_threshold || (data.mq135_level != null && data.mq135_level > config.mq135_threshold) : false;
   const isClimateBreached = data ? (data.temperature ?? -Infinity) > config.temperature_threshold || (data.humidity ?? -Infinity) > config.humidity_threshold : false;
   const isEnvironmentUnsafe = isAqiBreached || isClimateBreached;
 
@@ -196,18 +201,18 @@ export default function LiveMonitor() {
             <div>
               <div className="flex items-end gap-1 mb-2">
                 <span className="text-3xl sm:text-4xl font-semibold tracking-tight text-zinc-900 dark:text-white">
-                  {isOffline ? "--" : (data ? (data.mq135_level !== undefined ? data.mq135_level : "--") : "--")}
+                  {isOffline ? "--" : (data?.mq135_level != null ? Math.round(data.mq135_level) : "--")}
                 </span>
-                <span className="text-zinc-600 dark:text-zinc-400 font-medium mb-1" title="Raw MQ-135 sensor reading (0-4095), not ppm">raw</span>
+                <span className="text-zinc-600 dark:text-zinc-400 font-medium mb-1" title={GAS_NOTE}>ppm</span>
               </div>
               <div className="w-full h-1.5 bg-zinc-200 dark:bg-white/10 rounded-full overflow-hidden mb-2">
                 <div 
                   className={`h-full bg-indigo-400 rounded-full transition-all duration-1000 ${isOffline ? 'opacity-0' : 'opacity-100'}`}
-                  style={{ width: `${isOffline ? 0 : Math.min(((data?.mq135_level || 0) / 4095) * 100, 100)}%` }}
+                  style={{ width: `${isOffline ? 0 : Math.min(((data?.mq135_level || 0) / 2000) * 100, 100)}%` }}
                 ></div>
               </div>
               <div className="flex justify-between items-center mt-1">
-                <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium">Gas / VOCs</p>
+                <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium" title={GAS_NOTE}>Gas (est.)</p>
                 <p className="text-[10px] sm:text-xs text-zinc-600 font-medium flex items-center whitespace-nowrap">
                   Limit: {config.mq135_threshold} {aiBadge}
                 </p>
