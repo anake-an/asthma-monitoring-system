@@ -62,7 +62,7 @@ export default function CommandCenter() {
           {config[key]
             ? "Locked: the AI never changes this limit."
             : config.ai_optimization_enabled
-              ? "The AI may lower this when the room is unusual (at most 10 % a day, after a full day of readings), never above your value."
+              ? "The AI may lower this when the room is unusual (once a day at most, by up to 10 %, after a full day of readings), never above your value."
               : "AI optimization is off: this limit is used as set."}
         </span>
         <span className="flex items-center gap-1.5 shrink-0 font-medium">

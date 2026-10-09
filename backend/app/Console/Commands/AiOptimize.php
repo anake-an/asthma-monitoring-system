@@ -57,6 +57,7 @@ class AiOptimize extends Command
             } else {
                 foreach (HardwareConfig::LIMITS as $name) {
                     $config->{"{$name}_threshold"} = $config->capFor($name);
+                    $config->{"{$name}_day_start"} = $config->capFor($name); // a restore is not an AI change
                 }
             }
             $limitChanges = $config->pendingLimitChanges();
