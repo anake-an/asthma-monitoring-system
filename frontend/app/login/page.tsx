@@ -127,7 +127,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full bg-zinc-100/80 dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-2xl pl-11 pr-5 py-3.5 sm:py-4 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:outline-none focus:border-blue-500/50 focus:bg-blue-50/50 dark:focus:bg-blue-500/5 transition-all duration-300 focus:ring-4 focus:ring-blue-500/10"
-                placeholder="admin@asthma.local"
+                placeholder="you@example.com"
                 required
               />
             </div>

@@ -46,7 +46,7 @@ The Pico heuristic above. It produces candidate events and a strength value; it 
 *   `allow_anonymous false`, with two accounts: `respirosync_backend` (full access to `respirosync/#`) and `respirosync_device` (shared by devices).
 *   `acl` pins every device to `respirosync/devices/<its client id>/...`. A device cannot read another device's data, learn other tokens, or publish as another device. The password file is created on the server and never committed.
 
-### ⚙️ Laravel 11
+### ⚙️ Laravel 12
 *   **MQTT worker:** `app/Console/Commands/MqttSubscribe.php` subscribes to `respirosync/devices/+/telemetry` and `/events` and hands each message to `app/Services/DeviceMessageHandler.php`. Device identity comes from the topic, never from the payload.
 *   **Alert rule:** a cough raises an alert when there are **3 coughs in 10 minutes**, or **2 coughs in 10 minutes where this one has strength ≥ 0.8**. A single loud sound never alerts on its own. At most **one email per device per 10 minutes**. A mail failure is logged and never stops the worker.
 *   **Alert email:** `resources/views/emails/cough_alert.blade.php` shows the cough count and the device-reported strength, or "Not reported by device". It never shows an invented confidence.

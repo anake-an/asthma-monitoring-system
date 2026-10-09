@@ -69,6 +69,13 @@ return new class extends Migration
 
     public function down(): void
     {
+        // MySQL dropped the foreign key's own index when the unique index took over, so
+        // the foreign key now depends on the unique one. Give it a plain index first.
+        if (!Schema::hasIndex('hardware_configs', 'hardware_configs_user_id_foreign')) {
+            Schema::table('hardware_configs', function (Blueprint $table) {
+                $table->index('user_id', 'hardware_configs_user_id_foreign');
+            });
+        }
         Schema::table('hardware_configs', function (Blueprint $table) {
             $table->dropUnique(['user_id']);
         });

@@ -76,6 +76,9 @@ class DeviceMessageHandler
             'temperature' => self::number($data['temperature'] ?? null, -40, 85),
             'humidity' => self::number($data['humidity'] ?? null, 0, 100),
             'mq135_level' => self::number($data['mq135_level'] ?? null, 0, 4095),
+            // Set by PHP, not the DB default: the time windows below compare against now() in the
+            // app timezone, and the DB clock may run in another one (SQLite's is always UTC).
+            'recorded_at' => now(),
         ]);
     }
 
@@ -106,7 +109,8 @@ class DeviceMessageHandler
             'device_id' => $device->id,
             'severity' => $isAlert ? CoughEvent::SEVERITY_ALERT : CoughEvent::SEVERITY_LOGGED,
             'confidence' => $confidence,
-        ])->refresh(); // load DB-generated recorded_at
+            'recorded_at' => now(), // same clock as $since above
+        ])->refresh(); // load DB defaults (is_verified, inhaler_used)
 
         // Cooldown: at most one notification per device per window.
         if ($isAlert && !$recentAlert && $device->user) {
