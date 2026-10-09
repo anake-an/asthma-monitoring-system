@@ -1,8 +1,8 @@
 # 🫁 RespiroSync: AI-Powered Asthma Monitoring System
 
-![Version](https://img.shields.io/badge/version-v4.3.0-blue)
+![Version](https://img.shields.io/badge/version-v5.0.0-blue)
 ![Next.js](https://img.shields.io/badge/Next.js-14-black.svg) 
-![Laravel](https://img.shields.io/badge/Laravel-11-red.svg) 
+![Laravel](https://img.shields.io/badge/Laravel-12-red.svg) 
 ![Python](https://img.shields.io/badge/Python-3.10-yellow.svg) 
 ![Docker](https://img.shields.io/badge/Docker-Compose-blue.svg)
 ![License](https://img.shields.io/badge/license-GPLv3-green.svg)
@@ -154,8 +154,11 @@ The dashboard is served on `127.0.0.1:3005` and published through the Cloudflare
 
 ## 📄 License & Medical Disclaimer
 
-This project is open-sourced under the **GNU General Public License v3.0 (GPLv3)**. 
-*   **Students & Hobbyists:** You are free to use, modify, and distribute this software for academic and personal projects.
-*   **Commercial Entities:** If you use or modify this codebase in any commercial product, you are legally required to open-source your entire proprietary codebase under the same GPLv3 license.
+This project is licensed under the **GNU General Public License v3.0 (GPLv3)**; see [`LICENSE`](LICENSE) for the exact terms.
+*   You may use, study, modify and share it, for academic, personal or commercial purposes.
+*   If you **distribute** it or a modified version (for example, ship it on devices or publish a fork), you must license that work under GPLv3 too and make its source code available to the people you distribute it to.
+*   This summary is not legal advice; the `LICENSE` file is what applies.
 
-**DISCLAIMER:** RespiroSync is an educational/prototyping project. The AI models and sensor readings are not FDA-approved and should **never** be used as a replacement for professional medical advice, diagnosis, or emergency services.
+Security issues: please report them privately, as described in [`SECURITY.md`](SECURITY.md). Release history: [`CHANGELOG.md`](CHANGELOG.md).
+
+**MEDICAL DISCLAIMER:** RespiroSync is a student prototype. It is **not** a registered medical device (in Malaysia, medical devices are regulated by the Medical Device Authority under the Medical Device Act 2012, Act 737) and it has not been clinically validated. Its cough detection is a loudness heuristic, and its sensor readings and AI outputs can be wrong. It must **never** replace professional medical advice, diagnosis, treatment, or emergency services.
