@@ -168,6 +168,8 @@ void publishJson(const char *topic, Doc &doc) {
 }
 
 // --- Sharp GP2Y1014AU0F, returns ug/m3 ---
+uint32_t lastDustPinMv = 0;  // raw reading at GPIO 35, for the Serial log / calibration
+
 float readDustSensor() {
   digitalWrite(DUST_LED_PIN, LOW);  // LED on (active low)
   delayMicroseconds(280);
@@ -175,6 +177,7 @@ float readDustSensor() {
   delayMicroseconds(40);
   digitalWrite(DUST_LED_PIN, HIGH);
   delayMicroseconds(9680);
+  lastDustPinMv = mv;
 
   float sensorVolts = (mv / 1000.0f) * DUST_DIVIDER_RATIO;
   // Chris Nafis (2012): density [mg/m3] = 0.17 * V - 0.1  ->  [ug/m3] = 170 * V - 100
@@ -318,6 +321,9 @@ void readAndPublishTelemetry() {
   float temp = dht.readTemperature();
   float pm25 = readDustSensor();
   int mq135 = analogRead(MQ135PIN);
+  // Raw values for wiring checks and calibration. Readings below ~0.59 V at the sensor show as PM2.5 0.0.
+  Serial.printf("Dust: %u mV at pin (%.2f V at sensor) -> %.1f ug/m3 | MQ-135 raw %d\n",
+                (unsigned)lastDustPinMv, lastDustPinMv / 1000.0f * DUST_DIVIDER_RATIO, pm25, mq135);
 
   Doc doc;
   doc["pm25_level"] = pm25;
