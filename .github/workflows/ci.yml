@@ -113,6 +113,54 @@ jobs:
       - name: Build
         run: npm run build
 
+  firmware-esp32:
+    name: ESP32 firmware compiles (core ${{ matrix.core }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        core: ['2.0.17', 'latest']
+    steps:
+      - uses: actions/checkout@v5
+
+      # secrets.h is gitignored; compile against the example values.
+      - name: Use example secrets
+        run: cp hardware/esp32_firmware/secrets.example.h hardware/esp32_firmware/secrets.h
+
+      - uses: arduino/compile-sketches@v1
+        with:
+          fqbn: esp32:esp32:esp32
+          platforms: |
+            - name: esp32:esp32
+              source-url: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+              ${{ matrix.core != 'latest' && format('version: {0}', matrix.core) || '' }}
+          libraries: |
+            - name: WiFiManager
+            - name: ArduinoJson
+            - name: DHT sensor library
+            - name: Adafruit Unified Sensor
+            - name: LiquidCrystal I2C
+          sketch-paths: |
+            - hardware/esp32_firmware
+          enable-deltas-report: false
+
+  firmware-pico:
+    name: Pico firmware compiles (arduino-pico)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: arduino/compile-sketches@v1
+        with:
+          fqbn: rp2040:rp2040:rpipico
+          platforms: |
+            - name: rp2040:rp2040
+              source-url: https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
+          # Finds both sketches: pico_cough_ai and data_collection/
+          sketch-paths: |
+            - hardware/pico_cough_ai
+          enable-deltas-report: false
+
   ai_engine:
     name: AI engine (install and syntax check)
     runs-on: ubuntu-latest

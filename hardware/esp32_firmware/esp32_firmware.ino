@@ -1,7 +1,7 @@
 /*
  * RespiroSync - ESP32 gateway firmware
  *
- * - Reads DHT22, Sharp GP2Y1014AU0F (dust) and MQ-135 every 5 s
+ * - Reads DHT22, Sharp GP2Y1010AU0F / GP2Y1014AU0F (dust) and MQ-135 every 5 s
  * - Receives cough detections from the Raspberry Pi Pico over UART2
  * - Publishes to   respirosync/devices/<token>/telemetry and /events
  * - Subscribes to  respirosync/devices/<token>/config   (retained thresholds)
@@ -45,6 +45,23 @@ typedef StaticJsonDocument<256> Doc;
 // The Sharp sensor runs on 5 V, so its output goes through a 10k/20k divider
 // (see WIRING_GUIDE.md). Voltage at the sensor = voltage at the pin * 1.5.
 const float DUST_DIVIDER_RATIO = 1.5f;
+
+// Passive buzzer: it needs a square wave; a steady HIGH only clicks once.
+// Wired through a 220 ohm resistor so a magnetic buzzer stays within the pin's current limit.
+const unsigned int BUZZER_HZ = 2700;  // near the resonance of common 12 mm buzzers
+bool buzzerOn = false;
+
+void setBuzzer(bool on) {
+  if (on == buzzerOn) return;
+  buzzerOn = on;
+  if (on) {
+    tone(BUZZER_PIN, BUZZER_HZ);
+  } else {
+    noTone(BUZZER_PIN);
+    pinMode(BUZZER_PIN, OUTPUT);
+    digitalWrite(BUZZER_PIN, LOW);  // idle low: no DC through the coil
+  }
+}
 
 DHT dht(DHTPIN, DHTTYPE);
 LiquidCrystal_I2C lcd(0x27, 16, 2);  // try 0x3F if the screen stays blank
@@ -291,9 +308,9 @@ void handlePicoMessage() {
   lcd.print("Cough Detected!");
   coughDisplayUntil = millis() + 2000;
 
-  digitalWrite(BUZZER_PIN, HIGH);  // short acknowledgement chirp
+  setBuzzer(true);  // short acknowledgement chirp
   delay(80);
-  digitalWrite(BUZZER_PIN, LOW);
+  setBuzzer(false);
 }
 
 void readAndPublishTelemetry() {
@@ -360,7 +377,7 @@ void updateOutputs() {
 
   // Beep 150 ms every 2 s while an alarm is active, unless muted from the dashboard.
   bool beep = alarm && !muted && (millis() % 2000) < 150;
-  if (millis() > coughDisplayUntil) digitalWrite(BUZZER_PIN, beep);
+  if (millis() > coughDisplayUntil) setBuzzer(beep);
 }
 
 void loop() {
