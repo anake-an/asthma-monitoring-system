@@ -83,7 +83,43 @@ class HardwareConfig extends Model
                 $changes[$key] = (bool) $input[$key];
             }
         }
-        $this->update($changes);
+        $this->fill($changes);
+        $limitChanges = $this->pendingLimitChanges();
+        $this->save();
+        $this->recordLimitChanges($limitChanges, 'user', 'Changed in Smart Alerts');
+    }
+
+    /**
+     * Effective limits that changed but are not saved yet: [name => [old, new]]. Call before save().
+     */
+    public function pendingLimitChanges(): array
+    {
+        $changes = [];
+        foreach (self::LIMITS as $name) {
+            $key = "{$name}_threshold";
+            if ($this->isDirty($key)) {
+                $old = $this->getOriginal($key);
+                $changes[$name] = [$old === null ? null : (float) $old, (float) $this->{$key}];
+            }
+        }
+
+        return $changes;
+    }
+
+    /** Write one LimitChange row per changed limit (shown in the Activity Log). */
+    public function recordLimitChanges(array $changes, string $source, ?string $reason): void
+    {
+        foreach ($changes as $name => [$old, $new]) {
+            LimitChange::create([
+                'user_id' => $this->user_id,
+                'limit_name' => $name,
+                'old_value' => $old,
+                'new_value' => $new,
+                'source' => $source,
+                'reason' => $reason,
+                'created_at' => now(),
+            ]);
+        }
     }
 
     /** The AI may move a limit by at most this share per 24 h (DESIGN_MULTI_PATIENT.md 5.6). */
