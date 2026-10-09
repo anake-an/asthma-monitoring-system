@@ -91,9 +91,14 @@ def respect_room_normal(thresholds: dict, baseline: dict | None) -> dict:
     return out
 
 
+# The AI only adjusts limits once the room baseline covers a full day (24 h of 10-minute windows):
+# a few hours miss the day/night cycle (DESIGN_MULTI_PATIENT.md 5.6, "no change until minimum data").
+MIN_ADJUST_WINDOWS = 144
+
+
 def room_baseline(df: pd.DataFrame) -> dict:
     """Mean and spread of each room reading over the training data (spread floored by MIN_STD)."""
-    baseline = {}
+    baseline = {"windows": len(df)}
     for col in ("pm25_level", "temperature", "humidity"):
         baseline[f"{col}_mean"] = safe_val(df[col].mean())
         baseline[f"{col}_std"] = max(safe_val(df[col].std(), 0.0), MIN_STD[col])
@@ -368,6 +373,9 @@ def predict_attack(user_id: int = Query(..., ge=1)):
         "suggested_thresholds": thresholds,
         # Top of the room's normal range per reading (mean + 2 std): a user limit below it will alarm often.
         "room_normal_limits": room_normal_limits(room),
+        # Windows behind the room baseline; ai:optimize only changes limits once this covers 24 h.
+        "training_windows": (room or {}).get("windows"),
+        "ready_to_adjust": bool(room and room.get("windows", 0) >= MIN_ADJUST_WINDOWS),
         "current_inputs": {
             "pm25": round(pm25, 1), "temperature": round(temp, 1), "humidity": round(hum, 1),
             "coughs_last_10_min": cough_count, "coughs_last_hour": coughs_last_hour,

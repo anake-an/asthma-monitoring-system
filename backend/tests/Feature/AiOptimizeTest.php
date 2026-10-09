@@ -25,6 +25,7 @@ class AiOptimizeTest extends TestCase
 
         Http::fake(['*/predict*' => Http::response([
             'probability_of_attack' => 0.6,
+            'ready_to_adjust' => true,
             'suggested_thresholds' => [
                 'pm25_threshold' => 25.0, 'temperature_threshold' => 32.0,
                 'humidity_threshold' => 65.0, 'mq135_threshold' => 200.0,
@@ -36,7 +37,8 @@ class AiOptimizeTest extends TestCase
         Http::assertSentCount(1);
         Http::assertSent(fn (Request $r) => $r['user_id'] == $alice->id);
 
-        $this->assertSame(25.0, HardwareConfig::forUser($alice)->pm25_threshold);
+        // Suggested 25, but within one day the AI may only move 10 %: 35 -> 31.5.
+        $this->assertSame(31.5, HardwareConfig::forUser($alice)->pm25_threshold);
         $this->assertSame(50.0, HardwareConfig::forUser($bob)->pm25_threshold);
 
         $this->assertCount(1, $this->published);

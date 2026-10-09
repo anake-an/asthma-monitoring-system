@@ -5,6 +5,7 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 ## [Unreleased]
 
 ### Added
+- **AI changes are gradual:** the AI changes no limit until the room baseline covers 24 h of readings, and then moves each limit by at most 10 % per 24 h, so a Stage 1 flip between "Normal" and "Unusual" no longer swings limits every 5 minutes. A change in Smart Alerts starts a fresh daily budget; lowering your cap or locking a limit always applies at once.
 - **Your limit is a cap, with an optional lock (all four limits):** the value set in Smart Alerts is the maximum; with AI optimization on, the AI may lower the effective limit when the room is unusual, never raise it above your value, and never changes a locked limit. Sliders stay usable with AI on. The dashboard marks limits the AI lowered ("AI"), locked limits ("locked") and limits inside the room's usual range ("!": expect frequent alerts). Existing limits become caps on upgrade. `ai:optimize` re-publishes to devices only when a limit changes.
 
 ### Changed

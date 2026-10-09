@@ -27,9 +27,9 @@ class LimitCapsTest extends TestCase
         Device::create(['user_id' => $this->user->id, 'device_token' => 'CAPS01']);
     }
 
-    private function aiSuggests(array $limits): void
+    private function aiSuggests(array $limits, bool $ready = true): void
     {
-        Http::fake(['*/predict*' => Http::response(['probability_of_attack' => 0.5, 'suggested_thresholds' => $limits])]);
+        Http::fake(['*/predict*' => Http::response(['probability_of_attack' => 0.5, 'ready_to_adjust' => $ready, 'suggested_thresholds' => $limits])]);
     }
 
     public function test_saving_sets_the_cap_the_effective_limit_and_the_lock(): void
@@ -64,6 +64,34 @@ class LimitCapsTest extends TestCase
         $this->artisan('ai:optimize')->assertSuccessful();
 
         $this->assertSame(75.0, HardwareConfig::forUser($this->user)->fresh()->humidity_threshold);
+    }
+
+    public function test_the_ai_moves_a_limit_at_most_10_percent_per_day(): void
+    {
+        HardwareConfig::forUser($this->user); // humidity 75
+        $this->aiSuggests(['pm25_threshold' => 35.0, 'temperature_threshold' => 35.0, 'humidity_threshold' => 60.0, 'mq135_threshold' => 1000.0]);
+
+        $this->artisan('ai:optimize')->assertSuccessful();
+        $this->assertSame(67.5, HardwareConfig::forUser($this->user)->fresh()->humidity_threshold, 'first day: 75 - 10 %');
+
+        $this->travel(6)->hours();
+        $this->artisan('ai:optimize')->assertSuccessful();
+        $this->assertSame(67.5, HardwareConfig::forUser($this->user)->fresh()->humidity_threshold, 'same day: budget used up');
+
+        $this->travel(19)->hours(); // 25 h after the first run: a new day
+        $this->artisan('ai:optimize')->assertSuccessful();
+        $this->assertSame(60.8, HardwareConfig::forUser($this->user)->fresh()->humidity_threshold, 'second day: 67.5 - 10 %');
+    }
+
+    public function test_no_change_before_a_full_day_of_readings(): void
+    {
+        HardwareConfig::forUser($this->user);
+        $this->aiSuggests(['pm25_threshold' => 20.0, 'temperature_threshold' => 30.0, 'humidity_threshold' => 60.0, 'mq135_threshold' => 800.0], ready: false);
+
+        $this->artisan('ai:optimize')->assertSuccessful();
+
+        $this->assertSame(35.0, HardwareConfig::forUser($this->user)->fresh()->pm25_threshold);
+        $this->assertCount(0, $this->published);
     }
 
     public function test_unchanged_limits_are_not_published_again(): void

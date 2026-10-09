@@ -38,6 +38,7 @@ class HardwareConfig extends Model
         'temperature_threshold', 'temperature_cap', 'temperature_locked',
         'humidity_threshold', 'humidity_cap', 'humidity_locked',
         'mq135_threshold', 'mq135_cap', 'mq135_locked',
+        'pm25_day_start', 'temperature_day_start', 'humidity_day_start', 'mq135_day_start', 'ai_day_started_at',
         'is_buzzer_muted',
         'ai_optimization_enabled',
     ];
@@ -47,6 +48,8 @@ class HardwareConfig extends Model
         'temperature_threshold' => 'float', 'temperature_cap' => 'float', 'temperature_locked' => 'boolean',
         'humidity_threshold' => 'float', 'humidity_cap' => 'float', 'humidity_locked' => 'boolean',
         'mq135_threshold' => 'float', 'mq135_cap' => 'float', 'mq135_locked' => 'boolean',
+        'pm25_day_start' => 'float', 'temperature_day_start' => 'float', 'humidity_day_start' => 'float', 'mq135_day_start' => 'float',
+        'ai_day_started_at' => 'datetime',
         'is_buzzer_muted' => 'boolean',
         'ai_optimization_enabled' => 'boolean',
     ];
@@ -68,6 +71,8 @@ class HardwareConfig extends Model
             if (array_key_exists("{$name}_threshold", $input)) {
                 $changes["{$name}_cap"] = (float) $input["{$name}_threshold"];
                 $changes["{$name}_threshold"] = (float) $input["{$name}_threshold"];
+                // A user change is not AI movement: the AI's daily budget starts again from the new value.
+                $changes["{$name}_day_start"] = (float) $input["{$name}_threshold"];
             }
             if (array_key_exists("{$name}_locked", $input)) {
                 $changes["{$name}_locked"] = (bool) $input["{$name}_locked"];
@@ -81,17 +86,43 @@ class HardwareConfig extends Model
         $this->update($changes);
     }
 
+    /** The AI may move a limit by at most this share per 24 h (DESIGN_MULTI_PATIENT.md 5.6). */
+    public const AI_MAX_DAILY_CHANGE = 0.10;
+
     /**
-     * The limits the AI may set, given its suggestions: never above the user's cap, and
-     * exactly the cap for a locked limit. Returns <name>_threshold => value for all four.
+     * Start a new 24-hour budget window when the last one is over: each limit's reference becomes
+     * its current effective value. Changes the model in memory; the caller saves it.
+     */
+    public function startAiDayIfDue(\DateTimeInterface $now): void
+    {
+        if ($this->ai_day_started_at && $this->ai_day_started_at->gt(\Carbon\Carbon::instance($now)->subDay())) {
+            return;
+        }
+        $this->ai_day_started_at = $now;
+        foreach (self::LIMITS as $name) {
+            $this->{"{$name}_day_start"} = (float) $this->{"{$name}_threshold"};
+        }
+    }
+
+    /**
+     * The limits the AI may set, given its suggestions. Returns <name>_threshold => value for all four:
+     *   - locked: exactly the user's value (cap);
+     *   - otherwise the suggestion, within +/-10 % of the limit's value at the start of the current
+     *     24-hour window, and never above the cap (the cap wins even mid-window).
      */
     public function limitsFromSuggestion(array $suggested): array
     {
         $limits = [];
         foreach (self::LIMITS as $name) {
             $cap = $this->capFor($name);
+            if ($this->{"{$name}_locked"}) {
+                $limits["{$name}_threshold"] = $cap;
+                continue;
+            }
             $suggestion = isset($suggested["{$name}_threshold"]) ? (float) $suggested["{$name}_threshold"] : $cap;
-            $limits["{$name}_threshold"] = $this->{"{$name}_locked"} ? $cap : min($cap, $suggestion);
+            $reference = (float) ($this->{"{$name}_day_start"} ?? $this->{"{$name}_threshold"});
+            $budgeted = max($reference * (1 - self::AI_MAX_DAILY_CHANGE), min($reference * (1 + self::AI_MAX_DAILY_CHANGE), $suggestion));
+            $limits["{$name}_threshold"] = round(min($cap, $budgeted), 1);
         }
 
         return $limits;
