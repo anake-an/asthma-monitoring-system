@@ -73,7 +73,7 @@ class DashboardController extends Controller
     public function savePushSubscription(Request $request)
     {
         $request->validate([
-            'endpoint' => 'required',
+            'endpoint' => 'required|url|max:1024',
             'keys.auth' => 'required',
             'keys.p256dh' => 'required',
         ]);

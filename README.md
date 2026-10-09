@@ -31,7 +31,7 @@ The cloud platform features a responsive, dark-mode native dashboard designed fo
 | **Environmental Telemetry** | `ESP32` | DHT22 (temp/humidity), MQ-135 (gas, raw ADC), Sharp GP2Y1014AU0F (dust). Local buzzer/LED alarm when a reading crosses its threshold, even offline. |
 | **Secure IoT Transport** | `Mosquitto + Cloudflare Tunnel` | MQTT over WSS. No anonymous access; each device can only publish/subscribe under its own token (broker ACL). |
 | **Predictive AI Engine** | `Python / scikit-learn` | One model per account. Stage 1: anomaly check against the room's own baseline. Stage 2: Random Forest predicting an asthma-like event in the next hour, with held-out validation. Caregiver "false alarm" labels are excluded from training. |
-| **REST API & Workers** | `Laravel 11 / PHP 8.2` | API, MQTT worker, scheduler. All data is scoped to the signed-in account. |
+| **REST API & Workers** | `Laravel 12 / PHP 8.2` | API, MQTT worker, scheduler. All data is scoped to the signed-in account. |
 | **Interactive UI** | `Next.js / Tailwind CSS` | Live monitor, Sleep Mode, Command Center (thresholds sync to the device), weekly report. |
 | **Alerts** | `Brevo SMTP` | Email when coughs cluster (3 in 10 min, or 2 strong detections), at most one per device per 10 minutes. Web Push is implemented server-side; the browser subscription UI is not wired yet. |
 | **Identity Management** | `Laravel Sanctum` | Token auth, forgot/reset password (links expire after 60 minutes). |
@@ -70,7 +70,7 @@ The device connects with **client id = its 6-character token**; `mosquitto/confi
 ```text
 asthma-monitoring-system/
 ├── frontend/               # Next.js application (port 3000, published on 127.0.0.1:3005)
-├── backend/                # Laravel 11 API, MQTT worker, scheduler (port 8000 → 127.0.0.1:8005)
+├── backend/                # Laravel 12 API, MQTT worker, scheduler (port 8000 → 127.0.0.1:8005)
 │   └── tests/              # PHPUnit tests (in-memory SQLite)
 ├── ai_engine/              # Python FastAPI + scikit-learn service (127.0.0.1:8010)
 ├── hardware/               # ESP32 and Pico firmware (Arduino)
