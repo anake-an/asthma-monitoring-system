@@ -26,6 +26,8 @@ export default function LiveMonitor() {
     pm25_threshold: 35, temperature_threshold: 35, humidity_threshold: 75, mq135_threshold: 1000, ai_optimization_enabled: true,
     caps: {} as Partial<Record<LimitName, number>>,
     locked: {} as Partial<Record<LimitName, boolean>>,
+    // Limits without the missed-dose rule while it is on (the effective ones are 15 % lower), else null.
+    doseBase: null as Partial<Record<LimitName, number>> | null,
   });
   // Stage of the AI model ("Stage 1 (Anomaly Detection)" / "Stage 2 (Personalised)"), or null while learning.
   const [aiStage, setAiStage] = useState<string | null>(null);
@@ -130,6 +132,7 @@ export default function LiveMonitor() {
             ai_optimization_enabled: confData.ai_optimization_enabled !== undefined ? confData.ai_optimization_enabled : true,
             caps,
             locked,
+            doseBase: confData.missed_dose_base ?? null,
           });
         }
     };
@@ -174,19 +177,25 @@ export default function LiveMonitor() {
   // Badges next to each limit:
   //   "AI"     the AI engine lowered this limit below the user's own value (cap)
   //   "locked" the user locked it; the AI never changes it
+  //   "dose"   the missed daily dose rule lowered it 15 % until a daily dose is logged
   //   "!"      the limit is inside the room's usual range, so it will alarm often
   const badgeClass = "text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider";
   const limitBadges = (name: LimitName) => {
     const effective = config[`${name}_threshold` as `${LimitName}_threshold`];
     const cap = config.caps[name] ?? effective;
+    const ruleOn = config.doseBase != null && !config.locked[name];
+    const aiLimit = config.doseBase?.[name] ?? effective; // what the AI set, before the rule
     const roomTop = roomNormal?.[`${name}_threshold`];
     return (
       <>
         {config.locked[name] ? (
           <span className={`${badgeClass} bg-zinc-500/20 text-zinc-400`} title="Locked: the AI never changes this limit">locked</span>
-        ) : config.ai_optimization_enabled && aiStage && effective < cap ? (
+        ) : config.ai_optimization_enabled && aiStage && aiLimit < cap ? (
           <span className={`${badgeClass} bg-blue-500/20 text-blue-400`} title={`Lowered by the AI engine (${aiStage}) from your limit of ${cap}`}>AI</span>
         ) : null}
+        {ruleOn && (
+          <span className={`${badgeClass} bg-orange-500/20 text-orange-400`} title={`Daily inhaler dose missed: 15 % lower until one is logged (normally ${round1(aiLimit)})`}>dose</span>
+        )}
         {roomTop != null && effective < roomTop && (
           <span className={`${badgeClass} bg-amber-500/20 text-amber-400`} title={`Your room usually reaches ${roomTop}, above this limit: expect frequent alerts`}>!</span>
         )}
