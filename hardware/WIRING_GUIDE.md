@@ -116,6 +116,8 @@ Pin 1 is marked on the sensor's connector; cable colours vary between suppliers,
 
 The 150 Ω and 220 µF are required by the datasheet: the capacitor supplies the LED's short current pulse. The firmware multiplies the reading by 1.5 to undo the divider (`DUST_DIVIDER_RATIO`). The GP2Y1014AU0F has the same pinout and wiring.
 
+**Wire colours are not standardised** between cable suppliers; identify pins by position (pin 6, Vcc, is the red wire at one end of the connector). **Calibration:** each sensor has its own clean-air output (0-1.5 V). The firmware learns it as the lowest reading since power-on and converts the rise above it with the datasheet's typical sensitivity (0.5 V per 100 µg/m³). Power the device up in clean air; the Serial Monitor shows the learned baseline. The value is an estimated dust density, not a size-selective PM2.5 measurement.
+
 ### LCD 16×2 (PCF8574T backpack) through the BSS138 level shifter
 The backpack runs on 5 V and pulls SDA/SCL up to 5 V, so the I2C lines go through the level shifter.
 
