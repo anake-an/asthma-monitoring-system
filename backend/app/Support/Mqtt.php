@@ -71,6 +71,26 @@ class Mqtt
         $this->publish(self::topic($device->device_token, 'config'), json_encode($config->toDevicePayload()), true);
     }
 
+    /**
+     * Re-publish every device's current thresholds as retained config and return how many
+     * were sent. The MQTT worker runs this on start, i.e. after every backend deploy, so a
+     * migration that changes limits in the database also reaches devices still holding the
+     * old retained message (a gas limit of 300 once stayed on a device after the ppm change).
+     */
+    public function syncAllConfigs(): int
+    {
+        $count = 0;
+        foreach (Device::with('user')->whereNotNull('user_id')->get() as $device) {
+            if (!$device->user) {
+                continue;
+            }
+            $this->publishConfig($device, HardwareConfig::forUser($device->user));
+            $count++;
+        }
+
+        return $count;
+    }
+
     public function clearConfig(Device $device): void
     {
         // An empty retained payload deletes the retained message on the broker.

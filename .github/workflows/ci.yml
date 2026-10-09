@@ -181,3 +181,14 @@ jobs:
 
       - name: Syntax check
         run: python -m py_compile main.py
+
+      # Regression test: a password with '@' once made the engine connect to host '...@db'.
+      - name: Database URL keeps special characters in the password
+        env:
+          DB_USERNAME: respiro
+          DB_PASSWORD: 'p@ss:w/rd#1'
+          MODEL_DIR: /tmp/models
+        run: >
+          python -c "import main; u = main.engine.url;
+          assert (u.username, u.password, u.host, u.database) == ('respiro', 'p@ss:w/rd#1', 'db', 'asthma_db'), repr(u);
+          print('ok', repr(u))"

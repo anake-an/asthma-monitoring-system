@@ -13,7 +13,12 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 - The backend serves 4 requests in parallel (`PHP_CLI_SERVER_WORKERS`) instead of one at a time.
 - `WIRING_GUIDE.md` rewritten for the reference kit: MB-102 split power, BSS138 level shifter on the LCD, GP2Y1010AU0F (150 Ω from 220 ∥ 470 Ω), DHT22 module, passive buzzer through 220 Ω, pin summary, bring-up order, power-on order.
 
+### Fixed
+- **AI engine could never reach the database** when the DB password contains `@` (and other URL characters): the connection string was assembled by text, so MySQL saw a host like `…@db`. Prediction hid it (it checks for a model file first); training failed with a 500, so the AI could not leave Learning mode. The URL is now built from parts (`URL.create`), with a CI regression check.
+- **Devices kept stale limits after a deploy:** the MQTT worker re-publishes every device's current limits as retained config whenever it starts, so database changes (like the gas limit moving to ppm) reach devices that still held the old retained message.
+
 ### Fixed (honest wording)
+- **AI panel, Stage 1:** shown as a room anomaly level (Normal / Unusual / Very unusual) instead of an "Attack Probability" percentage; Stage 1 returns one of three fixed levels, not a calculated probability. Stage 2 is labelled "Episode risk in the next hour (model estimate)".
 - **Dust level** uses fixed published bands instead of a fraction of the user's alert limit (which called 21 µg/m³ "Hazardous"): Low ≤ 15 (WHO 2021 24-h guideline), Moderate ≤ 35, High > 35 µg/m³ (MAAQS 2020 24-h limit). The value is labelled "PM2.5 (est.)".
 - The air-quality card shows "Gas High" when gas exceeds its limit (it used to ignore gas while the warning banner counted it).
 - **No unearned "AI" claims:** limit badges show "AI" only while the AI engine has a model (Stage 1 or 2) and AI optimisation is on, and nothing while it is still learning; banners say "Cough-like Sound Detected" and "Warning: Alert Limit Exceeded"; the rescue-dose notice states its rule; the doctor report no longer mentions an "acoustic AI model"; subtitles drop "Edge AI".

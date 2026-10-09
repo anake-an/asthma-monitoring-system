@@ -80,6 +80,13 @@ export default function AiRiskAssessment() {
     riskText = "Learning";
   }
 
+  // Stage 1 (no episodes logged yet) returns one of three fixed levels, 0.1 / 0.5 / 0.8, from how far
+  // the room is from its own normal readings. That is an anomaly level, not a calculated probability,
+  // so it is shown in words. Stage 2 is a Random Forest estimate and is shown as a percentage.
+  const isStage1 = !isLearning && activePrediction.model_stage.startsWith("Stage 1");
+  const anomalyText = riskPercent > 70 ? "Very unusual" : riskPercent > 40 ? "Unusual" : "Normal";
+  if (isStage1) riskText = riskPercent > 70 ? "High" : riskPercent > 40 ? "Moderate" : "Low";
+
   return (
     <div className="bg-white dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 h-full flex flex-col relative overflow-hidden group hover:border-indigo-500/30 transition-colors duration-500">
       
@@ -102,11 +109,17 @@ export default function AiRiskAssessment() {
         <div className="flex items-end justify-between">
           <div>
             <div className="flex items-baseline gap-1">
-              <span className={`text-4xl lg:text-5xl font-semibold tracking-tight ${riskColor}`}>
-                {isLearning ? "--" : `${riskPercent}%`}
+              <span className={`${isStage1 ? "text-2xl lg:text-3xl" : "text-4xl lg:text-5xl"} font-semibold tracking-tight ${riskColor}`}>
+                {isLearning ? "--" : isStage1 ? anomalyText : `${riskPercent}%`}
               </span>
             </div>
-            <div className="text-sm text-zinc-600 dark:text-zinc-400 font-medium mt-1">{isLearning ? "Collecting data, no prediction yet" : "Attack Probability"}</div>
+            <div className="text-sm text-zinc-600 dark:text-zinc-400 font-medium mt-1">
+              {isLearning
+                ? "Collecting data, no prediction yet"
+                : isStage1
+                  ? "Room anomaly level (no episodes logged yet)"
+                  : "Episode risk in the next hour (model estimate)"}
+            </div>
           </div>
           <div className={`px-3 py-1 rounded-full text-xs font-semibold ${riskBg} ${riskColor}`}>
             {riskText}
