@@ -1,0 +1,67 @@
+# Changelog
+
+All notable changes to RespiroSync. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
+
+## [5.0.0] - 2026-10-09
+
+A security and honesty release. **Not a drop-in upgrade from 4.3.0:** the broker now requires credentials, the MQTT topics changed, both firmwares must be re-flashed and the Pico microphone rewired. See "Upgrading from 4.3.0" below.
+
+### Breaking
+- **MQTT broker requires authentication.** Anonymous access is off on every listener. Two accounts: `respirosync_backend` (API, worker, scheduler) and `respirosync_device` (shared by devices). An ACL pins each device, connected with its pairing token as client id, to its own topics.
+- **New topic layout** per device: `respirosync/devices/<token>/{telemetry,events,config,commands}`. The old `respirosync/telemetry` and `asthma/config` topics are gone.
+- **ESP32 firmware:** broker URL and device password move to a gitignored `secrets.h` (copy `secrets.example.h`). `esp32_firmware.example.ino` is removed.
+- **Pico firmware rewritten** for the arduino-pico `I2S` API (the 4.3.0 sketch did not compile). Microphone pins change to SCK GP14, WS GP15, SD GP13.
+- **10 kΩ / 20 kΩ voltage dividers** are required on the MQ-135 and Sharp dust sensor outputs (5 V sensors into 3.3 V ESP32 inputs).
+- **Laravel 11 → 12** and `laravel-notification-channels/webpush` 8 → 13 (see Security).
+- New required `.env` values: `MQTT_USERNAME`, `MQTT_PASSWORD` (root `.env`), `FRONTEND_URL` (`backend/.env`).
+
+### Security
+- Fixed: one account could read or verify another account's cough events, inhaler logs and reports (IDOR). All data is now scoped to the signed-in account.
+- Upgraded to Laravel 12.69: Laravel 11 no longer receives security fixes, and CVE-2026-48019 (CRLF injection through the `email` validation rule) is fixed only in 12.60+.
+- The database seeder no longer creates the public login `admin@asthma.local` / `password123`. It refuses to run in production.
+- Removed the `clear:data` command, which deleted every account's data without confirmation.
+- Tests refuse to run against anything but in-memory SQLite. Running them inside the production container used to wipe the live database.
+- Password-reset links now expire after 60 minutes.
+- Bumped Next.js to 14.2.35 (CVE-2025-55184, CVE-2025-66478).
+- Service ports bound to `127.0.0.1` only; no default fallbacks for secrets in `docker-compose.yaml`.
+- Committed `backend/composer.lock` (audited: no advisories, no abandoned packages).
+
+### Changed
+- **Honest outputs.** The alert email no longer shows an invented "98.5%" confidence; the Pico reports a 0-1 detection *strength* (a loudness heuristic, not a probability). The AI panel shows "Learning mode" instead of a placeholder risk percentage. Removed the made-up "estimated next inhaler" metric.
+- **Alert rule:** 3 coughs in 10 minutes, or 2 when one has strength ≥ 0.8. A single loud sound is logged but never alerts. At most one email per device per 10 minutes.
+- **AI engine** trains one model per account (`?user_id=` required), stores models in the `ai_models` volume, excludes coughs marked as false alarms, and validates on the most recent 25% of data.
+- AI threshold optimization (`ai:optimize`) runs every 5 minutes per account. While enabled, it overwrites manual thresholds.
+- Thresholds (`hardware_configs`) are per account; inhaler logs record their account.
+- The backend runs `php artisan migrate --force` on every start.
+- ESP32: local threshold alarm that works offline, verified TLS, corrected dust formula, LCD and LED status feedback.
+- Docs moved to `docs/` (`PROJECT_EXPLANATION.md`, `OPERATIONS.md`); README lists them.
+
+### Added
+- GitHub Actions CI: backend tests, frontend type check and build, AI engine check.
+- Reset-password page in the dashboard.
+- Laravel application skeleton (artisan, bootstrap, config, public, tests) committed to the repo.
+- `.env.example` files, `SECURITY.md`, this changelog.
+
+### Fixed
+- Cough alerts compared database-generated timestamps with the app clock; with different timezones, alerts never fired. Timestamps are now written by the app.
+- A failed DHT22 read is stored as empty, not as a fake value. Cough messages no longer create fake telemetry rows.
+- PM2.5 shows one decimal place in sleep mode; stale UI flash during login/logout; TypeScript error in the AI panel.
+
+### Removed
+- `TestDataSeeder` (written for the pre-devices schema) and `frontend/apply-light-mode.js` (one-off script).
+
+### Upgrading from 4.3.0
+1. Back up the database and the project folder (`docs/OPERATIONS.md`, section 2).
+2. Create the broker password file with both accounts and add `MQTT_USERNAME` / `MQTT_PASSWORD` to `.env` (README, "Broker credentials"). Add `FRONTEND_URL` to `backend/.env`.
+3. Pull and restart. Migrations run automatically.
+4. Rewire the Pico microphone and add the two voltage dividers (`hardware/WIRING_GUIDE.md`).
+5. Fill in `secrets.h`, flash both boards, and pair each ESP32 with a token from the dashboard.
+
+## [4.3.0] - 2026-10-08
+
+Initial public release.
+
+> **Superseded.** 4.3.0 runs an open MQTT broker and has the cross-account data access fixed in 5.0.0. Do not deploy it.
+
+[5.0.0]: https://github.com/anake-an/asthma-monitoring-system/compare/v4.3.0...v5.0.0
+[4.3.0]: https://github.com/anake-an/asthma-monitoring-system/releases/tag/v4.3.0
