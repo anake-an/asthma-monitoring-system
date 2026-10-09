@@ -4,7 +4,7 @@ import { useRooms } from "@/lib/rooms";
 
 export default function InhalerTracker() {
   // Doses belong to the child of the room on screen.
-  const { patientId, patients } = useRooms();
+  const { patientId, patients, canLogDose } = useRooms();
   const patientName = patients.find(p => p.id === patientId)?.name;
   const [lastUsed, setLastUsed] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -126,7 +126,9 @@ export default function InhalerTracker() {
         </div>
         <button
           onClick={handleManualLogClick}
-          className="w-full sm:w-auto px-3 py-1.5 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-500/20 text-[11px] font-medium rounded transition-colors"
+          disabled={!canLogDose}
+          title={canLogDose ? undefined : "Viewers cannot log doses"}
+          className="w-full sm:w-auto px-3 py-1.5 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-500/20 text-[11px] font-medium rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Log Dose
         </button>

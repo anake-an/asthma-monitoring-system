@@ -20,7 +20,8 @@ export type Patient = {
   id: number;
   name: string;
   birth_year: number | null;
-  role: "owner" | "caregiver" | "viewer";
+  role: "owner" | "caregiver" | "viewer"; // my role for this child
+  alerts: boolean; // whether I get its cough alerts
   devices: { id: number; name: string; status: string }[];
 };
 
@@ -31,6 +32,8 @@ type Rooms = {
   device: Device | null; // the room on screen
   deviceId: number | null;
   patientId: number | null; // that room's child (or the first child for a shared room / no room)
+  canLogDose: boolean; // log doses for that child: owner or caregiver
+  canMarkCoughs: boolean; // mark the room's coughs: its owner, or owner/caregiver of its child
   selectDevice: (id: number) => void;
   refresh: () => Promise<void>;
 };
@@ -85,6 +88,9 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
   // The chosen room while it still exists, else the most recently seen one (the API's order).
   const device = devices.find(d => d.id === chosen) ?? devices[0] ?? null;
   const patientId = device?.patient_id ?? patients.find(p => p.role === "owner")?.id ?? patients[0]?.id ?? null;
+  const roleOf = (id: number | null | undefined) => patients.find(p => p.id === id)?.role;
+  const canLogDose = ["owner", "caregiver"].includes(roleOf(patientId) ?? "");
+  const canMarkCoughs = !!device?.can_configure || ["owner", "caregiver"].includes(roleOf(device?.patient_id) ?? "");
 
   const selectDevice = useCallback((id: number) => {
     setChosen(id);
@@ -94,7 +100,7 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <RoomsContext.Provider value={{ loaded, devices, patients, device, deviceId: device?.id ?? null, patientId, selectDevice, refresh }}>
+    <RoomsContext.Provider value={{ loaded, devices, patients, device, deviceId: device?.id ?? null, patientId, canLogDose, canMarkCoughs, selectDevice, refresh }}>
       {children}
     </RoomsContext.Provider>
   );
