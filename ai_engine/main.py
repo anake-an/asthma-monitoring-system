@@ -53,6 +53,39 @@ DEFAULT_THRESHOLDS = {
 }
 
 
+# Safety range for any automatically suggested limit (DESIGN_MULTI_PATIENT.md section 5.4).
+LIMIT_RANGE = {
+    "pm25_threshold": (15.0, 55.0),
+    "temperature_threshold": (26.0, 38.0),
+    "humidity_threshold": (55.0, 90.0),
+    "mq135_threshold": (700.0, 3000.0),
+}
+ROOM_FEATURE = {"pm25_threshold": "pm25_level", "temperature_threshold": "temperature", "humidity_threshold": "humidity"}
+
+
+def respect_room_normal(thresholds: dict, baseline: dict | None) -> dict:
+    """The AI may tighten limits, but never below the room's own normal range (learned mean + 2 std):
+    a limit inside the normal range alarms all the time. Every limit also stays within LIMIT_RANGE.
+    Example: a room that is normally 69.6 +/- 2 % humidity never gets a humidity limit below 73.6 %."""
+    out = {}
+    for key, value in thresholds.items():
+        feature = ROOM_FEATURE.get(key)
+        if baseline and feature:
+            value = max(value, baseline[f"{feature}_mean"] + 2 * baseline[f"{feature}_std"])
+        low, high = LIMIT_RANGE[key]
+        out[key] = round(min(max(value, low), high), 1)
+    return out
+
+
+def room_baseline(df: pd.DataFrame) -> dict:
+    """Mean and spread of each room reading over the training data (spread floored by MIN_STD)."""
+    baseline = {}
+    for col in ("pm25_level", "temperature", "humidity"):
+        baseline[f"{col}_mean"] = safe_val(df[col].mean())
+        baseline[f"{col}_std"] = max(safe_val(df[col].std(), 0.0), MIN_STD[col])
+    return baseline
+
+
 def model_path(user_id: int) -> str:
     return os.path.join(MODEL_DIR, f"user_{user_id}_model.pkl")
 
@@ -149,12 +182,11 @@ def train_model(user_id: int = Query(..., ge=1)):
 
     X, y = df[FEATURES], df["target_attack_soon"]
 
+    # The room's normal range is kept at both stages: predict() never sets a limit inside it.
+    baseline = room_baseline(df)
+    joblib.dump(baseline, baseline_path(user_id))
+
     if y.sum() == 0:
-        baseline = {}
-        for col in ("pm25_level", "temperature", "humidity"):
-            baseline[f"{col}_mean"] = safe_val(df[col].mean())
-            baseline[f"{col}_std"] = max(safe_val(df[col].std(), 0.0), MIN_STD[col])
-        joblib.dump(baseline, baseline_path(user_id))
         if os.path.exists(model_path(user_id)):
             os.remove(model_path(user_id))
         return {"message": "No asthma events recorded yet. Stage 1 baseline (anomaly detection) created.",
@@ -230,8 +262,6 @@ def predict_attack(user_id: int = Query(..., ge=1)):
                           ("humidity_threshold", "humidity")):
             thresholds[key] -= thresholds[key] * imp[feat] * probability * 0.5
         thresholds["mq135_threshold"] -= thresholds["mq135_threshold"] * probability * 0.3
-        floors = {"pm25_threshold": 15.0, "temperature_threshold": 26.0, "humidity_threshold": 55.0, "mq135_threshold": 700.0}
-        thresholds = {k: round(max(floors[k], v), 1) for k, v in thresholds.items()}
         stage = "Stage 2 (Personalised)"
     else:
         b = joblib.load(baseline_path(user_id))
@@ -244,6 +274,10 @@ def predict_attack(user_id: int = Query(..., ge=1)):
         elif probability > 0.4:
             thresholds = {"pm25_threshold": 25.0, "temperature_threshold": 32.0, "humidity_threshold": 65.0, "mq135_threshold": 900.0}
         stage = "Stage 1 (Anomaly Detection)"
+
+    # Never inside the room's normal range, always within the safety range (both stages).
+    room = joblib.load(baseline_path(user_id)) if has_stage1 else None
+    thresholds = respect_room_normal(thresholds, room)
 
     return {
         "model_stage": stage,

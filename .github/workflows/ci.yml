@@ -182,6 +182,11 @@ jobs:
       - name: Syntax check
         run: python -m py_compile main.py
 
+      - name: AI limits never inside the room's normal range
+        env:
+          MODEL_DIR: /tmp/models
+        run: python test_thresholds.py
+
       # Regression test: a password with '@' once made the engine connect to host '...@db'.
       - name: Database URL keeps special characters in the password
         env:

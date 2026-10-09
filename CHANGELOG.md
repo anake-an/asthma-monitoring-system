@@ -15,6 +15,7 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ### Fixed
 - **AI engine could never reach the database** when the DB password contains `@` (and other URL characters): the connection string was assembled by text, so MySQL saw a host like `…@db`. Prediction hid it (it checks for a model file first); training failed with a 500, so the AI could not leave Learning mode. The URL is now built from parts (`URL.create`), with a CI regression check.
+- **AI limits alarmed in a normal room:** Stage 1 picked one of three fixed limit sets that ignored the room's own normal, e.g. humidity 65 % in a room that is normally 69.6 %. The AI may still tighten limits, but never below the room's learned normal range (mean + 2 standard deviations) and always within a safety range (PM2.5 15-55 µg/m³, temperature 26-38 °C, humidity 55-90 %, gas 700-3000 ppm). The room baseline is now saved at both training stages. CI checks the rule with a real baseline.
 - **Devices kept stale limits after a deploy:** the MQTT worker re-publishes every device's current limits as retained config whenever it starts, so database changes (like the gas limit moving to ppm) reach devices that still held the old retained message.
 
 ### Fixed (honest wording)
