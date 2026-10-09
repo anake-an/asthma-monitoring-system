@@ -38,6 +38,55 @@ jobs:
       - name: Run tests
         run: php artisan test
 
+  migrations:
+    name: Migrations on MySQL 8 (same engine as production)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-only
+          MYSQL_DATABASE: asthma_db
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pci-only"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_DATABASE: asthma_db
+      DB_USERNAME: root
+      DB_PASSWORD: ci-only
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, pdo_mysql, bcmath, gmp, curl, openssl, intl
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate --ansi
+
+      # Column changes (->change(), charset) behave differently on MySQL than on SQLite.
+      - name: Migrate, roll back the last two, migrate again
+        run: |
+          php artisan migrate --force
+          php artisan migrate:rollback --step=2 --force
+          php artisan migrate --force
+          php artisan migrate:status
+
   frontend:
     name: Frontend type check and build (Next.js)
     runs-on: ubuntu-latest
