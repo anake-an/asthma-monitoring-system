@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import InhalerTracker from "./InhalerTracker";
+import { dustLevel, DUST_LABEL, DUST_BANDS_NOTE } from "@/lib/dustBands";
 
 type Telemetry = {
   pm25_level: number;
@@ -90,11 +91,12 @@ export default function LiveMonitor() {
     return () => clearInterval(interval);
   }, []);
 
+  // Fixed published bands (lib/dustBands.ts), independent of the user's alert limit.
   const getAqiInfo = (pm25: number) => {
-    if (pm25 <= config.pm25_threshold * 0.3) return { text: "Excellent", color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", bar: "bg-emerald-400" };
-    if (pm25 <= config.pm25_threshold * 0.8) return { text: "Fair", color: "text-yellow-400", bg: "bg-yellow-400/10", border: "border-yellow-400/20", bar: "bg-yellow-400" };
-    if (pm25 <= config.pm25_threshold) return { text: "Poor", color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20", bar: "bg-orange-400" };
-    return { text: "Hazardous", color: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/20", bar: "bg-red-400" };
+    const level = dustLevel(pm25);
+    if (level === "low") return { text: DUST_LABEL.low, color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", bar: "bg-emerald-400" };
+    if (level === "moderate") return { text: DUST_LABEL.moderate, color: "text-yellow-400", bg: "bg-yellow-400/10", border: "border-yellow-400/20", bar: "bg-yellow-400" };
+    return { text: DUST_LABEL.high, color: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/20", bar: "bg-red-400" };
   };
 
   // Card status: gas over its limit takes priority over the dust level.
@@ -154,7 +156,7 @@ export default function LiveMonitor() {
                 ></div>
               </div>
               <div className="flex justify-between items-center mt-1">
-                <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium">PM2.5</p>
+                <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium" title={DUST_BANDS_NOTE}>PM2.5 (est.)</p>
                 <p className="text-[10px] sm:text-xs text-zinc-600 font-medium flex items-center whitespace-nowrap">
                   Limit: {config.pm25_threshold} {config.ai_optimization_enabled && <span className="bg-blue-500/20 text-blue-400 text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider" title="AI optimisation is on: these limits are adjusted automatically once the model has enough data">auto</span>}
                 </p>
@@ -182,6 +184,7 @@ export default function LiveMonitor() {
               </div>
             </div>
           </div>
+          <p className="mt-6 text-[10px] leading-snug text-zinc-500 dark:text-zinc-500 font-light">{DUST_BANDS_NOTE}</p>
         </div>
 
         {/* Room Climate Card */}
