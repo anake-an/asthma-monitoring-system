@@ -16,7 +16,7 @@ class HardwareConfig extends Model
         'pm25_threshold' => 35.0,
         'temperature_threshold' => 35.0,
         'humidity_threshold' => 60.0,
-        'mq135_threshold' => 300.0,
+        'mq135_threshold' => 1000.0, // estimated ppm (CO2-equivalent); ~1000 is a common ventilation guide
         'is_buzzer_muted' => false,
         'ai_optimization_enabled' => true,
     ];

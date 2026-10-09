@@ -28,7 +28,7 @@ The cloud platform features a responsive, dark-mode native dashboard designed fo
 | Feature | Technology Used | Description |
 |---|---|---|
 | **Acoustic cough detection** | `Raspberry Pi Pico` | INMP441 I2S microphone. A sound-level heuristic flags short loud bursts and reports a 0–1 *detection strength*. It cannot yet tell a cough from other loud sounds (see `hardware/README.md`, Phase 2). |
-| **Environmental Telemetry** | `ESP32` | DHT22 (temp/humidity), MQ-135 (gas, raw ADC), Sharp GP2Y1010AU0F (dust). Local passive-buzzer/LED alarm when a reading crosses its threshold, even offline. |
+| **Environmental Telemetry** | `ESP32` | DHT22 (temp/humidity), MQ-135 (gas, estimated CO₂-equivalent ppm, self-calibrated), Sharp GP2Y1010AU0F (dust, self-calibrated estimate). Sent every 3 s, smoothed over ~12 s. Local passive-buzzer/LED alarm when a reading crosses its threshold, even offline. |
 | **Secure IoT Transport** | `Mosquitto + Cloudflare Tunnel` | MQTT over WSS. No anonymous access; each device can only publish/subscribe under its own token (broker ACL). |
 | **Predictive AI Engine** | `Python / scikit-learn` | One model per account. Stage 1: anomaly check against the room's own baseline. Stage 2: Random Forest predicting an asthma-like event in the next hour, with held-out validation. Caregiver "false alarm" labels are excluded from training. |
 | **REST API & Workers** | `Laravel 12 / PHP 8.2` | API, MQTT worker, scheduler. All data is scoped to the signed-in account. |
@@ -58,7 +58,7 @@ graph LR
 |---|---|---|
 | `respirosync/devices/<token>/telemetry` | device → cloud | `{"pm25_level":12.3,"temperature":29.1,"humidity":70,"mq135_level":410}` (`null` for a failed sensor) |
 | `respirosync/devices/<token>/events` | device → cloud | `{"event":"cough","level":2,"confidence":0.42}` (`confidence` = Pico detection strength) |
-| `respirosync/devices/<token>/config` | cloud → device (retained) | `{"pm25_threshold":35,"temperature_threshold":35,"humidity_threshold":60,"mq135_threshold":300,"is_buzzer_muted":false}` |
+| `respirosync/devices/<token>/config` | cloud → device (retained) | `{"pm25_threshold":35,"temperature_threshold":35,"humidity_threshold":60,"mq135_threshold":1000,"is_buzzer_muted":false}` |
 | `respirosync/devices/<token>/commands` | cloud → device | `{"command":"factory_reset"}`, `buzzer_on`, `buzzer_off` |
 
 The device connects with **client id = its 6-character token**; `mosquitto/config/acl` restricts it to its own four topics.

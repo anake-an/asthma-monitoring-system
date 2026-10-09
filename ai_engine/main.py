@@ -45,7 +45,7 @@ DEFAULT_THRESHOLDS = {
     "pm25_threshold": 35.0,
     "temperature_threshold": 35.0,
     "humidity_threshold": 75.0,  # Malaysian indoor baseline
-    "mq135_threshold": 300.0,
+    "mq135_threshold": 1000.0,  # estimated ppm (CO2-equivalent) from the firmware
 }
 
 
@@ -226,7 +226,7 @@ def predict_attack(user_id: int = Query(..., ge=1)):
                           ("humidity_threshold", "humidity")):
             thresholds[key] -= thresholds[key] * imp[feat] * probability * 0.5
         thresholds["mq135_threshold"] -= thresholds["mq135_threshold"] * probability * 0.3
-        floors = {"pm25_threshold": 15.0, "temperature_threshold": 26.0, "humidity_threshold": 55.0, "mq135_threshold": 150.0}
+        floors = {"pm25_threshold": 15.0, "temperature_threshold": 26.0, "humidity_threshold": 55.0, "mq135_threshold": 700.0}
         thresholds = {k: round(max(floors[k], v), 1) for k, v in thresholds.items()}
         stage = "Stage 2 (Personalised)"
     else:
@@ -236,9 +236,9 @@ def predict_attack(user_id: int = Query(..., ge=1)):
                 (hum - b["humidity_mean"]) / b["humidity_std"])
         probability = 0.8 if z > 2.5 else 0.5 if z > 1.5 else 0.1
         if probability > 0.7:
-            thresholds = {"pm25_threshold": 20.0, "temperature_threshold": 30.0, "humidity_threshold": 60.0, "mq135_threshold": 150.0}
+            thresholds = {"pm25_threshold": 20.0, "temperature_threshold": 30.0, "humidity_threshold": 60.0, "mq135_threshold": 800.0}
         elif probability > 0.4:
-            thresholds = {"pm25_threshold": 25.0, "temperature_threshold": 32.0, "humidity_threshold": 65.0, "mq135_threshold": 200.0}
+            thresholds = {"pm25_threshold": 25.0, "temperature_threshold": 32.0, "humidity_threshold": 65.0, "mq135_threshold": 900.0}
         stage = "Stage 1 (Anomaly Detection)"
 
     return {

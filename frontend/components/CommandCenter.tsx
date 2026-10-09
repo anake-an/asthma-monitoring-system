@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { GAS_NOTE, GAS_DEFAULT_LIMIT_PPM } from "@/lib/gas";
 
 export function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -17,7 +18,7 @@ export default function CommandCenter() {
     pm25_threshold: 35, 
     temperature_threshold: 35, 
     humidity_threshold: 60, 
-    mq135_threshold: 300,
+    mq135_threshold: GAS_DEFAULT_LIMIT_PPM,
     is_buzzer_muted: false,
     ai_optimization_enabled: true
   });
@@ -67,7 +68,7 @@ export default function CommandCenter() {
         pm25_threshold: Math.round(data.pm25_threshold || 35),
         temperature_threshold: Math.round(data.temperature_threshold || 35),
         humidity_threshold: Math.round(data.humidity_threshold || 60),
-        mq135_threshold: Math.round(data.mq135_threshold || 300),
+        mq135_threshold: Math.round(data.mq135_threshold || GAS_DEFAULT_LIMIT_PPM),
         is_buzzer_muted: data.is_buzzer_muted || false,
         ai_optimization_enabled: data.ai_optimization_enabled !== undefined ? data.ai_optimization_enabled : true
       }))
@@ -404,19 +405,19 @@ export default function CommandCenter() {
                 <div className="flex justify-between items-center mb-1">
                   <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Air Gas Limit (VOCs)</label>
                   <span className="text-lg font-semibold text-indigo-400">
-                    {config.mq135_threshold} <span className="text-xs text-zinc-600 dark:text-zinc-400 font-normal" title="Raw MQ-135 sensor reading (0-4095), not ppm">raw</span>
+                    {config.mq135_threshold} <span className="text-xs text-zinc-600 dark:text-zinc-400 font-normal" title={GAS_NOTE}>ppm (est.)</span>
                   </span>
                 </div>
-                <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-4 font-light">Warns if household chemicals or smoke are detected</p>
+                <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-4 font-light">Estimated CO2-equivalent; also reacts to smoke and household chemicals</p>
                 <input
-                  type="range" min="50" max="1000" step="10"
+                  type="range" min="450" max="3000" step="50"
                   disabled={config.ai_optimization_enabled}
                   value={config.mq135_threshold}
                   onChange={(e) => setConfig({...config, mq135_threshold: Number(e.target.value)})}
                   className="w-full accent-indigo-500"
                 />
                 <div className="flex justify-between text-[10px] text-zinc-600 dark:text-zinc-400 mt-2 font-medium">
-                  <span>50 (Fresh)</span><span>500 (Noticeable)</span><span>1000 (Strong)</span>
+                  <span>450 (Fresh air)</span><span>1000 (Ventilate)</span><span>3000 (Poor)</span>
                 </div>
               </div>
 

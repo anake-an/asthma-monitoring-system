@@ -14,16 +14,20 @@ use Illuminate\Http\Request;
 class DashboardController extends Controller
 {
     /**
-     * Latest 100 telemetry rows from the user's devices.
+     * Latest telemetry rows from the user's devices (?limit=1..100, default 100).
+     * X-Server-Time (Unix ms) lets the dashboard judge "offline" by the server clock
+     * instead of the viewer's computer clock, which may be off by tens of seconds.
      */
     public function getTelemetry(Request $request)
     {
+        $limit = min(max((int) $request->query('limit', 100), 1), 100);
+
         $logs = TelemetryLog::whereIn('device_id', $this->deviceIds($request))
             ->orderBy('recorded_at', 'desc')
-            ->take(100)
+            ->take($limit)
             ->get();
 
-        return response()->json($logs);
+        return response()->json($logs)->header('X-Server-Time', (string) now()->getTimestampMs());
     }
 
     /**

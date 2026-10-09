@@ -52,6 +52,9 @@ services:
     environment:
       <<: *laravel-env
       MAIL_FROM_NAME: "RespiroSync Dashboard"
+      # artisan serve handles one request at a time by default; the dashboard polls several
+      # endpoints every few seconds, so a slow request (e.g. the AI engine) delayed all the others.
+      PHP_CLI_SERVER_WORKERS: 4
     depends_on:
       - db
       - mqtt

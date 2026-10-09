@@ -7,13 +7,16 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 ### Changed
 - **ESP32 firmware drives a passive buzzer** with a 2.7 kHz `tone()` (alarm, cough chirp, cloud `buzzer_on`); idles low so no DC flows through a magnetic coil.
 - **Dust sensor self-calibrates:** the clean-air baseline is learned as the lowest reading since boot, readings average 25 LED pulses, and the rise is converted with the datasheet's typical sensitivity. The fixed formula reported 0.0 on sensors with a low clean-air output.
-- Dashboard shows a device offline after 30 s without data (was 90 s).
+- **Gas is an estimated CO₂-equivalent ppm** instead of the raw ADC value: the firmware applies the MQ-135 datasheet curve, calibrated against the cleanest air seen since power-on (420 ppm). Default gas limit 1000 ppm everywhere (firmware, backend, AI engine, dashboard); a migration resets existing gas limits, which were on the raw scale. Shown as "ppm" with "(est.)" labels and an explanation on hover. **Re-flash the ESP32.**
+- **Smoother, faster updates:** the ESP32 sends every 3 s (was 5 s); dust and gas are averaged over the last 4 readings, and the local alarm uses the same smoothed values, so a single noisy reading no longer beeps without the dashboard showing it. The dashboard refreshes live values every 2 s, requests only the newest reading (`/api/telemetry?limit=1`), runs its requests in parallel and never stacks them.
+- **Offline detection by the server's clock** (`X-Server-Time`), after 20 s without data (was 90 s): a wrong clock on the viewer's computer made the device flicker between online and offline.
+- The backend serves 4 requests in parallel (`PHP_CLI_SERVER_WORKERS`) instead of one at a time.
 - `WIRING_GUIDE.md` rewritten for the reference kit: MB-102 split power, BSS138 level shifter on the LCD, GP2Y1010AU0F (150 Ω from 220 ∥ 470 Ω), DHT22 module, passive buzzer through 220 Ω, pin summary, bring-up order, power-on order.
 
 ### Fixed (honest wording)
-- **Dust level** uses fixed published bands instead of a fraction of the user's alert limit (which called 21 µg/m³ "Hazardous"): Low ≤ 15 (WHO 2021 24-h guideline), Moderate ≤ 35, High > 35 µg/m³ (MAAQS 2020 24-h limit), with a note that this is an instant, indicative reading.
-- **Gas** is labelled "raw" (MQ-135 ADC 0-4095), not "ppm"; the air-quality card shows "Gas High" when gas exceeds its limit.
-- **No unearned "AI" claims:** limit badges say "auto"; banners say "Cough-like Sound Detected" and "Warning: Alert Limit Exceeded"; the rescue-dose notice states its rule; the doctor report no longer mentions an "acoustic AI model"; subtitles drop "Edge AI".
+- **Dust level** uses fixed published bands instead of a fraction of the user's alert limit (which called 21 µg/m³ "Hazardous"): Low ≤ 15 (WHO 2021 24-h guideline), Moderate ≤ 35, High > 35 µg/m³ (MAAQS 2020 24-h limit). The value is labelled "PM2.5 (est.)".
+- The air-quality card shows "Gas High" when gas exceeds its limit (it used to ignore gas while the warning banner counted it).
+- **No unearned "AI" claims:** limit badges show "AI" only while the AI engine has a model (Stage 1 or 2) and AI optimisation is on, and nothing while it is still learning; banners say "Cough-like Sound Detected" and "Warning: Alert Limit Exceeded"; the rescue-dose notice states its rule; the doctor report no longer mentions an "acoustic AI model"; subtitles drop "Edge AI".
 - `/api/ai/predict` answers `learning: true` while there is no model or no recent data, instead of a 400 error.
 
 ### Added
