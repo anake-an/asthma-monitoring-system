@@ -106,9 +106,13 @@ class HardwareConfig extends Model
         return $changes;
     }
 
-    /** Write one LimitChange row per changed limit (shown in the Activity Log). */
+    /**
+     * Write one LimitChange row per changed limit, all with the same time, so the Activity Log
+     * can show one update as one line.
+     */
     public function recordLimitChanges(array $changes, string $source, ?string $reason): void
     {
+        $now = now();
         foreach ($changes as $name => [$old, $new]) {
             LimitChange::create([
                 'user_id' => $this->user_id,
@@ -117,7 +121,7 @@ class HardwareConfig extends Model
                 'new_value' => $new,
                 'source' => $source,
                 'reason' => $reason,
-                'created_at' => now(),
+                'created_at' => $now,
             ]);
         }
     }
@@ -143,6 +147,8 @@ class HardwareConfig extends Model
     /**
      * The limits the AI may set, given its suggestions. Returns <name>_threshold => value for all four:
      *   - locked: exactly the user's value (cap);
+     *   - already moved by the AI in the current 24-hour window: unchanged until the next window,
+     *     so a room flipping between "normal" and "unusual" does not swing it (or the log) all day;
      *   - otherwise the suggestion, within +/-10 % of the limit's value at the start of the current
      *     24-hour window, and never above the cap (the cap wins even mid-window).
      */
@@ -155,8 +161,13 @@ class HardwareConfig extends Model
                 $limits["{$name}_threshold"] = $cap;
                 continue;
             }
+            $current = (float) $this->{"{$name}_threshold"};
+            $reference = (float) ($this->{"{$name}_day_start"} ?? $current);
+            if (abs($current - $reference) >= 0.05) { // one AI change per limit per window
+                $limits["{$name}_threshold"] = min($cap, $current);
+                continue;
+            }
             $suggestion = isset($suggested["{$name}_threshold"]) ? (float) $suggested["{$name}_threshold"] : $cap;
-            $reference = (float) ($this->{"{$name}_day_start"} ?? $this->{"{$name}_threshold"});
             $budgeted = max($reference * (1 - self::AI_MAX_DAILY_CHANGE), min($reference * (1 + self::AI_MAX_DAILY_CHANGE), $suggestion));
             $limits["{$name}_threshold"] = round(min($cap, $budgeted), 1);
         }

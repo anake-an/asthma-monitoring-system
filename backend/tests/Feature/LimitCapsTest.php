@@ -83,6 +83,46 @@ class LimitCapsTest extends TestCase
         $this->assertSame(60.8, HardwareConfig::forUser($this->user)->fresh()->humidity_threshold, 'second day: 67.5 - 10 %');
     }
 
+    public function test_a_flipping_room_changes_each_limit_at_most_once_per_day(): void
+    {
+        HardwareConfig::forUser($this->user); // humidity 75
+        $unusual = ['pm25_threshold' => 35.0, 'temperature_threshold' => 35.0, 'humidity_threshold' => 65.0, 'mq135_threshold' => 1000.0];
+        $normal = ['humidity_threshold' => 75.0] + $unusual;
+        $answer = fn (array $limits) => ['probability_of_attack' => 0.5, 'ready_to_adjust' => true, 'suggested_thresholds' => $limits];
+        // One answer per run (a second Http::fake would not replace the first).
+        Http::fake(['*/predict*' => Http::sequence()
+            ->push($answer($unusual))
+            ->push($answer($normal))->push($answer($unusual))->push($answer($normal))
+            ->push($answer($normal))]);
+
+        $this->artisan('ai:optimize')->assertSuccessful();
+        $this->assertSame(67.5, HardwareConfig::forUser($this->user)->fresh()->humidity_threshold);
+
+        for ($i = 0; $i < 3; $i++) { // Stage 1 flips every hour
+            $this->travel(1)->hours();
+            $this->artisan('ai:optimize')->assertSuccessful();
+            $this->assertSame(67.5, HardwareConfig::forUser($this->user)->fresh()->humidity_threshold, 'held until the next day');
+        }
+        $this->assertCount(1, $this->published);
+        $this->assertSame(1, \App\Models\LimitChange::count());
+
+        $this->travel(22)->hours(); // a new day: one more change allowed, back up by at most 10 %
+        $this->artisan('ai:optimize')->assertSuccessful();
+        $this->assertSame(74.3, HardwareConfig::forUser($this->user)->fresh()->humidity_threshold);
+    }
+
+    public function test_a_user_change_gives_the_ai_a_fresh_change_the_same_day(): void
+    {
+        HardwareConfig::forUser($this->user);
+        $this->aiSuggests(['pm25_threshold' => 35.0, 'temperature_threshold' => 35.0, 'humidity_threshold' => 65.0, 'mq135_threshold' => 1000.0]);
+        $this->artisan('ai:optimize')->assertSuccessful(); // humidity 75 -> 67.5
+
+        HardwareConfig::forUser($this->user)->fresh()->applyUserSettings(['humidity_threshold' => 80]);
+        $this->artisan('ai:optimize')->assertSuccessful();
+
+        $this->assertSame(72.0, HardwareConfig::forUser($this->user)->fresh()->humidity_threshold, '80 - 10 %');
+    }
+
     public function test_no_change_before_a_full_day_of_readings(): void
     {
         HardwareConfig::forUser($this->user);

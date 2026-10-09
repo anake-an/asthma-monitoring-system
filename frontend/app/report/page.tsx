@@ -112,6 +112,19 @@ export default function ReportPage() {
 
   const maxCount = Math.max(...last7Days.flatMap(d => [d.cough_count, d.inhaler_total]), 10); // at least 10 for scale
 
+  // One line per update: the rows of one AI run or one Smart Alerts save share time, source and reason.
+  const limitOrder = Object.keys(LIMIT_LABELS);
+  const limitUpdates: { created_at: string; source: LimitChange["source"]; reason: string | null; changes: LimitChange[] }[] = [];
+  for (const c of data.limit_changes ?? []) {
+    const last = limitUpdates[limitUpdates.length - 1];
+    if (last && last.created_at === c.created_at && last.source === c.source && last.reason === c.reason) {
+      last.changes.push(c);
+    } else {
+      limitUpdates.push({ created_at: c.created_at, source: c.source, reason: c.reason, changes: [c] });
+    }
+  }
+  limitUpdates.forEach(u => u.changes.sort((a, b) => limitOrder.indexOf(a.limit_name) - limitOrder.indexOf(b.limit_name)));
+
   return (
     <div className="bg-gray-50 dark:bg-[#09090b] print:bg-white min-h-screen text-zinc-900 dark:text-zinc-100 print:text-black font-sans transition-all selection:bg-blue-500/30 print:min-h-0 print:h-auto print:overflow-visible">
       <Head>
@@ -282,47 +295,52 @@ export default function ReportPage() {
             </div>
           </div>
 
-          {/* Alert limit changes: every change by the AI or by the user, with the reason */}
-          <div className="mb-12 bg-zinc-100 dark:bg-white/5 print:bg-transparent border border-zinc-300 dark:border-white/10 print:border-none rounded-2xl p-8 print:p-0 relative z-10 print:break-inside-avoid">
+          {/* Alert limit changes: one line per update by the AI or by the user, with the reason */}
+          <div className="mb-12 bg-zinc-100 dark:bg-white/5 print:bg-transparent border border-zinc-300 dark:border-white/10 print:border-none rounded-2xl p-8 print:p-0 relative z-10">
             <h2 className="text-lg font-semibold text-zinc-900 dark:text-white print:text-black mb-1">Alert Limit Changes</h2>
             <p className="text-xs text-zinc-600 dark:text-zinc-400 print:text-gray-600 mb-6">
-              The AI may lower a limit below your own value (at most 10 % a day), never raise it above.
+              The AI may lower a limit below your own value, never raise it above, and changes each limit at most once a day (by up to 10 %).
             </p>
-            {data.limit_changes && data.limit_changes.length > 0 ? (
+            {limitUpdates.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-[10px] uppercase tracking-widest text-zinc-600 dark:text-zinc-400 print:text-gray-600">
                       <th className="pb-3 pr-4 font-semibold">When</th>
-                      <th className="pb-3 pr-4 font-semibold">Limit</th>
                       <th className="pb-3 pr-4 font-semibold">Change</th>
                       <th className="pb-3 pr-4 font-semibold">By</th>
                       <th className="pb-3 font-semibold">Reason</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.limit_changes.map((c, i) => {
-                      const label = LIMIT_LABELS[c.limit_name] ?? { name: c.limit_name, unit: "" };
-                      return (
-                        <tr key={i} className="border-t border-zinc-300 dark:border-white/10 print:border-gray-200 text-zinc-700 dark:text-zinc-300 print:text-gray-700">
-                          <td className="py-2.5 pr-4 font-mono text-xs whitespace-nowrap">
-                            {new Date(c.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                          </td>
-                          <td className="py-2.5 pr-4 whitespace-nowrap">{label.name}</td>
-                          <td className="py-2.5 pr-4 whitespace-nowrap font-medium text-zinc-900 dark:text-white print:text-black">
-                            {c.old_value === null ? "" : `${c.old_value}${label.unit} → `}{c.new_value}{label.unit}
-                          </td>
-                          <td className="py-2.5 pr-4 whitespace-nowrap">
-                            {c.source === "ai" ? (
-                              <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-500 dark:text-blue-400 text-[10px] font-bold uppercase tracking-wider">AI</span>
-                            ) : (
-                              <span className="text-xs">You</span>
-                            )}
-                          </td>
-                          <td className="py-2.5 text-xs">{c.reason}</td>
-                        </tr>
-                      );
-                    })}
+                    {limitUpdates.map((u, i) => (
+                      <tr key={i} className="border-t border-zinc-300 dark:border-white/10 print:border-gray-200 text-zinc-700 dark:text-zinc-300 print:text-gray-700 align-top print:break-inside-avoid">
+                        <td className="py-2.5 pr-4 font-mono text-xs whitespace-nowrap">
+                          {new Date(u.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        </td>
+                        <td className="py-2.5 pr-4">
+                          {u.changes.map(c => {
+                            const label = LIMIT_LABELS[c.limit_name] ?? { name: c.limit_name, unit: "" };
+                            return (
+                              <div key={c.limit_name} className="whitespace-nowrap">
+                                {label.name}{" "}
+                                <span className="font-medium text-zinc-900 dark:text-white print:text-black">
+                                  {c.old_value === null ? "" : `${c.old_value}${label.unit} → `}{c.new_value}{label.unit}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </td>
+                        <td className="py-2.5 pr-4 whitespace-nowrap">
+                          {u.source === "ai" ? (
+                            <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-500 dark:text-blue-400 text-[10px] font-bold uppercase tracking-wider">AI</span>
+                          ) : (
+                            <span className="text-xs">You</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 text-xs">{u.reason}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
