@@ -111,15 +111,34 @@ class DeviceMessageHandler
             'recorded_at' => now(), // same clock as $since above
         ])->refresh(); // load DB defaults (is_verified, inhaler_used)
 
-        // Cooldown: at most one notification per device per window.
-        if ($isAlert && !$recentAlert && $device->user) {
-            try {
-                $device->user->notify(new CoughAlertNotification($cough, $recentCoughs));
-            } catch (\Throwable $e) {
-                // An SMTP/push failure must not kill the MQTT worker loop.
-                Log::error('Failed to send cough alert', ['device_id' => $device->id, 'error' => $e->getMessage()]);
+        // Cooldown: at most one notification per device per window, to every recipient.
+        if ($isAlert && !$recentAlert) {
+            foreach (self::alertRecipients($device) as $user) {
+                try {
+                    $user->notify(new CoughAlertNotification($cough, $recentCoughs));
+                } catch (\Throwable $e) {
+                    // An SMTP/push failure must not kill the MQTT worker loop or skip the others.
+                    Log::error('Failed to send cough alert', ['device_id' => $device->id, 'user_id' => $user->id, 'error' => $e->getMessage()]);
+                }
             }
         }
+    }
+
+    /**
+     * Who gets a room's cough alerts: every member of the room's child with alerts on (owners and
+     * caregivers by default, viewers if they switched it on), plus the account that paired the
+     * device when it is not a member of that child (e.g. a shared room). Read at alert time, so a
+     * removed member gets nothing from that moment.
+     */
+    public static function alertRecipients(Device $device): \Illuminate\Support\Collection
+    {
+        $users = $device->patient ? $device->patient->alertRecipients() : collect();
+        $ownerIsMember = $device->patient && $device->user && $device->patient->roleOf($device->user) !== null;
+        if ($device->user && !$ownerIsMember && !$users->contains('id', $device->user->id)) {
+            $users->push($device->user);
+        }
+
+        return $users->values();
     }
 
     private static function number(mixed $value, float $min, float $max): ?float

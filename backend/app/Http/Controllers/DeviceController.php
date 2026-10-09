@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AuditLog;
 use App\Models\Device;
 use App\Models\HardwareConfig;
 use App\Models\Patient;
@@ -35,6 +36,7 @@ class DeviceController extends Controller
             'name' => 'New RespiroSync ESP32',
             'status' => 'pending',
         ]);
+        AuditLog::record($user, 'device.paired', $patient->id, $device->id, ['token' => $token]);
 
         // Retained, so the ESP32 gets its room's thresholds on its very first connect.
         try {
@@ -79,13 +81,23 @@ class DeviceController extends Controller
 
         if (array_key_exists('patient_id', $validated) && $validated['patient_id'] !== null) {
             // Only into a child this user owns.
-            $patient = Patient::find($validated['patient_id']);
-            if (!$patient || $request->user()->cannot('manage', $patient)) {
-                abort(404);
-            }
+            $this->authorizeOr404($request, Patient::find($validated['patient_id']), 'manage');
         }
 
+        $before = ['name' => $device->name, 'patient' => $device->patient?->name, 'patient_id' => $device->patient_id];
         $device->update($validated);
+        $device->load('patient:id,name');
+
+        if ($device->name !== $before['name']) {
+            AuditLog::record($request->user(), 'device.renamed', $device->patient_id, $device->id, ['from' => $before['name'], 'to' => $device->name]);
+        }
+        if ((int) $device->patient_id !== (int) $before['patient_id']) {
+            $moved = ['room' => $device->name, 'from' => $before['patient'] ?? 'shared room', 'to' => $device->patient?->name ?? 'shared room'];
+            // Logged for both children, so each one's history shows the room arriving or leaving.
+            foreach (array_unique(array_filter([$before['patient_id'], $device->patient_id])) as $patientId) {
+                AuditLog::record($request->user(), 'device.moved', (int) $patientId, $device->id, $moved);
+            }
+        }
 
         return response()->json($device->fresh()->load('patient:id,name'));
     }
@@ -102,6 +114,7 @@ class DeviceController extends Controller
             Log::error('Failed to publish factory reset: ' . $e->getMessage());
         }
 
+        AuditLog::record($request->user(), 'device.removed', $device->patient_id, $device->id, ['room' => $device->name, 'token' => $device->device_token]);
         $device->delete();
 
         return response()->json(['message' => 'Device removed successfully']);

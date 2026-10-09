@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AuditLog;
 use App\Models\Patient;
 use Illuminate\Http\Request;
 
@@ -22,6 +23,7 @@ class PatientController extends Controller
                 'name' => $p->name,
                 'birth_year' => $p->birth_year,
                 'role' => $p->pivot->role,
+                'alerts' => (bool) $p->pivot->alerts, // my own cough alerts for this child
                 'devices' => $p->devices->map->only(['id', 'name', 'status'])->values(),
             ]);
 
@@ -33,6 +35,7 @@ class PatientController extends Controller
         $validated = $this->validated($request);
         $patient = Patient::create($validated);
         $patient->users()->attach($request->user()->id, ['role' => Patient::OWNER]);
+        AuditLog::record($request->user(), 'patient.created', $patient->id, null, ['name' => $patient->name]);
 
         return response()->json($patient, 201);
     }
@@ -41,7 +44,11 @@ class PatientController extends Controller
     {
         $request->merge(['patient_id' => $id]);
         $patient = $this->patient($request, 'manage');
+        $before = $patient->name;
         $patient->update($this->validated($request, partial: true));
+        if ($patient->name !== $before) {
+            AuditLog::record($request->user(), 'patient.renamed', $patient->id, null, ['from' => $before, 'to' => $patient->name]);
+        }
 
         return response()->json($patient);
     }
@@ -57,6 +64,7 @@ class PatientController extends Controller
         if ($request->user()->ownedPatients()->count() <= 1) {
             return response()->json(['message' => 'Keep at least one child: rename this one instead.'], 422);
         }
+        AuditLog::record($request->user(), 'patient.deleted', $patient->id, null, ['name' => $patient->name]);
         $patient->delete();
 
         return response()->json(['message' => 'Patient and their dose history deleted']);

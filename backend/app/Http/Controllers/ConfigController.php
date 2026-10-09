@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AuditLog;
 use App\Models\HardwareConfig;
 use App\Support\Mqtt;
 use Illuminate\Http\Request;
@@ -48,6 +49,8 @@ class ConfigController extends Controller
         $config = HardwareConfig::forDevice($device);
         // The submitted limits are the user's own values (caps); the AI may tighten below them.
         $config->applyUserSettings($validated);
+        // The limit values themselves are in limit_changes; this records who saved which settings.
+        AuditLog::record($request->user(), 'settings.saved', $device->patient_id, $device->id, array_diff_key($validated, ['device_id' => 0]));
 
         // Push the new thresholds to this device (retained).
         $synced = 0;
