@@ -11,9 +11,9 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 - `WIRING_GUIDE.md` rewritten for the reference kit: MB-102 split power, BSS138 level shifter on the LCD, GP2Y1010AU0F (150 Ω from 220 ∥ 470 Ω), DHT22 module, passive buzzer through 220 Ω, pin summary, bring-up order, power-on order.
 
 ### Fixed (honest wording)
-- **Dust level** uses fixed published bands instead of a fraction of the user's alert limit (which called 21 µg/m³ "Hazardous"): Low ≤ 15 (WHO 2021 24-h guideline), Moderate ≤ 35, High > 35 µg/m³ (MAAQS 2020 24-h limit), with a note that this is an instant, indicative reading.
+- **Dust level** uses fixed published bands instead of a fraction of the user's alert limit (which called 21 µg/m³ "Hazardous"): Low ≤ 15 (WHO 2021 24-h guideline), Moderate ≤ 35, High > 35 µg/m³ (MAAQS 2020 24-h limit). The value is labelled "PM2.5 (est.)".
 - **Gas** is labelled "raw" (MQ-135 ADC 0-4095), not "ppm"; the air-quality card shows "Gas High" when gas exceeds its limit.
-- **No unearned "AI" claims:** limit badges say "auto"; banners say "Cough-like Sound Detected" and "Warning: Alert Limit Exceeded"; the rescue-dose notice states its rule; the doctor report no longer mentions an "acoustic AI model"; subtitles drop "Edge AI".
+- **No unearned "AI" claims:** limit badges show "AI" only while the AI engine has a model (Stage 1 or 2) and AI optimisation is on, and nothing while it is still learning; banners say "Cough-like Sound Detected" and "Warning: Alert Limit Exceeded"; the rescue-dose notice states its rule; the doctor report no longer mentions an "acoustic AI model"; subtitles drop "Edge AI".
 - `/api/ai/predict` answers `learning: true` while there is no model or no recent data, instead of a 400 error.
 
 ### Added

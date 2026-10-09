@@ -16,6 +16,27 @@ export default function LiveMonitor() {
   const [coughDetected, setCoughDetected] = useState(false);
   const [isOffline, setIsOffline] = useState(true);
   const [config, setConfig] = useState({ pm25_threshold: 35, temperature_threshold: 35, humidity_threshold: 60, mq135_threshold: 300, ai_optimization_enabled: true });
+  // Stage of the AI model ("Stage 1 (Anomaly Detection)" / "Stage 2 (Personalised)"), or null while learning.
+  const [aiStage, setAiStage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchAiStage = async () => {
+      try {
+        const token = localStorage.getItem("auth_token");
+        const res = await fetch("/api/ai/predict", {
+          headers: { "Authorization": `Bearer ${token}`, "Accept": "application/json" }
+        });
+        if (!res.ok) { setAiStage(null); return; }
+        const p = await res.json();
+        setAiStage(p.learning || p.probability_of_attack == null ? null : (p.model_stage ?? "AI model"));
+      } catch {
+        setAiStage(null);
+      }
+    };
+    fetchAiStage();
+    const interval = setInterval(fetchAiStage, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -118,6 +139,15 @@ export default function LiveMonitor() {
   const isClimateBreached = data ? (data.temperature ?? -Infinity) > config.temperature_threshold || (data.humidity ?? -Infinity) > config.humidity_threshold : false;
   const isEnvironmentUnsafe = isAqiBreached || isClimateBreached;
 
+  // "AI" only when AI optimisation is on and the engine has a model: ai:optimize then applies its
+  // limits every 5 minutes. While the engine is learning, the limits are the user's or the defaults.
+  const aiBadge = config.ai_optimization_enabled && aiStage ? (
+    <span
+      className="bg-blue-500/20 text-blue-400 text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider"
+      title={`Set by the AI engine (${aiStage}), updated every 5 minutes`}
+    >AI</span>
+  ) : null;
+
   return (
     <section className="flex flex-col gap-6">
       {/* Vitals Hero Cards */}
@@ -158,7 +188,7 @@ export default function LiveMonitor() {
               <div className="flex justify-between items-center mt-1">
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium" title={DUST_BANDS_NOTE}>PM2.5 (est.)</p>
                 <p className="text-[10px] sm:text-xs text-zinc-600 font-medium flex items-center whitespace-nowrap">
-                  Limit: {config.pm25_threshold} {config.ai_optimization_enabled && <span className="bg-blue-500/20 text-blue-400 text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider" title="AI optimisation is on: these limits are adjusted automatically once the model has enough data">auto</span>}
+                  Limit: {config.pm25_threshold} {aiBadge}
                 </p>
               </div>
             </div>
@@ -179,12 +209,11 @@ export default function LiveMonitor() {
               <div className="flex justify-between items-center mt-1">
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium">Gas / VOCs</p>
                 <p className="text-[10px] sm:text-xs text-zinc-600 font-medium flex items-center whitespace-nowrap">
-                  Limit: {config.mq135_threshold} {config.ai_optimization_enabled && <span className="bg-blue-500/20 text-blue-400 text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider" title="AI optimisation is on: these limits are adjusted automatically once the model has enough data">auto</span>}
+                  Limit: {config.mq135_threshold} {aiBadge}
                 </p>
               </div>
             </div>
           </div>
-          <p className="mt-6 text-[10px] leading-snug text-zinc-500 dark:text-zinc-500 font-light">{DUST_BANDS_NOTE}</p>
         </div>
 
         {/* Room Climate Card */}
@@ -219,7 +248,7 @@ export default function LiveMonitor() {
               <div className="flex justify-between items-center mt-1">
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium">Temperature</p>
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium flex items-center whitespace-nowrap">
-                  Limit: {config.temperature_threshold}°C {config.ai_optimization_enabled && <span className="bg-blue-500/20 text-blue-400 text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider" title="AI optimisation is on: these limits are adjusted automatically once the model has enough data">auto</span>}
+                  Limit: {config.temperature_threshold}°C {aiBadge}
                 </p>
               </div>
             </div>
@@ -236,7 +265,7 @@ export default function LiveMonitor() {
               <div className="flex justify-between items-center mt-1">
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium">Humidity</p>
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium flex items-center whitespace-nowrap">
-                  Limit: {config.humidity_threshold}% {config.ai_optimization_enabled && <span className="bg-blue-500/20 text-blue-400 text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider" title="AI optimisation is on: these limits are adjusted automatically once the model has enough data">auto</span>}
+                  Limit: {config.humidity_threshold}% {aiBadge}
                 </p>
               </div>
             </div>
