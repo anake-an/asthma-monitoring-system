@@ -1,7 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useRooms } from "@/lib/rooms";
 
 export default function InhalerTracker() {
+  // Doses belong to the child of the room on screen.
+  const { patientId, patients } = useRooms();
+  const patientName = patients.find(p => p.id === patientId)?.name;
   const [lastUsed, setLastUsed] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [inhalerType, setInhalerType] = useState<'rescue' | 'controller'>('rescue');
@@ -11,7 +15,7 @@ export default function InhalerTracker() {
   const fetchStatus = async () => {
     try {
       const token = localStorage.getItem("auth_token");
-      const res = await fetch("/api/inhaler-status", {
+      const res = await fetch(patientId ? `/api/inhaler-status?patient_id=${patientId}` : "/api/inhaler-status", {
         headers: { "Authorization": `Bearer ${token}` }
       });
       if (res.ok) {
@@ -28,7 +32,7 @@ export default function InhalerTracker() {
     fetchStatus();
     const interval = setInterval(fetchStatus, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [patientId]);
 
   const handleManualLogClick = () => {
     setShowConfirmModal(true);
@@ -44,7 +48,7 @@ export default function InhalerTracker() {
           "Authorization": `Bearer ${token}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ type: inhalerType })
+        body: JSON.stringify({ type: inhalerType, patient_id: patientId })
       });
       fetchStatus();
 
@@ -97,7 +101,7 @@ export default function InhalerTracker() {
           <div>
             <div className="flex items-center gap-3">
               <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                Medication
+                Medication{patientName ? ` · ${patientName}` : ""}
               </p>
               <div className="flex bg-zinc-200 dark:bg-black/40 p-0.5 rounded-lg border border-zinc-200 dark:border-white/5">
                 <button
@@ -152,7 +156,7 @@ export default function InhalerTracker() {
           <div className="bg-white dark:bg-[#12121e] border border-zinc-200 dark:border-[#1e1e30] rounded-xl shadow-2xl p-6 max-w-sm w-full animate-in zoom-in-95 duration-200">
             <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-2">Confirm Medication</h3>
             <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-6">
-              Are you sure you want to log an <span className="font-medium text-zinc-800 dark:text-zinc-200">{inhalerType === 'rescue' ? 'Emergency (Blue)' : 'Daily (Brown)'}</span> inhaler dose for right now?
+              Are you sure you want to log an <span className="font-medium text-zinc-800 dark:text-zinc-200">{inhalerType === 'rescue' ? 'Emergency (Blue)' : 'Daily (Brown)'}</span> inhaler dose{patientName ? ` for ${patientName}` : ""} now?
             </p>
             <div className="flex gap-3 justify-end">
               <button
