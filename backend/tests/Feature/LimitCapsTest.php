@@ -68,6 +68,7 @@ class LimitCapsTest extends TestCase
 
     public function test_unchanged_limits_are_not_published_again(): void
     {
+        HardwareConfig::forUser($this->user); // ai:optimize only processes accounts that have a config
         $this->aiSuggests(['pm25_threshold' => 25.0, 'temperature_threshold' => 35.0, 'humidity_threshold' => 75.0, 'mq135_threshold' => 1000.0]);
 
         $this->artisan('ai:optimize')->assertSuccessful();
