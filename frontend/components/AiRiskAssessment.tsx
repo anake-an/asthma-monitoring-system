@@ -8,7 +8,15 @@ type AiPrediction = {
   current_inputs?: { coughs_last_hour: number };
   error?: string;
   learning?: boolean; // backend: no model or not enough recent data yet
+  // Stage 2 only: which model and how it scored on the most recent 25% of data it never trained on.
+  model?: {
+    model_type: "logistic_regression" | "random_forest";
+    episode_windows: number;
+    evaluation: { recall: number | null; precision: number | null; test_episode_windows: number; note: string };
+  } | null;
 };
+
+const MODEL_NAME = { logistic_regression: "Logistic regression", random_forest: "Random forest" } as const;
 
 export default function AiRiskAssessment() {
   const [prediction, setPrediction] = useState<AiPrediction | null>(null);
@@ -120,6 +128,14 @@ export default function AiRiskAssessment() {
                   ? "Room anomaly level (no episodes logged yet)"
                   : "Episode risk in the next hour (model estimate)"}
             </div>
+            {!isLearning && !isStage1 && activePrediction.model && (
+              <div className="text-[11px] text-zinc-500 dark:text-zinc-500 mt-1 font-light">
+                {MODEL_NAME[activePrediction.model.model_type]} · {activePrediction.model.episode_windows} episode windows ·{" "}
+                {activePrediction.model.evaluation.recall !== null && activePrediction.model.evaluation.precision !== null
+                  ? `caught ${Math.round(activePrediction.model.evaluation.recall * 100)}% of later episodes, ${Math.round(activePrediction.model.evaluation.precision * 100)}% of warnings real`
+                  : "not yet evaluated (too few later episodes)"}
+              </div>
+            )}
           </div>
           <div className={`px-3 py-1 rounded-full text-xs font-semibold ${riskBg} ${riskColor}`}>
             {riskText}
