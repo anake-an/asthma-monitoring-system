@@ -404,7 +404,7 @@ export default function CommandCenter() {
                 <div className="flex justify-between items-center mb-1">
                   <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Air Gas Limit (VOCs)</label>
                   <span className="text-lg font-semibold text-indigo-400">
-                    {config.mq135_threshold} <span className="text-xs text-zinc-600 dark:text-zinc-400 font-normal">ppm</span>
+                    {config.mq135_threshold} <span className="text-xs text-zinc-600 dark:text-zinc-400 font-normal" title="Raw MQ-135 sensor reading (0-4095), not ppm">raw</span>
                   </span>
                 </div>
                 <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-4 font-light">Warns if household chemicals or smoke are detected</p>

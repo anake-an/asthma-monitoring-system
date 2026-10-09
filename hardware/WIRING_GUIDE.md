@@ -1,80 +1,182 @@
 # RespiroSync Hardware Wiring Guide
 
-This document outlines the **exact** wiring diagram for the Dual-Processor Architecture using both the ESP32 and the Raspberry Pi Pico.
-
-## ⚠️ Important Power Rules
-1. **Common Ground (GND):** All components, the ESP32, and the Raspberry Pi Pico MUST share a common Ground (GND) connection. If grounds are not connected, the sensors and communication will fail.
-2. **5V vs 3.3V:** The ESP32 and Pico operate at **3.3V logic**. However, sensors like the MQ135 and Sharp Dust Sensor **REQUIRE 5V** to function properly. You must power these sensors from the `VIN` or `5V` pin of the ESP32.
-3. **Never feed 5V into an ESP32 pin.** The analog outputs of the MQ-135 and the Sharp sensor can rise above 3.3V when powered from 5V. Put a **10kΩ / 20kΩ voltage divider** on each one: sensor output ➔ 10kΩ ➔ ESP32 pin ➔ 20kΩ ➔ GND. That scales 5V down to 3.33V. The firmware multiplies the dust reading back by 1.5 (`DUST_DIVIDER_RATIO`).
+Wiring for the dual-processor build: an **ESP32** (sensors, display, alarm, Wi-Fi/MQTT) and a **Raspberry Pi Pico** (microphone, cough detection), linked over UART.
 
 > [!WARNING]
-> **Hardware Liability Disclaimer:** 
-> This wiring guide is a **reference implementation** only. Because ESP32 development boards and sensor modules vary wildly by manufacturer, you should *never* blindly follow these exact diagrams without verifying them against your own hardware. Always double-check your specific manufacturer datasheets for pinouts, voltages, and common grounds before powering on the system. The authors are not responsible for any fried boards, short circuits, or damaged components. Proceed at your own risk.
+> **Hardware liability disclaimer.** This is a reference build. Modules vary by manufacturer: check pin labels against your own parts and their datasheets before powering on. The authors are not responsible for damaged components. Proceed at your own risk.
 
 ---
 
-## 1. Raspberry Pi Pico (Audio AI Coprocessor)
-The Pico handles the INMP441 I2S Microphone for cough detection and signals the ESP32 over Serial Wires.
+## 0. Parts list (reference build)
 
-### INMP441 (I2S Microphone)
-*Operates at 3.3V. Do not use 5V.*
-*   **VDD** ➔ Pico **3V3 (Out)**
-*   **GND** ➔ Pico **GND**
-*   **L/R** ➔ Pico **GND** (Sets channel to Left)
-*   **SCK (Serial Clock / BCLK)** ➔ Pico **GP 14**
-*   **WS (Word Select / LRCLK)** ➔ Pico **GP 15**
-*   **SD (Serial Data)** ➔ Pico **GP 13**
-
-> The arduino-pico I2S driver requires LRCLK to be on the pin right after BCLK (BCLK + 1). Earlier versions of this guide had WS on GP13 and SD on GP15, which cannot work.
-
-### Pico ➔ ESP32 Communication (UART)
-*Direct connection is safe (both are 3.3V logic).*
-*   **Pico GND** ➔ **ESP32 GND**
-*   **Pico GP0 (UART0 TX)** ➔ ESP32 **GPIO 16 (UART2 RX)**
-*   **Pico GP1 (UART0 RX)** ➔ ESP32 **GPIO 17 (UART2 TX)**
+| Part | Notes |
+|---|---|
+| Raspberry Pi Pico | arduino-pico core |
+| ESP32 dev board (ESP32-WROOM) | arduino-esp32 core 2.0.x or 3.x |
+| INMP441 I2S microphone | 3.3 V only |
+| DHT22, 3-pin module (or bare 4-pin sensor) | module has its pull-up; bare sensor needs 10 kΩ |
+| MQ-135 gas sensor module | 5 V heater |
+| Sharp GP2Y1010AU0F dust sensor, bare, 6-wire cable | + 150 Ω (220 Ω ∥ 470 Ω) and 220 µF |
+| 16×2 LCD with PCF8574T I2C backpack | 5 V |
+| BSS138 4-channel logic level shifter | for the LCD's I2C lines |
+| Passive buzzer (2 terminals, `+` / `−`) | + 220 Ω series resistor |
+| Red and green LED | + 220 Ω each |
+| MB-102 breadboard power module + 9 V DC adapter | 5 V rail for the sensors and LCD |
+| Resistors: 10 kΩ ×2-3, 20 kΩ ×2, 220 Ω ×4, 470 Ω ×1 | third 10 kΩ only for a bare DHT22 |
+| Capacitors: 1000 µF ×1, 220 µF ×1 (electrolytic) | long leg = `+`, striped side = `−` |
 
 ---
 
-## 2. ESP32 (Main IoT Gateway - esp32_firmware)
-The ESP32 handles environmental sensors, triggers alarms, and talks to the Cloudflare MQTT Broker via WebSockets.
+## 1. Power (read first)
 
-### DHT22 (Temperature & Humidity)
-*Operates at 3.3V.*
-*   **VCC** ➔ ESP32 **3.3V**
-*   **GND** ➔ ESP32 **GND**
-*   **DATA** ➔ ESP32 **GPIO 4**
-    *(Note: Requires a **10kΩ Pull-up Resistor** connecting the DATA pin to the 3.3V pin if you are using a bare white sensor. If using a PCB module, the resistor is usually built-in).*
+```
+9 V adapter ──► MB-102 (rail jumper on 5 V) ──► 5 V rail: MQ-135, Sharp sensor, LCD, level shifter HV
+USB (PC, or a 5 V phone charger) ──► ESP32 ── its 3V3 pin ──► DHT22, level shifter LV
+USB (PC, or a 5 V phone charger) ──► Pico  ── its 3V3 pin ──► INMP441
+GND: MB-102 GND, ESP32 GND and Pico GND all tied together
+```
 
-### MQ-135 (Gas/Air Quality Sensor)
-*Requires 5V to heat the internal coil.*
-*   **VCC** ➔ ESP32 **5V (VIN)**
-*   **GND** ➔ ESP32 **GND**
-*   **A0 (Analog Out)** ➔ **10kΩ** ➔ ESP32 **GPIO 34**, with **20kΩ** from GPIO 34 to GND
+Rules:
+1. **One common ground.** Every GND (MB-102, ESP32, Pico, every sensor) must be connected, or the UART link and the analog readings fail.
+2. **Never connect the MB-102's 5 V to the ESP32's 5 V/VIN pin or to the Pico's VSYS/VBUS.** The boards run from their own USB supply; two 5 V sources fighting each other can damage either. Only the grounds are shared.
+3. **MB-102 jumper:** the rail that feeds the sensors must be set to **5 V**, not 3.3 V. Leave the other rail off or unused.
+4. **Why split:** the MB-102 uses linear regulators. At 9 V in, every 100 mA it supplies turns into ~0.4 W of heat. The sensors and LCD (~200 mA) are fine; adding the ESP32's Wi-Fi peaks and the Pico overheats it.
+5. **Bulk capacitor:** 1000 µF across the MB-102's 5 V rail and GND, close to the module (`+` to 5 V).
+6. **Power-on order: MB-102 first, then the ESP32** (or press the ESP32's EN/RST button after switching the MB-102 on). If the ESP32 boots while the LCD is unpowered, the LCD misses its initialisation and shows garbage characters until the ESP32 is reset.
+7. **Never feed 5 V into an ESP32 or Pico pin.** The two 5 V analog sensors go through 10 kΩ / 20 kΩ dividers (5 V → 3.33 V), and the LCD's I2C lines go through the level shifter.
 
-### Sharp GP2Y1014AU (Dust Sensor / PM2.5)
-*Requires 5V. **Crucial:** Needs a 150Ω resistor and 220µF capacitor as per datasheet to stabilize the LED flash.*
-*   **V-LED (Pin 1)** ➔ Connect to ESP32 **5V (VIN)** through a **150Ω resistor**. ALSO connect a **220µF capacitor** between this pin and GND.
-*   **LED-GND (Pin 2)** ➔ ESP32 **GND**
-*   **LED-Pin (Pin 3)** ➔ ESP32 **GPIO 5** (Digital output to pulse the LED)
-*   **S-GND (Pin 4)** ➔ ESP32 **GND**
-*   **Vo (Pin 5)** ➔ **10kΩ** ➔ ESP32 **GPIO 35**, with **20kΩ** from GPIO 35 to GND (analog input for the dust reading)
-*   **Vcc (Pin 6)** ➔ ESP32 **5V (VIN)**
+*(An LM2596 adjustable buck converter can replace the MB-102 only after its output has been set to 5.0 V with a multimeter, with nothing connected. Unadjusted, it can output close to its input voltage, which destroys the Pico and the 5 V sensors.)*
 
-### Active Buzzer
-*Used for immediate hardware alarming.*
-*   **VCC** ➔ ESP32 **3.3V** or **5V**
-*   **GND** ➔ ESP32 **GND**
-*   **I/O (Signal)** ➔ ESP32 **GPIO 18**
+---
 
-### I2C LCD Display (16x2)
-*Displays live status and alerts.*
-*   **VCC** ➔ ESP32 **5V (VIN)** *(Most I2C backpacks need 5V)*
-*   **GND** ➔ ESP32 **GND**
-*   **SDA** ➔ ESP32 **GPIO 21**
-*   **SCL** ➔ ESP32 **GPIO 22**
+## 2. Raspberry Pi Pico (cough detection)
+
+### INMP441 microphone (3.3 V only)
+| INMP441 | Pico |
+|---|---|
+| VDD | **3V3 (OUT)** (pin 36) |
+| GND | GND |
+| L/R | GND (left channel) |
+| SCK | **GP14** |
+| WS | **GP15** |
+| SD | **GP13** |
+
+> The arduino-pico I2S driver requires WS (LRCLK) on the pin right after SCK (BCLK). Older versions of this guide had WS on GP13 and SD on GP15, which cannot work.
+
+### Pico ↔ ESP32 (UART, both 3.3 V: direct connection)
+| Pico | ESP32 |
+|---|---|
+| GP0 (UART0 TX) | **GPIO 16** (UART2 RX) |
+| GP1 (UART0 RX) | **GPIO 17** (UART2 TX) |
+| GND | GND |
+
+---
+
+## 3. ESP32 (sensors, display, alarm)
+
+### DHT22
+**3-pin module (sensor on a small board).** Pin order differs between makers, so follow the labels printed on the board. These modules usually include the 10 kΩ pull-up (a small resistor marked `103`); if yours has none, add one from DATA to 3V3.
+
+| Module label | Connect to |
+|---|---|
+| `+` / `VCC` | ESP32 **3V3** |
+| `out` / `DAT` / `S` | ESP32 **GPIO 4** |
+| `−` / `GND` | GND |
+
+**Bare 4-pin sensor** (pins numbered left to right, grille facing you):
+
+| DHT22 pin | Connect to |
+|---|---|
+| 1 VCC | ESP32 **3V3** |
+| 2 DATA | ESP32 **GPIO 4**, plus a **10 kΩ** from DATA to 3V3 (pull-up) |
+| 3 NC | not connected |
+| 4 GND | GND |
+
+### MQ-135 module (5 V heater)
+| MQ-135 | Connect to |
+|---|---|
+| VCC | MB-102 **5 V** rail |
+| GND | GND |
+| AO | **10 kΩ** ➔ ESP32 **GPIO 34**, and **20 kΩ** from GPIO 34 to GND |
+| DO | not used |
+
+A new MQ-135 needs about **24-48 hours** of heating before its readings settle.
+
+### Sharp GP2Y1010AU0F dust sensor (bare, 6-wire cable)
+Pin 1 is marked on the sensor's connector; cable colours vary between suppliers, so count from the connector, not the colours.
+
+| Sharp pin | Connect to |
+|---|---|
+| 1 V-LED | **~150 Ω** to the MB-102 **5 V** rail (a **220 Ω and a 470 Ω in parallel** = 149.9 Ω), and a **220 µF** capacitor from pin 1 to GND (`+` on pin 1) |
+| 2 LED-GND | GND |
+| 3 LED | ESP32 **GPIO 5** (the firmware pulses it; LOW = LED on) |
+| 4 S-GND | GND |
+| 5 Vo | **10 kΩ** ➔ ESP32 **GPIO 35**, and **20 kΩ** from GPIO 35 to GND |
+| 6 Vcc | MB-102 **5 V** rail |
+
+The 150 Ω and 220 µF are required by the datasheet: the capacitor supplies the LED's short current pulse. The firmware multiplies the reading by 1.5 to undo the divider (`DUST_DIVIDER_RATIO`). The GP2Y1014AU0F has the same pinout and wiring.
+
+**Wire colours are not standardised** between cable suppliers; identify pins by position (pin 6, Vcc, is the red wire at one end of the connector). **Calibration:** each sensor has its own clean-air output (0-1.5 V). The firmware learns it as the lowest reading since power-on and converts the rise above it with the datasheet's typical sensitivity (0.5 V per 100 µg/m³). Power the device up in clean air; the Serial Monitor shows the learned baseline. The value is an estimated dust density, not a size-selective PM2.5 measurement.
+
+### LCD 16×2 (PCF8574T backpack) through the BSS138 level shifter
+The backpack runs on 5 V and pulls SDA/SCL up to 5 V, so the I2C lines go through the level shifter.
+
+| From | To |
+|---|---|
+| LCD VCC | MB-102 **5 V** rail |
+| LCD GND | GND |
+| Level shifter **HV** | MB-102 **5 V** rail |
+| Level shifter **LV** | ESP32 **3V3** |
+| Level shifter GND (both sides) | GND |
+| LCD **SDA** | level shifter **HV1** |
+| LCD **SCL** | level shifter **HV2** |
+| level shifter **LV1** | ESP32 **GPIO 21** (SDA) |
+| level shifter **LV2** | ESP32 **GPIO 22** (SCL) |
+
+The firmware uses I2C address `0x27`. If the screen lights up but stays blank, try `0x3F` in `esp32_firmware.ino`, then adjust the contrast trimmer on the backpack.
+
+### Passive buzzer
+| Buzzer | Connect to |
+|---|---|
+| `+` | **220 Ω** ➔ ESP32 **GPIO 18** |
+| `−` | GND |
+
+The firmware drives it with a 2.7 kHz `tone()`. The 220 Ω keeps the pin current around 14 mA even if the buzzer is a low-resistance magnetic type; never connect it to the pin without the resistor. If the buzzer board has more than two pins, pins with the same mark are connected together.
 
 ### Status LEDs
-*Visual indication of system health.*
-*   **Green LED (Anode +)** ➔ ESP32 **GPIO 19** *(Use 220Ω Resistor)*
-*   **Red LED (Anode +)** ➔ ESP32 **GPIO 23** *(Use 220Ω Resistor)*
-*   **LED Cathodes (-)** ➔ ESP32 **GND**
+| From | Through | To |
+|---|---|---|
+| ESP32 **GPIO 19** | 220 Ω | **green** LED anode (long leg) |
+| ESP32 **GPIO 23** | 220 Ω | **red** LED anode (long leg) |
+| both LED cathodes (short leg) | | GND |
+
+Green = connected and normal. Red = alarm, or not connected to the broker.
+
+---
+
+## 4. Pin summary
+
+| ESP32 pin | Used for | | Pico pin | Used for |
+|---|---|---|---|---|
+| GPIO 4 | DHT22 DATA | | GP0 | UART TX → ESP32 GPIO 16 |
+| GPIO 5 | Sharp LED pulse | | GP1 | UART RX ← ESP32 GPIO 17 |
+| GPIO 16 | UART RX ← Pico GP0 | | GP13 | INMP441 SD |
+| GPIO 17 | UART TX → Pico GP1 | | GP14 | INMP441 SCK |
+| GPIO 18 | Buzzer (via 220 Ω) | | GP15 | INMP441 WS |
+| GPIO 19 | Green LED | | 3V3 (OUT) | INMP441 VDD |
+| GPIO 21 / 22 | LCD SDA / SCL (via level shifter) | | | |
+| GPIO 23 | Red LED | | | |
+| GPIO 34 | MQ-135 (via divider) | | | |
+| GPIO 35 | Sharp Vo (via divider) | | | |
+
+---
+
+## 5. Bring-up order
+
+Test each part on its own before adding the next; it makes faults easy to find.
+
+1. **Pico + INMP441** on USB. Flash `pico_cough_ai.ino` with `DEBUG_LEVELS 1`, open the Serial Plotter, clap or cough, and set `RMS_THRESHOLD` above your room's background level.
+2. **ESP32 alone** on USB. Fill `secrets.h`, flash with *Erase All Flash Before Sketch Upload* enabled, pair it from the dashboard, and check that it appears online.
+3. Add the **DHT22**, **LEDs**, **buzzer** and **LCD** (with the level shifter and the MB-102 5 V rail). Temperature and humidity should appear on the LCD and the dashboard.
+4. Add the **MQ-135** and the **Sharp sensor**. Readings should appear within a few seconds; expect the MQ-135 to drift during its first day.
+5. Connect the **Pico ↔ ESP32 UART** and the common GND. A cough should show "Cough Detected!" on the LCD, chirp, and appear in the dashboard's event timeline.

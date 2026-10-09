@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import InhalerTracker from "./InhalerTracker";
+import { dustLevel, DUST_LABEL, DUST_BANDS_NOTE } from "@/lib/dustBands";
 
 type Telemetry = {
   pm25_level: number;
@@ -38,11 +39,11 @@ export default function LiveMonitor() {
             const latestLog = logs[0];
             setData(latestLog);
             
-            // Offline Detection: If the data is older than 90 seconds, mark as offline
+            // Offline Detection: the ESP32 sends every 5 s, so 30 s without data (6 missed readings) = offline
             // We append 'Z' to tell JavaScript the timestamp is UTC (not local time)
             const recordedAtUtc = latestLog.recorded_at.endsWith('Z') ? latestLog.recorded_at : latestLog.recorded_at + 'Z';
             const diffSeconds = (new Date().getTime() - new Date(recordedAtUtc).getTime()) / 1000;
-            setIsOffline(diffSeconds > 90);
+            setIsOffline(diffSeconds > 30);
           } else {
             setData(null);
             setIsOffline(true);
@@ -90,11 +91,18 @@ export default function LiveMonitor() {
     return () => clearInterval(interval);
   }, []);
 
+  // Fixed published bands (lib/dustBands.ts), independent of the user's alert limit.
   const getAqiInfo = (pm25: number) => {
-    if (pm25 <= config.pm25_threshold * 0.3) return { text: "Excellent", color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", bar: "bg-emerald-400" };
-    if (pm25 <= config.pm25_threshold * 0.8) return { text: "Fair", color: "text-yellow-400", bg: "bg-yellow-400/10", border: "border-yellow-400/20", bar: "bg-yellow-400" };
-    if (pm25 <= config.pm25_threshold) return { text: "Poor", color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20", bar: "bg-orange-400" };
-    return { text: "Hazardous", color: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/20", bar: "bg-red-400" };
+    const level = dustLevel(pm25);
+    if (level === "low") return { text: DUST_LABEL.low, color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", bar: "bg-emerald-400" };
+    if (level === "moderate") return { text: DUST_LABEL.moderate, color: "text-yellow-400", bg: "bg-yellow-400/10", border: "border-yellow-400/20", bar: "bg-yellow-400" };
+    return { text: DUST_LABEL.high, color: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/20", bar: "bg-red-400" };
+  };
+
+  // Card status: gas over its limit takes priority over the dust level.
+  const getAirInfo = (pm25: number, gas?: number) => {
+    if (gas !== undefined && gas > config.mq135_threshold) return { text: "Gas High", color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20", bar: "bg-orange-400" };
+    return getAqiInfo(pm25);
   };
 
   const getClimateInfo = (temp: number | null, hum: number | null) => {
@@ -123,11 +131,11 @@ export default function LiveMonitor() {
             <div>
               <p className="text-sm text-zinc-600 dark:text-zinc-400 font-medium tracking-wide uppercase mb-1">Air Quality</p>
               <h3 className="text-2xl sm:text-3xl font-semibold text-zinc-900 dark:text-zinc-100">
-                {isOffline ? "Device Offline" : (data ? getAqiInfo(data.pm25_level).text : "Awaiting Data")}
+                {isOffline ? "Device Offline" : (data ? getAirInfo(data.pm25_level, data.mq135_level).text : "Awaiting Data")}
               </h3>
             </div>
-            <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors duration-500 ${isOffline ? 'bg-zinc-100 dark:bg-zinc-800/50' : (data ? getAqiInfo(data.pm25_level).bg : 'bg-zinc-100 dark:bg-zinc-800/50')}`}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={isOffline ? 'text-zinc-600 dark:text-zinc-400' : (data ? getAqiInfo(data.pm25_level).color : 'text-zinc-600 dark:text-zinc-400')}>
+            <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors duration-500 ${isOffline ? 'bg-zinc-100 dark:bg-zinc-800/50' : (data ? getAirInfo(data.pm25_level, data.mq135_level).bg : 'bg-zinc-100 dark:bg-zinc-800/50')}`}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={isOffline ? 'text-zinc-600 dark:text-zinc-400' : (data ? getAirInfo(data.pm25_level, data.mq135_level).color : 'text-zinc-600 dark:text-zinc-400')}>
                 <path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2"/>
               </svg>
             </div>
@@ -148,9 +156,9 @@ export default function LiveMonitor() {
                 ></div>
               </div>
               <div className="flex justify-between items-center mt-1">
-                <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium">PM2.5</p>
+                <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium" title={DUST_BANDS_NOTE}>PM2.5 (est.)</p>
                 <p className="text-[10px] sm:text-xs text-zinc-600 font-medium flex items-center whitespace-nowrap">
-                  Limit: {config.pm25_threshold} {config.ai_optimization_enabled && <span className="bg-blue-500/20 text-blue-400 text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider">AI</span>}
+                  Limit: {config.pm25_threshold} {config.ai_optimization_enabled && <span className="bg-blue-500/20 text-blue-400 text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider" title="AI optimisation is on: these limits are adjusted automatically once the model has enough data">auto</span>}
                 </p>
               </div>
             </div>
@@ -160,7 +168,7 @@ export default function LiveMonitor() {
                 <span className="text-3xl sm:text-4xl font-semibold tracking-tight text-zinc-900 dark:text-white">
                   {isOffline ? "--" : (data ? (data.mq135_level !== undefined ? data.mq135_level : "--") : "--")}
                 </span>
-                <span className="text-zinc-600 dark:text-zinc-400 font-medium mb-1">ppm</span>
+                <span className="text-zinc-600 dark:text-zinc-400 font-medium mb-1" title="Raw MQ-135 sensor reading (0-4095), not ppm">raw</span>
               </div>
               <div className="w-full h-1.5 bg-zinc-200 dark:bg-white/10 rounded-full overflow-hidden mb-2">
                 <div 
@@ -171,11 +179,12 @@ export default function LiveMonitor() {
               <div className="flex justify-between items-center mt-1">
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium">Gas / VOCs</p>
                 <p className="text-[10px] sm:text-xs text-zinc-600 font-medium flex items-center whitespace-nowrap">
-                  Limit: {config.mq135_threshold} {config.ai_optimization_enabled && <span className="bg-blue-500/20 text-blue-400 text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider">AI</span>}
+                  Limit: {config.mq135_threshold} {config.ai_optimization_enabled && <span className="bg-blue-500/20 text-blue-400 text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider" title="AI optimisation is on: these limits are adjusted automatically once the model has enough data">auto</span>}
                 </p>
               </div>
             </div>
           </div>
+          <p className="mt-6 text-[10px] leading-snug text-zinc-500 dark:text-zinc-500 font-light">{DUST_BANDS_NOTE}</p>
         </div>
 
         {/* Room Climate Card */}
@@ -210,7 +219,7 @@ export default function LiveMonitor() {
               <div className="flex justify-between items-center mt-1">
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium">Temperature</p>
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium flex items-center whitespace-nowrap">
-                  Limit: {config.temperature_threshold}°C {config.ai_optimization_enabled && <span className="bg-blue-500/20 text-blue-400 text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider">AI</span>}
+                  Limit: {config.temperature_threshold}°C {config.ai_optimization_enabled && <span className="bg-blue-500/20 text-blue-400 text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider" title="AI optimisation is on: these limits are adjusted automatically once the model has enough data">auto</span>}
                 </p>
               </div>
             </div>
@@ -227,7 +236,7 @@ export default function LiveMonitor() {
               <div className="flex justify-between items-center mt-1">
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium">Humidity</p>
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium flex items-center whitespace-nowrap">
-                  Limit: {config.humidity_threshold}% {config.ai_optimization_enabled && <span className="bg-blue-500/20 text-blue-400 text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider">AI</span>}
+                  Limit: {config.humidity_threshold}% {config.ai_optimization_enabled && <span className="bg-blue-500/20 text-blue-400 text-[9px] px-1.5 py-0.5 rounded ml-1.5 font-bold tracking-wider" title="AI optimisation is on: these limits are adjusted automatically once the model has enough data">auto</span>}
                 </p>
               </div>
             </div>
@@ -258,9 +267,9 @@ export default function LiveMonitor() {
               {isOffline
                 ? 'ESP32 Gateway Offline'
                 : coughDetected 
-                  ? 'AI Warning: Cough Event Detected'
+                  ? 'Cough-like Sound Detected'
                   : isEnvironmentUnsafe
-                    ? 'AI Warning: Environmental Limit Exceeded'
+                    ? 'Warning: Alert Limit Exceeded'
                     : !data 
                       ? 'Awaiting ESP32 Edge Sensor Data' 
                       : 'Environment is Safe and Stable'}
@@ -269,12 +278,12 @@ export default function LiveMonitor() {
               {isOffline
                 ? 'Connection lost. Please check power and WiFi on the ESP32 device.'
                 : coughDetected 
-                  ? 'High probability of asthma triggers present in the room. Keep inhaler nearby.'
+                  ? 'The device heard a loud cough-like sound in the last 12 hours. Keep the inhaler nearby if symptoms appear.'
                   : isEnvironmentUnsafe
-                    ? 'Current room conditions exceed AI safety thresholds. Consider ventilation or AC.'
+                    ? 'A reading is above your alert limits. Consider ventilation or AC.'
                     : !data 
                       ? 'Please power on the ESP32 gateway to begin live monitoring.' 
-                      : 'AI Active (Smart Monitoring)'}
+                      : 'All readings are within your alert limits.'}
             </p>
           </div>
         </div>

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { dustLevel } from "@/lib/dustBands";
 
 type Telemetry = {
   pm25_level: number;
@@ -111,10 +112,11 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
     return date.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
   };
 
+  // Same fixed bands as the dashboard (lib/dustBands.ts), independent of the alert limit.
   const getAqiInfo = (pm25: number) => {
-    if (pm25 <= config.pm25_threshold * 0.3) return { color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", glow: "shadow-emerald-500/10" };
-    if (pm25 <= config.pm25_threshold * 0.8) return { color: "text-yellow-400", bg: "bg-yellow-500/10", border: "border-yellow-500/20", glow: "shadow-yellow-500/10" };
-    if (pm25 <= config.pm25_threshold) return { color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/20", glow: "shadow-orange-500/10" };
+    const level = dustLevel(pm25);
+    if (level === "low") return { color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", glow: "shadow-emerald-500/10" };
+    if (level === "moderate") return { color: "text-yellow-400", bg: "bg-yellow-500/10", border: "border-yellow-500/20", glow: "shadow-yellow-500/10" };
     return { color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/20", glow: "shadow-red-500/20" };
   };
 
@@ -221,7 +223,7 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
             </span>
             <p className="text-sm font-medium tracking-wide text-zinc-800 dark:text-zinc-200">
               {coughDetected 
-                ? "AI Alert: Cough Detected" 
+                ? "Cough-like Sound Detected" 
                 : !data 
                   ? "Awaiting Sensor Data"
                   : "Monitoring Active"}

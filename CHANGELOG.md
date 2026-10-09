@@ -2,6 +2,24 @@
 
 All notable changes to RespiroSync. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- **ESP32 firmware drives a passive buzzer** with a 2.7 kHz `tone()` (alarm, cough chirp, cloud `buzzer_on`); idles low so no DC flows through a magnetic coil.
+- **Dust sensor self-calibrates:** the clean-air baseline is learned as the lowest reading since boot, readings average 25 LED pulses, and the rise is converted with the datasheet's typical sensitivity. The fixed formula reported 0.0 on sensors with a low clean-air output.
+- Dashboard shows a device offline after 30 s without data (was 90 s).
+- `WIRING_GUIDE.md` rewritten for the reference kit: MB-102 split power, BSS138 level shifter on the LCD, GP2Y1010AU0F (150 Ω from 220 ∥ 470 Ω), DHT22 module, passive buzzer through 220 Ω, pin summary, bring-up order, power-on order.
+
+### Fixed (honest wording)
+- **Dust level** uses fixed published bands instead of a fraction of the user's alert limit (which called 21 µg/m³ "Hazardous"): Low ≤ 15 (WHO 2021 24-h guideline), Moderate ≤ 35, High > 35 µg/m³ (MAAQS 2020 24-h limit), with a note that this is an instant, indicative reading.
+- **Gas** is labelled "raw" (MQ-135 ADC 0-4095), not "ppm"; the air-quality card shows "Gas High" when gas exceeds its limit.
+- **No unearned "AI" claims:** limit badges say "auto"; banners say "Cough-like Sound Detected" and "Warning: Alert Limit Exceeded"; the rescue-dose notice states its rule; the doctor report no longer mentions an "acoustic AI model"; subtitles drop "Edge AI".
+- `/api/ai/predict` answers `learning: true` while there is no model or no recent data, instead of a 400 error.
+
+### Added
+- Serial log of raw dust and MQ-135 readings and the learned dust baseline.
+- CI compiles the ESP32 firmware (arduino-esp32 2.0.17 and latest) and both Pico sketches.
+
 ## [5.0.0] - 2026-10-09
 
 A security and honesty release. **Not a drop-in upgrade from 4.3.0:** the broker now requires credentials, the MQTT topics changed, both firmwares must be re-flashed and the Pico microphone rewired. See "Upgrading from 4.3.0" below.

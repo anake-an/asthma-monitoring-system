@@ -67,13 +67,13 @@ export default function InhalerTracker() {
     const m = Math.floor((hoursDiff - h) * 60);
     const timeText = `${h}h ${m}m`;
 
-    // AI Logic Check
+    // Rule (not AI):
     // If the user takes MULTIPLE rescue doses within 4 hours, trigger warning.
     if (inhalerType === 'rescue' && recentRescueCount >= 2) {
       return {
         warning: true,
         timeText,
-        aiNotice: "AI Warning: High frequency of rescue inhaler use detected today. Please monitor symptoms closely."
+        aiNotice: "Warning: 2 or more rescue doses in the last 4 hours. Please monitor symptoms closely."
       };
     }
 

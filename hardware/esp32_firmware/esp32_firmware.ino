@@ -1,7 +1,7 @@
 /*
  * RespiroSync - ESP32 gateway firmware
  *
- * - Reads DHT22, Sharp GP2Y1014AU0F (dust) and MQ-135 every 5 s
+ * - Reads DHT22, Sharp GP2Y1010AU0F / GP2Y1014AU0F (dust) and MQ-135 every 5 s
  * - Receives cough detections from the Raspberry Pi Pico over UART2
  * - Publishes to   respirosync/devices/<token>/telemetry and /events
  * - Subscribes to  respirosync/devices/<token>/config   (retained thresholds)
@@ -45,6 +45,23 @@ typedef StaticJsonDocument<256> Doc;
 // The Sharp sensor runs on 5 V, so its output goes through a 10k/20k divider
 // (see WIRING_GUIDE.md). Voltage at the sensor = voltage at the pin * 1.5.
 const float DUST_DIVIDER_RATIO = 1.5f;
+
+// Passive buzzer: it needs a square wave; a steady HIGH only clicks once.
+// Wired through a 220 ohm resistor so a magnetic buzzer stays within the pin's current limit.
+const unsigned int BUZZER_HZ = 2700;  // near the resonance of common 12 mm buzzers
+bool buzzerOn = false;
+
+void setBuzzer(bool on) {
+  if (on == buzzerOn) return;
+  buzzerOn = on;
+  if (on) {
+    tone(BUZZER_PIN, BUZZER_HZ);
+  } else {
+    noTone(BUZZER_PIN);
+    pinMode(BUZZER_PIN, OUTPUT);
+    digitalWrite(BUZZER_PIN, LOW);  // idle low: no DC through the coil
+  }
+}
 
 DHT dht(DHTPIN, DHTTYPE);
 LiquidCrystal_I2C lcd(0x27, 16, 2);  // try 0x3F if the screen stays blank
@@ -150,19 +167,31 @@ void publishJson(const char *topic, Doc &doc) {
   esp_mqtt_client_publish(mqtt_client, topic, buffer, n, 1, 0);
 }
 
-// --- Sharp GP2Y1014AU0F, returns ug/m3 ---
-float readDustSensor() {
-  digitalWrite(DUST_LED_PIN, LOW);  // LED on (active low)
-  delayMicroseconds(280);
-  uint32_t mv = analogReadMilliVolts(DUST_OUT_PIN);
-  delayMicroseconds(40);
-  digitalWrite(DUST_LED_PIN, HIGH);
-  delayMicroseconds(9680);
+// --- Sharp GP2Y1010AU0F / GP2Y1014AU0F, returns an estimated dust density in ug/m3 ---
+// Each unit has its own clean-air output (Voc; datasheet range 0-1.5 V), so a fixed
+// formula reads 0 on some sensors. The baseline is learned as the lowest averaged
+// reading since boot. Limitation: a unit that boots in dusty air under-reports until
+// it has seen cleaner air. Not size-selective, so this approximates PM2.5.
+const int DUST_SAMPLES = 25;                     // 25 LED pulses x 10 ms = 0.25 s per reading
+const float DUST_SENSITIVITY_V_PER_UG = 0.005f;  // datasheet typical: 0.5 V per 0.1 mg/m3
+uint32_t lastDustPinMv = 0;                      // averaged reading at GPIO 35 (Serial log)
+float dustBaselineV = -1.0f;                     // learned clean-air voltage at the sensor
 
-  float sensorVolts = (mv / 1000.0f) * DUST_DIVIDER_RATIO;
-  // Chris Nafis (2012): density [mg/m3] = 0.17 * V - 0.1  ->  [ug/m3] = 170 * V - 100
-  float density = 170.0f * sensorVolts - 100.0f;
-  return density < 0 ? 0 : density;
+float readDustSensor() {
+  uint32_t sumMv = 0;
+  for (int i = 0; i < DUST_SAMPLES; i++) {
+    digitalWrite(DUST_LED_PIN, LOW);  // LED on (active low)
+    delayMicroseconds(280);           // sample 0.28 ms into the 0.32 ms pulse (datasheet timing)
+    sumMv += analogReadMilliVolts(DUST_OUT_PIN);
+    delayMicroseconds(40);
+    digitalWrite(DUST_LED_PIN, HIGH);
+    delayMicroseconds(9680);          // 10 ms cycle
+  }
+  lastDustPinMv = sumMv / DUST_SAMPLES;
+
+  float sensorVolts = (lastDustPinMv / 1000.0f) * DUST_DIVIDER_RATIO;
+  if (dustBaselineV < 0 || sensorVolts < dustBaselineV) dustBaselineV = sensorVolts;
+  return (sensorVolts - dustBaselineV) / DUST_SENSITIVITY_V_PER_UG;
 }
 
 void factoryReset() {
@@ -291,9 +320,9 @@ void handlePicoMessage() {
   lcd.print("Cough Detected!");
   coughDisplayUntil = millis() + 2000;
 
-  digitalWrite(BUZZER_PIN, HIGH);  // short acknowledgement chirp
+  setBuzzer(true);  // short acknowledgement chirp
   delay(80);
-  digitalWrite(BUZZER_PIN, LOW);
+  setBuzzer(false);
 }
 
 void readAndPublishTelemetry() {
@@ -301,6 +330,9 @@ void readAndPublishTelemetry() {
   float temp = dht.readTemperature();
   float pm25 = readDustSensor();
   int mq135 = analogRead(MQ135PIN);
+  // Raw values for wiring checks and calibration.
+  Serial.printf("Dust: %u mV at pin (%.2f V at sensor, clean-air baseline %.2f V) -> %.1f ug/m3 | MQ-135 raw %d\n",
+                (unsigned)lastDustPinMv, lastDustPinMv / 1000.0f * DUST_DIVIDER_RATIO, dustBaselineV, pm25, mq135);
 
   Doc doc;
   doc["pm25_level"] = pm25;
@@ -360,7 +392,7 @@ void updateOutputs() {
 
   // Beep 150 ms every 2 s while an alarm is active, unless muted from the dashboard.
   bool beep = alarm && !muted && (millis() % 2000) < 150;
-  if (millis() > coughDisplayUntil) digitalWrite(BUZZER_PIN, beep);
+  if (millis() > coughDisplayUntil) setBuzzer(beep);
 }
 
 void loop() {

@@ -4,9 +4,10 @@ import { Brain, Activity, Clock } from "lucide-react";
 
 type AiPrediction = {
   model_stage: string;
-  probability_of_attack: number;
+  probability_of_attack: number | null;
   current_inputs?: { coughs_last_hour: number };
   error?: string;
+  learning?: boolean; // backend: no model or not enough recent data yet
 };
 
 export default function AiRiskAssessment() {
@@ -52,12 +53,12 @@ export default function AiRiskAssessment() {
 
   // No model yet (or engine unreachable): show "Learning mode" instead of locking the panel,
   // but never display a made-up risk number.
-  const isLearning = !prediction || !!prediction.error;
+  const isLearning = !prediction || !!prediction.error || !!prediction.learning || prediction.probability_of_attack === null;
   const activePrediction: AiPrediction = isLearning
     ? { model_stage: "Learning mode", probability_of_attack: 0 }
     : (prediction as AiPrediction);
-  
-  const riskPercent = Math.round(activePrediction.probability_of_attack * 100);
+
+  const riskPercent = Math.round((activePrediction.probability_of_attack ?? 0) * 100);
   
   let riskColor = "text-emerald-400";
   let riskBg = "bg-emerald-400/10";
