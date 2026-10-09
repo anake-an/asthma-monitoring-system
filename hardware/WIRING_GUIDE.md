@@ -42,7 +42,8 @@ Rules:
 3. **MB-102 jumper:** the rail that feeds the sensors must be set to **5 V**, not 3.3 V. Leave the other rail off or unused.
 4. **Why split:** the MB-102 uses linear regulators. At 9 V in, every 100 mA it supplies turns into ~0.4 W of heat. The sensors and LCD (~200 mA) are fine; adding the ESP32's Wi-Fi peaks and the Pico overheats it.
 5. **Bulk capacitor:** 1000 µF across the MB-102's 5 V rail and GND, close to the module (`+` to 5 V).
-6. **Never feed 5 V into an ESP32 or Pico pin.** The two 5 V analog sensors go through 10 kΩ / 20 kΩ dividers (5 V → 3.33 V), and the LCD's I2C lines go through the level shifter.
+6. **Power-on order: MB-102 first, then the ESP32** (or press the ESP32's EN/RST button after switching the MB-102 on). If the ESP32 boots while the LCD is unpowered, the LCD misses its initialisation and shows garbage characters until the ESP32 is reset.
+7. **Never feed 5 V into an ESP32 or Pico pin.** The two 5 V analog sensors go through 10 kΩ / 20 kΩ dividers (5 V → 3.33 V), and the LCD's I2C lines go through the level shifter.
 
 *(An LM2596 adjustable buck converter can replace the MB-102 only after its output has been set to 5.0 V with a multimeter, with nothing connected. Unadjusted, it can output close to its input voltage, which destroys the Pico and the 5 V sensors.)*
 
