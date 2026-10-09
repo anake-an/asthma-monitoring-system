@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import InhalerTracker from "./InhalerTracker";
-import { dustLevel, DUST_LABEL, DUST_BANDS_NOTE } from "@/lib/dustBands";
+import { dustLevel, DUST_BANDS_NOTE } from "@/lib/dustBands";
+import { barPercent, readingLevel, LEVEL_STYLE, type Level } from "@/lib/readingStatus";
 import { GAS_NOTE } from "@/lib/gas";
 
 type Telemetry = {
@@ -138,27 +139,30 @@ export default function LiveMonitor() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fixed published bands (lib/dustBands.ts), independent of the user's alert limit.
-  const getAqiInfo = (pm25: number) => {
-    const level = dustLevel(pm25);
-    if (level === "low") return { text: DUST_LABEL.low, color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", bar: "bg-emerald-400" };
-    if (level === "moderate") return { text: DUST_LABEL.moderate, color: "text-yellow-400", bg: "bg-yellow-400/10", border: "border-yellow-400/20", bar: "bg-yellow-400" };
-    return { text: DUST_LABEL.high, color: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/20", bar: "bg-red-400" };
+  // Headlines follow the same rule as the bars (lib/readingStatus.ts): green / amber "near" / red "over".
+  type CardInfo = { text: string } & (typeof LEVEL_STYLE)[Level];
+  const card = (text: string, level: Level): CardInfo => ({ text, ...LEVEL_STYLE[level] });
+
+  const getAirInfo = (pm25: number, gas?: number | null): CardInfo => {
+    const dust = readingLevel("pm25", pm25, config.pm25_threshold);
+    const gasLevel = gas != null ? readingLevel("mq135", gas, config.mq135_threshold) : "ok";
+    if (dust === "over" || gasLevel === "over") return card("Action Needed", "over");
+    if (dust === "near") return card("Slightly Dusty", "near");
+    if (gasLevel === "near") return card("Slightly Stuffy", "near"); // high CO2-equivalent: the room needs fresh air
+    // Below the limits: the word follows the published dust bands (lib/dustBands.ts).
+    const band = dustLevel(pm25);
+    if (band === "high") return card("Dusty", "near");
+    return card(band === "low" ? "Clean Air" : "Fair Air", "ok");
   };
 
-  // Card status: gas over its limit takes priority over the dust level.
-  const getAirInfo = (pm25: number, gas?: number | null) => {
-    if (gas != null && gas > config.mq135_threshold) return { text: "Gas High", color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20", bar: "bg-orange-400" };
-    return getAqiInfo(pm25);
-  };
-
-  const getClimateInfo = (temp: number | null, hum: number | null) => {
-    if (temp === null || hum === null) return { text: "Sensor Error", color: "text-zinc-500", bg: "bg-zinc-500/10", border: "border-zinc-500/20", bar: "bg-zinc-400" };
-    if (temp > config.temperature_threshold || hum > config.humidity_threshold) return { text: "Action Needed", color: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/20", bar: "bg-red-400" };
-    if (temp > config.temperature_threshold - 2) return { text: "Slightly Warm", color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20", bar: "bg-orange-400" };
-    if (hum > config.humidity_threshold - 5) return { text: "Slightly Humid", color: "text-blue-400", bg: "bg-blue-400/10", border: "border-blue-400/20", bar: "bg-blue-400" };
-    if (temp < 18 || hum < 30) return { text: "Cool & Dry", color: "text-cyan-400", bg: "bg-cyan-400/10", border: "border-cyan-400/20", bar: "bg-cyan-400" };
-    return { text: "Comfortable", color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", bar: "bg-emerald-400" };
+  const getClimateInfo = (temp: number | null, hum: number | null): CardInfo => {
+    if (temp === null || hum === null) return { text: "Sensor Error", color: "text-zinc-500", bg: "bg-zinc-500/10", bar: "bg-zinc-400" };
+    const t = readingLevel("temperature", temp, config.temperature_threshold);
+    const h = readingLevel("humidity", hum, config.humidity_threshold);
+    if (t === "over" || h === "over") return card("Action Needed", "over");
+    if (t === "near") return card("Slightly Warm", "near");
+    if (h === "near") return card("Slightly Humid", "near");
+    return card("Comfortable", "ok");
   };
 
   const isAqiBreached = data ? data.pm25_level > config.pm25_threshold || (data.mq135_level != null && data.mq135_level > config.mq135_threshold) : false;
@@ -190,11 +194,11 @@ export default function LiveMonitor() {
     );
   };
 
-  // Bars show each reading against its own limit: full at the limit, amber from 80 %, red above it.
-  const barWidth = (value: number | null | undefined, limit: number) =>
-    isOffline || value == null || limit <= 0 ? 0 : Math.min((value / limit) * 100, 100);
-  const barColor = (value: number | null | undefined, limit: number, normal: string) =>
-    isOffline || value == null ? "bg-transparent" : value > limit ? "bg-red-400" : value >= limit * 0.8 ? "bg-amber-400" : normal;
+  // Bars: empty at "nothing to worry about", full at the limit; coloured by the same rule as the headlines.
+  const barWidth = (name: LimitName, value: number | null | undefined, limit: number) =>
+    isOffline || value == null ? 0 : barPercent(name, value, limit);
+  const barColor = (name: LimitName, value: number | null | undefined, limit: number) =>
+    isOffline || value == null ? "bg-transparent" : LEVEL_STYLE[readingLevel(name, value, limit)].bar;
 
   return (
     <section className="flex flex-col gap-6">
@@ -229,8 +233,8 @@ export default function LiveMonitor() {
               </div>
               <div className="w-full h-1.5 bg-zinc-200 dark:bg-white/10 rounded-full overflow-hidden mb-2">
                 <div 
-                  className={`h-full rounded-full transition-all duration-1000 ${barColor(data?.pm25_level, config.pm25_threshold, "bg-emerald-400")}`} 
-                  style={{ width: `${barWidth(data?.pm25_level, config.pm25_threshold)}%` }}
+                  className={`h-full rounded-full transition-all duration-1000 ${barColor("pm25", data?.pm25_level, config.pm25_threshold)}`} 
+                  style={{ width: `${barWidth("pm25", data?.pm25_level, config.pm25_threshold)}%` }}
                 ></div>
               </div>
               <div className="flex justify-between items-center mt-1">
@@ -250,8 +254,8 @@ export default function LiveMonitor() {
               </div>
               <div className="w-full h-1.5 bg-zinc-200 dark:bg-white/10 rounded-full overflow-hidden mb-2">
                 <div 
-                  className={`h-full rounded-full transition-all duration-1000 ${barColor(data?.mq135_level, config.mq135_threshold, "bg-indigo-400")}`}
-                  style={{ width: `${barWidth(data?.mq135_level, config.mq135_threshold)}%` }}
+                  className={`h-full rounded-full transition-all duration-1000 ${barColor("mq135", data?.mq135_level, config.mq135_threshold)}`}
+                  style={{ width: `${barWidth("mq135", data?.mq135_level, config.mq135_threshold)}%` }}
                 ></div>
               </div>
               <div className="flex justify-between items-center mt-1">
@@ -291,7 +295,7 @@ export default function LiveMonitor() {
                 <span className="text-zinc-600 dark:text-zinc-400 font-medium mb-1">°C</span>
               </div>
               <div className="w-full h-1.5 bg-zinc-200 dark:bg-white/10 rounded-full overflow-hidden mb-2">
-                <div className={`h-full rounded-full transition-all duration-1000 ${barColor(data?.temperature, config.temperature_threshold, "bg-blue-400")}`} style={{ width: `${barWidth(data?.temperature, config.temperature_threshold)}%` }}></div>
+                <div className={`h-full rounded-full transition-all duration-1000 ${barColor("temperature", data?.temperature, config.temperature_threshold)}`} style={{ width: `${barWidth("temperature", data?.temperature, config.temperature_threshold)}%` }}></div>
               </div>
               <div className="flex justify-between items-center mt-1">
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium">Temperature</p>
@@ -308,7 +312,7 @@ export default function LiveMonitor() {
                 <span className="text-zinc-600 dark:text-zinc-400 font-medium mb-1">%</span>
               </div>
               <div className="w-full h-1.5 bg-zinc-200 dark:bg-white/10 rounded-full overflow-hidden mb-2">
-                <div className={`h-full rounded-full transition-all duration-1000 ${barColor(data?.humidity, config.humidity_threshold, "bg-blue-400")}`} style={{ width: `${barWidth(data?.humidity, config.humidity_threshold)}%` }}></div>
+                <div className={`h-full rounded-full transition-all duration-1000 ${barColor("humidity", data?.humidity, config.humidity_threshold)}`} style={{ width: `${barWidth("humidity", data?.humidity, config.humidity_threshold)}%` }}></div>
               </div>
               <div className="flex justify-between items-center mt-1">
                 <p className="text-[10px] sm:text-xs text-zinc-600 dark:text-zinc-400 font-medium">Humidity</p>
