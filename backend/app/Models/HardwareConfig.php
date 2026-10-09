@@ -34,6 +34,7 @@ class HardwareConfig extends Model
 
     protected $fillable = [
         'user_id',
+        'device_id',
         'pm25_threshold', 'pm25_cap', 'pm25_locked',
         'temperature_threshold', 'temperature_cap', 'temperature_locked',
         'humidity_threshold', 'humidity_cap', 'humidity_locked',
@@ -121,14 +122,17 @@ class HardwareConfig extends Model
     public const MISSED_DOSE_OFF = 'Daily inhaler dose logged: limits back up';
 
     /**
-     * True when this account uses a daily (controller) inhaler, i.e. logged one in the last 7 days,
-     * but has not logged one in the last 26 h (a day plus 2 h of grace). Accounts that never log
-     * daily doses are never affected. Per patient once patients exist.
+     * True when this patient uses a daily (controller) inhaler, i.e. one was logged in the last 7 days,
+     * but none in the last 26 h (a day plus 2 h of grace). Patients without daily doses, and shared
+     * rooms (no patient), are never affected.
      */
-    public static function missedDailyDose(int $userId, \DateTimeInterface $now): bool
+    public static function missedDailyDose(?int $patientId, \DateTimeInterface $now): bool
     {
+        if (!$patientId) {
+            return false;
+        }
         $now = \Carbon\Carbon::instance($now);
-        $controller = fn () => InhalerLog::where('user_id', $userId)->where('type', 'controller');
+        $controller = fn () => InhalerLog::where('patient_id', $patientId)->where('type', 'controller');
 
         return $controller()->where('administered_at', '>=', $now->copy()->subDays(7))->exists()
             && !$controller()->where('administered_at', '>=', $now->copy()->subHours(26))->exists();
@@ -192,6 +196,7 @@ class HardwareConfig extends Model
         foreach ($changes as $name => [$old, $new]) {
             LimitChange::create([
                 'user_id' => $this->user_id,
+                'device_id' => $this->device_id,
                 'limit_name' => $name,
                 'old_value' => $old,
                 'new_value' => $new,
@@ -256,12 +261,36 @@ class HardwareConfig extends Model
         return $this->belongsTo(User::class);
     }
 
-    /**
-     * Each account owns exactly one threshold profile, created on first use.
-     */
-    public static function forUser(User $user): self
+    public function device()
     {
-        return static::firstOrCreate(['user_id' => $user->id], self::DEFAULTS);
+        return $this->belongsTo(Device::class);
+    }
+
+    /**
+     * Each device (room) has its own limits, created on first use. A new room of a child starts from
+     * the user's own values of that child's most recently changed room (patient defaults, design
+     * section 2), otherwise from DEFAULTS. The AI state (day budget, rule) always starts fresh.
+     */
+    public static function forDevice(Device $device): self
+    {
+        return static::firstOrCreate(['device_id' => $device->id], ['user_id' => $device->user_id] + self::seedFor($device));
+    }
+
+    private static function seedFor(Device $device): array
+    {
+        $sibling = $device->patient_id
+            ? static::whereHas('device', fn ($q) => $q->where('patient_id', $device->patient_id))->latest('updated_at')->first()
+            : null;
+        if (!$sibling) {
+            return self::DEFAULTS;
+        }
+        $seed = ['is_buzzer_muted' => $sibling->is_buzzer_muted, 'ai_optimization_enabled' => $sibling->ai_optimization_enabled];
+        foreach (self::LIMITS as $name) {
+            $seed["{$name}_cap"] = $seed["{$name}_threshold"] = $sibling->capFor($name);
+            $seed["{$name}_locked"] = (bool) $sibling->{"{$name}_locked"};
+        }
+
+        return $seed;
     }
 
     /**

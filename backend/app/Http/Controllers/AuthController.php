@@ -23,9 +23,9 @@ class AuthController extends Controller
             'password' => Hash::make($request->password),
         ]);
 
-        // When a user registers, we should ideally create a default hardware config for them
-        // For now, if we are not linking config to user_id yet, we just create the user.
-        
+        // Every account starts with one patient ("My child", renamed in the dashboard).
+        $user->defaultPatient();
+
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
@@ -97,9 +97,14 @@ class AuthController extends Controller
         // Revoke all tokens
         $user->tokens()->delete();
         
-        // Under PDPA Right to Erasure, we should delete the user record entirely.
-        // We might also need to delete related data or keep it anonymous depending on the schema, 
-        // but for now we just delete the user.
+        // PDPA right to erasure: delete the children this account alone has access to, with their
+        // dose history. Devices, telemetry, coughs, configs and limit changes go with the user
+        // (cascade). Patients shared with other accounts (phase 3) are left to them.
+        foreach ($user->ownedPatients()->withCount('users')->get() as $patient) {
+            if ($patient->users_count <= 1) {
+                $patient->delete();
+            }
+        }
         $user->delete();
 
         return response()->json([

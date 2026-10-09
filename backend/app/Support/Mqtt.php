@@ -63,7 +63,7 @@ class Mqtt
     }
 
     /**
-     * Push the owner's thresholds to one device as a retained message, so the
+     * Push a device's own thresholds to it as a retained message, so the
      * ESP32 receives them immediately and again after every reconnect.
      */
     public function publishConfig(Device $device, HardwareConfig $config): void
@@ -80,11 +80,8 @@ class Mqtt
     public function syncAllConfigs(): int
     {
         $count = 0;
-        foreach (Device::with('user')->whereNotNull('user_id')->get() as $device) {
-            if (!$device->user) {
-                continue;
-            }
-            $this->publishConfig($device, HardwareConfig::forUser($device->user));
+        foreach (Device::whereNotNull('user_id')->get() as $device) {
+            $this->publishConfig($device, HardwareConfig::forDevice($device));
             $count++;
         }
 

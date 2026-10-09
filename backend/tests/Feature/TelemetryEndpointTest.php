@@ -34,6 +34,7 @@ class TelemetryEndpointTest extends TestCase
 
     public function test_new_accounts_get_a_gas_limit_on_the_ppm_scale(): void
     {
-        $this->assertSame(1000.0, HardwareConfig::forUser(User::factory()->create())->mq135_threshold);
+        $device = Device::create(['user_id' => User::factory()->create()->id, 'device_token' => 'NEW001']);
+        $this->assertSame(1000.0, HardwareConfig::forDevice($device)->mq135_threshold);
     }
 }

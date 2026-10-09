@@ -21,11 +21,13 @@ class LimitChangeLogTest extends TestCase
 
     private User $user;
 
+    private Device $device;
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->user = User::factory()->create();
-        Device::create(['user_id' => $this->user->id, 'device_token' => 'LOG001']);
+        $this->device = Device::create(['user_id' => $this->user->id, 'device_token' => 'LOG001']);
     }
 
     private function aiSuggests(array $limits, bool $ready = true, string $stage = 'Stage 1 (Anomaly Detection)'): void
@@ -38,7 +40,7 @@ class LimitChangeLogTest extends TestCase
 
     public function test_an_ai_change_is_logged_with_its_reason(): void
     {
-        HardwareConfig::forUser($this->user); // humidity 75
+        HardwareConfig::forDevice($this->device); // humidity 75
         $this->aiSuggests(['pm25_threshold' => 35.0, 'temperature_threshold' => 35.0, 'humidity_threshold' => 70.0, 'mq135_threshold' => 1000.0]);
 
         $this->artisan('ai:optimize')->assertSuccessful();
@@ -54,7 +56,7 @@ class LimitChangeLogTest extends TestCase
 
     public function test_unchanged_limits_are_not_logged(): void
     {
-        HardwareConfig::forUser($this->user);
+        HardwareConfig::forDevice($this->device);
         $this->aiSuggests(['pm25_threshold' => 35.0, 'temperature_threshold' => 35.0, 'humidity_threshold' => 75.0, 'mq135_threshold' => 1000.0]);
 
         $this->artisan('ai:optimize')->assertSuccessful();
@@ -65,7 +67,7 @@ class LimitChangeLogTest extends TestCase
 
     public function test_a_user_change_is_logged(): void
     {
-        HardwareConfig::forUser($this->user);
+        HardwareConfig::forDevice($this->device);
         Sanctum::actingAs($this->user);
 
         $this->postJson('/api/config', ['pm25_threshold' => 20, 'humidity_locked' => true])->assertOk();
@@ -79,12 +81,12 @@ class LimitChangeLogTest extends TestCase
     public function test_limits_return_to_the_users_values_while_the_ai_is_not_ready(): void
     {
         // e.g. lowered by the AI before the 24 h rule existed, or before an AI reset
-        HardwareConfig::forUser($this->user)->update(['pm25_threshold' => 25.0, 'humidity_threshold' => 73.2]);
+        HardwareConfig::forDevice($this->device)->update(['pm25_threshold' => 25.0, 'humidity_threshold' => 73.2]);
         $this->aiSuggests(['pm25_threshold' => 20.0, 'temperature_threshold' => 30.0, 'humidity_threshold' => 60.0, 'mq135_threshold' => 800.0], ready: false);
 
         $this->artisan('ai:optimize')->assertSuccessful();
 
-        $c = HardwareConfig::forUser($this->user)->fresh();
+        $c = HardwareConfig::forDevice($this->device)->fresh();
         $this->assertSame(35.0, $c->pm25_threshold);
         $this->assertSame(75.0, $c->humidity_threshold);
         $this->assertSame(2, LimitChange::where('reason', 'Back to your limit: less than 24 h of readings')->count());
@@ -93,37 +95,38 @@ class LimitChangeLogTest extends TestCase
 
     public function test_limits_return_to_the_users_values_while_the_ai_is_learning(): void
     {
-        HardwareConfig::forUser($this->user)->update(['mq135_threshold' => 900.0]);
+        HardwareConfig::forDevice($this->device)->update(['mq135_threshold' => 900.0]);
         Http::fake(['*/predict*' => Http::response(['detail' => 'No model trained yet'], 404)]);
 
         $this->artisan('ai:optimize')->assertSuccessful();
 
-        $this->assertSame(1000.0, HardwareConfig::forUser($this->user)->fresh()->mq135_threshold);
+        $this->assertSame(1000.0, HardwareConfig::forDevice($this->device)->fresh()->mq135_threshold);
         $this->assertSame('Back to your limit: the AI is still learning', LimitChange::first()->reason);
     }
 
     public function test_an_engine_error_leaves_the_limits_alone(): void
     {
-        HardwareConfig::forUser($this->user)->update(['pm25_threshold' => 25.0]);
+        HardwareConfig::forDevice($this->device)->update(['pm25_threshold' => 25.0]);
         Http::fake(['*/predict*' => Http::response('Internal Server Error', 500)]);
 
         $this->artisan('ai:optimize')->assertSuccessful();
 
-        $this->assertSame(25.0, HardwareConfig::forUser($this->user)->fresh()->pm25_threshold);
+        $this->assertSame(25.0, HardwareConfig::forDevice($this->device)->fresh()->pm25_threshold);
         $this->assertSame(0, LimitChange::count());
     }
 
     public function test_the_weekly_report_lists_this_weeks_changes_newest_first(): void
     {
         $other = User::factory()->create();
-        $row = fn (User $u, string $name, string $when) => LimitChange::create([
-            'user_id' => $u->id, 'limit_name' => $name, 'old_value' => 35, 'new_value' => 31.5,
+        $otherDevice = Device::create(['user_id' => $other->id, 'device_token' => 'OTHER1']);
+        $row = fn (Device $d, string $name, string $when) => LimitChange::create([
+            'user_id' => $d->user_id, 'device_id' => $d->id, 'limit_name' => $name, 'old_value' => 35, 'new_value' => 31.5,
             'source' => 'ai', 'reason' => 'Room unusual (Stage 1)', 'created_at' => now()->sub($when),
         ]);
-        $row($this->user, 'pm25', '2 days');
-        $row($this->user, 'humidity', '1 hour');
-        $row($this->user, 'mq135', '10 days'); // older than the report period
-        $row($other, 'temperature', '1 hour'); // another account
+        $row($this->device, 'pm25', '2 days');
+        $row($this->device, 'humidity', '1 hour');
+        $row($this->device, 'mq135', '10 days'); // older than the report period
+        $row($otherDevice, 'temperature', '1 hour'); // another account
 
         Sanctum::actingAs($this->user);
         $changes = $this->getJson('/api/report')->assertOk()->json('limit_changes');
@@ -131,6 +134,7 @@ class LimitChangeLogTest extends TestCase
         $this->assertSame(['humidity', 'pm25'], array_column($changes, 'limit_name'));
         $this->assertSame('ai', $changes[0]['source']);
         $this->assertSame('Room unusual (Stage 1)', $changes[0]['reason']);
+        $this->assertSame($this->device->id, $changes[0]['device_id'], 'each change names its room');
     }
 
     public function test_reasons_are_plain_language(): void

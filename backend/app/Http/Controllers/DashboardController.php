@@ -9,36 +9,42 @@ use App\Models\TelemetryLog;
 use Illuminate\Http\Request;
 
 /**
- * Every query here is scoped to the authenticated account: telemetry and cough
- * events through the user's devices, inhaler logs through user_id.
+ * Dashboard data, per device (room) or per patient (child). Access goes through
+ * Controller::device() / ::patient() and the policies in App\Policies; without an id,
+ * the user's most recently seen device or default patient is used.
  */
 class DashboardController extends Controller
 {
     /**
-     * Latest telemetry rows from the user's devices (?limit=1..100, default 100).
+     * Latest telemetry rows of one device (?device_id, ?limit=1..100, default 100).
      * X-Server-Time (Unix ms) lets the dashboard judge "offline" by the server clock
      * instead of the viewer's computer clock, which may be off by tens of seconds.
      */
     public function getTelemetry(Request $request)
     {
         $limit = min(max((int) $request->query('limit', 100), 1), 100);
+        $device = $this->device($request);
 
-        $logs = TelemetryLog::whereIn('device_id', $this->deviceIds($request))
-            ->orderBy('recorded_at', 'desc')
-            ->take($limit)
-            ->get();
+        $logs = $device
+            ? TelemetryLog::where('device_id', $device->id)->orderBy('recorded_at', 'desc')->take($limit)->get()
+            : collect();
 
         return response()->json($logs)->header('X-Server-Time', (string) now()->getTimestampMs());
     }
 
     /**
-     * Paginated cough events from the user's devices.
+     * Paginated cough events of one device (?device_id), or of every device the user can see
+     * when none is given. Each event carries its device's id and name (the room).
      */
     public function getCoughEvents(Request $request)
     {
         $perPage = min(max((int) $request->get('per_page', 10), 1), 100);
+        $deviceIds = $request->filled('device_id')
+            ? [$this->device($request)->id]
+            : $request->user()->accessibleDevices()->pluck('id');
 
-        $events = CoughEvent::whereIn('device_id', $this->deviceIds($request))
+        $events = CoughEvent::with('device:id,name')
+            ->whereIn('device_id', $deviceIds)
             ->orderBy('recorded_at', 'desc')
             ->paginate($perPage);
 
@@ -51,7 +57,10 @@ class DashboardController extends Controller
      */
     public function verifyCoughEvent(Request $request, $id)
     {
-        $event = CoughEvent::whereIn('device_id', $this->deviceIds($request))->findOrFail($id);
+        $event = CoughEvent::with('device')->find($id);
+        if (!$event || !$event->device || $request->user()->cannot('logDose', $event->device)) {
+            abort(404);
+        }
 
         $request->validate([
             'is_verified' => 'required|boolean',
@@ -66,13 +75,20 @@ class DashboardController extends Controller
         if ($request->boolean('inhaler_used')) {
             InhalerLog::firstOrCreate(
                 ['cough_event_id' => $event->id],
-                ['is_manual' => false, 'user_id' => $request->user()->id, 'device_id' => $event->device_id, 'administered_at' => now()]
+                [
+                    'is_manual' => false,
+                    'user_id' => $request->user()->id,
+                    // The room's child; NULL in a shared room (not attributed to a child).
+                    'patient_id' => $event->device->patient_id,
+                    'device_id' => $event->device_id,
+                    'administered_at' => now(),
+                ]
             );
         } else {
             InhalerLog::where('cough_event_id', $event->id)->delete();
         }
 
-        return response()->json($event);
+        return response()->json($event->makeHidden('device'));
     }
 
     public function savePushSubscription(Request $request)
@@ -93,11 +109,12 @@ class DashboardController extends Controller
     }
 
     /**
-     * Most recent inhaler administration for this account.
+     * Most recent inhaler dose of one patient (?patient_id, default: the user's default patient).
      */
     public function getInhalerStatus(Request $request)
     {
-        $logs = $request->user()->inhalerLogs();
+        $patient = $this->patient($request);
+        $logs = InhalerLog::where('patient_id', $patient->id);
 
         $lastLog = (clone $logs)->orderBy('administered_at', 'desc')->first();
 
@@ -106,22 +123,26 @@ class DashboardController extends Controller
             ->count();
 
         return response()->json([
+            'patient_id' => $patient->id,
             'last_administered_at' => $lastLog?->administered_at,
             'recent_rescue_count' => $recentRescueCount,
         ]);
     }
 
     /**
-     * Log a manual inhaler dose for this account.
+     * Log a manual inhaler dose for a patient (patient_id, default: the user's default patient).
      */
     public function logManualInhaler(Request $request)
     {
         $request->validate([
             'type' => 'required|in:rescue,controller',
+            'patient_id' => 'nullable|integer',
         ]);
+        $patient = $this->patient($request, 'logDose');
 
         $log = InhalerLog::create([
             'user_id' => $request->user()->id,
+            'patient_id' => $patient->id,
             'is_manual' => true,
             'type' => $request->type,
             'administered_at' => now(), // app clock, matching the "last 4 hours" query above
@@ -134,21 +155,23 @@ class DashboardController extends Controller
     }
 
     /**
-     * Data for the weekly activity report, for this account only.
+     * Data for the weekly activity report of one patient (?patient_id): coughs from that child's
+     * rooms, that child's doses, and the limit changes of those rooms. Shared rooms are excluded.
      */
     public function getWeeklyReport(Request $request)
     {
+        $patient = $this->patient($request);
         $startDate = now()->subDays(7);
-        $deviceIds = $this->deviceIds($request);
-        $userId = $request->user()->id;
+        $deviceIds = $patient->devices()->pluck('id');
 
         $coughs = fn () => CoughEvent::whereIn('device_id', $deviceIds)->where('recorded_at', '>=', $startDate);
-        $inhalers = fn () => InhalerLog::where('user_id', $userId)->where('administered_at', '>=', $startDate);
+        $inhalers = fn () => InhalerLog::where('patient_id', $patient->id)->where('administered_at', '>=', $startDate);
 
         $rescueDoses = $inhalers()->where('type', 'rescue')->count();
         $controllerDoses = $inhalers()->where('type', 'controller')->count();
 
         return response()->json([
+            'patient' => ['id' => $patient->id, 'name' => $patient->name],
             'start_date' => $startDate->toDateString(),
             'end_date' => now()->toDateString(),
             'total_events' => $coughs()->count(),
@@ -166,18 +189,16 @@ class DashboardController extends Controller
                 ->groupBy('date', 'type')
                 ->orderBy('date')
                 ->get(),
-            // Every change of an alert limit in the period, by the AI or by the user, newest first.
-            'limit_changes' => LimitChange::where('user_id', $userId)
+            // Every change of an alert limit in the period, by the AI, the user or a rule, newest first.
+            'limit_changes' => LimitChange::with('device:id,name')
+                ->whereIn('device_id', $deviceIds)
                 ->where('created_at', '>=', $startDate)
                 ->orderByDesc('created_at')
                 ->orderByDesc('id')
                 ->limit(50)
-                ->get(['limit_name', 'old_value', 'new_value', 'source', 'reason', 'created_at']),
+                ->get(['id', 'device_id', 'limit_name', 'old_value', 'new_value', 'source', 'reason', 'created_at'])
+                ->map(fn ($c) => $c->only(['limit_name', 'old_value', 'new_value', 'source', 'reason', 'created_at'])
+                    + ['device_id' => $c->device_id, 'device_name' => $c->device?->name]),
         ]);
-    }
-
-    private function deviceIds(Request $request)
-    {
-        return $request->user()->devices()->pluck('id');
     }
 }
