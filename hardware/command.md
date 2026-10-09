@@ -37,18 +37,15 @@ php artisan migrate:fresh --seed
 ## 3. Reset AI Engine (Forget Training Data)
 If you want to force the AI to forget all logged doses and return to **"Stage 1 (Anomaly Detection)"**, you need to delete its compiled model files (`.pkl`).
 
-**If using Windows PowerShell:**
-```powershell
-Remove-Item -Path "ai_engine\asthma_model.pkl" -ErrorAction SilentlyContinue
-Remove-Item -Path "ai_engine\baseline_model.pkl" -ErrorAction SilentlyContinue
-```
+Models are stored per user in the `ai_models` Docker volume (`/app/models/user_<id>_model.pkl` and `user_<id>_baseline.pkl`).
 
-**If using Mac / Linux / WSL:**
 ```bash
-rm -f ai_engine/*.pkl
+# one user
+docker compose exec ai_engine sh -c 'rm -f /app/models/user_1_*'
+# everyone
+docker compose exec ai_engine sh -c 'rm -f /app/models/*.pkl'
 ```
-
-**After deleting the models, you must restart the AI Engine server** so it recognizes the files are gone!
+No restart is needed: the engine checks for the files on every request.
 
 ---
 
@@ -63,20 +60,21 @@ If you cleared the database but your frontend is acting weird or still stuck in 
 ## 5. Docker Full Hard Reset
 If you are running the system via Docker and want to nuke the database and models completely:
 ```bash
-# 1. Delete the saved AI machine learning models
-rm -f /volume2/docker/iot-project/ai_engine/*.pkl
-
-# 2. Destroy the entire database volume and restart containers
+# Destroys the database AND the ai_models volume, then recreates everything.
 docker compose down -v
 docker compose up -d
-
-# 3. Wait about 10 seconds for MySQL to boot up, then initialize fresh tables
-docker compose exec backend php artisan migrate:fresh --seed
+# The backend runs `php artisan migrate --force` on start, so the tables are recreated automatically.
+# (Do not use --seed in production: the seeder creates admin@asthma.local / password123.)
 ```
 
 ## 6. Send Factory Reset to ESP32 Manually
-If you want to force an ESP32 to wipe its WiFi credentials remotely over MQTT:
+Removing the device in the dashboard does this for you. To do it by hand (the broker requires the backend account):
 ```bash
-docker compose exec backend php artisan tinker --execute="\$m=new PhpMqtt\Client\MqttClient('mqtt',1883,'sniper');\$m->connect((new PhpMqtt\Client\ConnectionSettings)->setUseTls(false),true);\$m->publish('respirosync/commands/YOUR_TOKEN','{\"command\":\"factory_reset\"}',0);\$m->disconnect();echo \"Kill signal sent!\n\";"
+docker compose exec mqtt mosquitto_pub -u respirosync_backend -P 'BACKEND_PASSWORD' -t respirosync/devices/YOUR_TOKEN/commands -m '{"command":"factory_reset"}'
 ```
-*(Replace `YOUR_TOKEN` with the actual device token).*
+*(Replace `YOUR_TOKEN` with the device token and `BACKEND_PASSWORD` with the broker password from `.env`.)*
+
+## 7. Run the backend tests
+```bash
+docker compose exec backend php artisan test
+```

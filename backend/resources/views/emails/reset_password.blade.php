@@ -22,7 +22,7 @@
             <h1>Password Reset Request</h1>
             <p>We received a request to reset the password associated with your RespiroSync account. Click the button below to securely set a new password. This link will expire in 60 minutes.</p>
             
-            <a href="{{ env('FRONTEND_URL', 'http://localhost:3005') }}/reset-password?token={{ $token }}&email={{ urlencode($email) }}" class="btn" style="color: #ffffff;">Reset My Password</a>
+            <a href="{{ config('services.frontend.url') }}/reset-password?token={{ $token }}&email={{ urlencode($email) }}" class="btn" style="color: #ffffff;">Reset My Password</a>
             
             <div class="divider"></div>
             

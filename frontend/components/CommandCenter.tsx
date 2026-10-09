@@ -253,7 +253,7 @@ export default function CommandCenter() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await fetch("/api/config", {
+      const res = await fetch("/api/config", {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -263,6 +263,10 @@ export default function CommandCenter() {
         body: JSON.stringify(config),
       });
       setSaving(false);
+      if (!res.ok) {
+        showToast("Failed to save thresholds", "error");
+        return;
+      }
       setSaved(true);
       showToast("Smart thresholds updated", "success");
       setTimeout(() => setSaved(false), 2000);

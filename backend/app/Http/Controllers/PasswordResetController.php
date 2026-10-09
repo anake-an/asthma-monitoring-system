@@ -48,7 +48,9 @@ class PasswordResetController extends Controller
 
         $resetRecord = DB::table('password_reset_tokens')->where('email', $request->email)->first();
 
-        if (!$resetRecord || !Hash::check($request->token, $resetRecord->token)) {
+        $expired = $resetRecord && Carbon::parse($resetRecord->created_at)->lt(now()->subMinutes(60));
+
+        if (!$resetRecord || $expired || !Hash::check($request->token, $resetRecord->token)) {
             return response()->json(['message' => 'Invalid or expired reset token.'], 400);
         }
 

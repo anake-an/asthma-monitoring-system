@@ -7,10 +7,12 @@ use Illuminate\Database\Eloquent\Model;
 class InhalerLog extends Model
 {
     protected $fillable = [
+        'user_id',
+        'device_id',
         'administered_at',
         'is_manual',
         'type',
-        'cough_event_id'
+        'cough_event_id',
     ];
 
     protected $casts = [
@@ -19,4 +21,9 @@ class InhalerLog extends Model
     ];
 
     public $timestamps = false; // We use administered_at
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
 }

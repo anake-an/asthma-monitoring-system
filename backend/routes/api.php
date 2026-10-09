@@ -37,15 +37,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/ai/train', [\App\Http\Controllers\AiController::class, 'trainModel']);
     Route::get('/ai/predict', [\App\Http\Controllers\AiController::class, 'getPrediction']);
     Route::get('/vapid-public-key', function () {
-        return response()->json(['key' => env('VAPID_PUBLIC_KEY')]);
+        return response()->json(['key' => config('webpush.vapid.public_key')]);
     });
-    
-    Route::post('/test-push', function (\Illuminate\Http\Request $request) {
-        $event = \App\Models\CoughEvent::latest('recorded_at')->first();
-        if (!$event) {
-            $event = new \App\Models\CoughEvent(['severity' => 3]);
-        }
-        $request->user()->notify(new \App\Notifications\CoughAlertNotification($event));
+
+    Route::post('/test-push', function (Request $request) {
+        $user = $request->user();
+        $event = $user->coughEvents()->latest('recorded_at')->first()
+            ?? new \App\Models\CoughEvent(['severity' => \App\Models\CoughEvent::SEVERITY_ALERT]);
+        $user->notify(new \App\Notifications\CoughAlertNotification($event));
+
         return response()->json(['message' => 'Test notification sent']);
-    });
+    })->middleware('throttle:3,1');
 });

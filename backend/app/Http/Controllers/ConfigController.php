@@ -3,76 +3,43 @@
 namespace App\Http\Controllers;
 
 use App\Models\HardwareConfig;
+use App\Support\Mqtt;
 use Illuminate\Http\Request;
-use PhpMqtt\Client\MqttClient;
-use PhpMqtt\Client\ConnectionSettings;
+use Illuminate\Support\Facades\Log;
 
-class ConfigController
+class ConfigController extends Controller
 {
-    public function getConfig()
+    public function getConfig(Request $request)
     {
-        $config = HardwareConfig::first();
-        if (!$config) {
-            $config = HardwareConfig::create([
-                'pm25_threshold' => 35.0,
-                'temperature_threshold' => 35.0,
-                'humidity_threshold' => 60.0,
-                'mq135_threshold' => 300.0,
-                'is_buzzer_muted' => false,
-                'ai_optimization_enabled' => true,
-            ]);
-        }
-        return response()->json($config);
+        return response()->json(HardwareConfig::forUser($request->user()));
     }
 
-    public function updateConfig(Request $request)
+    public function updateConfig(Request $request, Mqtt $mqtt)
     {
         $validated = $request->validate([
-            'pm25_threshold' => 'numeric',
-            'temperature_threshold' => 'numeric',
-            'humidity_threshold' => 'numeric',
-            'mq135_threshold' => 'numeric',
+            'pm25_threshold' => 'numeric|min:0|max:500',
+            'temperature_threshold' => 'numeric|min:0|max:60',
+            'humidity_threshold' => 'numeric|min:0|max:100',
+            'mq135_threshold' => 'numeric|min:0|max:4095',
             'is_buzzer_muted' => 'boolean',
             'ai_optimization_enabled' => 'boolean',
         ]);
 
-        $config = HardwareConfig::first();
-        if ($config) {
-            $config->update($validated);
-        } else {
-            $config = HardwareConfig::create($validated);
+        $user = $request->user();
+        $config = HardwareConfig::forUser($user);
+        $config->update($validated);
+
+        // Push the new thresholds to every device this account owns (retained).
+        $synced = 0;
+        foreach ($user->devices as $device) {
+            try {
+                $mqtt->publishConfig($device, $config);
+                $synced++;
+            } catch (\Throwable $e) {
+                Log::error('Failed to publish config to device', ['device_id' => $device->id, 'error' => $e->getMessage()]);
+            }
         }
 
-        // Publish to MQTT
-        try {
-            $server   = env('MQTT_HOST', 'mqtt');
-            $port     = env('MQTT_PORT', 1883);
-            $clientId = 'laravel_publisher_' . uniqid();
-
-            $mqtt = new MqttClient($server, $port, $clientId);
-            $settings = (new ConnectionSettings())
-                ->setKeepAliveInterval(10)
-                ->setUseTls(false)
-                ->setTlsSelfSignedAllowed(true);
-
-            $mqtt->connect($settings, true);
-
-            $payload = json_encode([
-                'pm25_threshold' => $config->pm25_threshold,
-                'temperature_threshold' => $config->temperature_threshold,
-                'humidity_threshold' => $config->humidity_threshold,
-                'mq135_threshold' => $config->mq135_threshold,
-                'is_buzzer_muted' => $config->is_buzzer_muted,
-                'ai_optimization_enabled' => $config->ai_optimization_enabled,
-            ]);
-
-            $mqtt->publish('asthma/config', $payload, 0);
-            $mqtt->disconnect();
-        } catch (\Exception $e) {
-            \Log::error("Failed to publish config to MQTT: " . $e->getMessage());
-            // Optionally, return error response if MQTT is critical
-        }
-
-        return response()->json($config);
+        return response()->json($config->toArray() + ['devices_synced' => $synced]);
     }
 }

@@ -17,6 +17,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy the rest of the application
 COPY . .
 
+# Per-user models are written here (mounted as the ai_models volume in docker-compose)
+RUN mkdir -p /app/models
+
 # Expose port for FastAPI
 EXPOSE 8000
 

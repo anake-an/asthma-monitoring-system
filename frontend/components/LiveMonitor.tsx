@@ -4,8 +4,8 @@ import InhalerTracker from "./InhalerTracker";
 
 type Telemetry = {
   pm25_level: number;
-  temperature: number;
-  humidity: number;
+  temperature: number | null; // null when the DHT22 read failed
+  humidity: number | null;
   mq135_level?: number;
   recorded_at: string;
 };
@@ -97,7 +97,8 @@ export default function LiveMonitor() {
     return { text: "Hazardous", color: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/20", bar: "bg-red-400" };
   };
 
-  const getClimateInfo = (temp: number, hum: number) => {
+  const getClimateInfo = (temp: number | null, hum: number | null) => {
+    if (temp === null || hum === null) return { text: "Sensor Error", color: "text-zinc-500", bg: "bg-zinc-500/10", border: "border-zinc-500/20", bar: "bg-zinc-400" };
     if (temp > config.temperature_threshold || hum > config.humidity_threshold) return { text: "Action Needed", color: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/20", bar: "bg-red-400" };
     if (temp > config.temperature_threshold - 2) return { text: "Slightly Warm", color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20", bar: "bg-orange-400" };
     if (hum > config.humidity_threshold - 5) return { text: "Slightly Humid", color: "text-blue-400", bg: "bg-blue-400/10", border: "border-blue-400/20", bar: "bg-blue-400" };
@@ -106,7 +107,7 @@ export default function LiveMonitor() {
   };
 
   const isAqiBreached = data ? data.pm25_level > config.pm25_threshold || (data.mq135_level !== undefined && data.mq135_level > config.mq135_threshold) : false;
-  const isClimateBreached = data ? data.temperature > config.temperature_threshold || data.humidity > config.humidity_threshold : false;
+  const isClimateBreached = data ? (data.temperature ?? -Infinity) > config.temperature_threshold || (data.humidity ?? -Infinity) > config.humidity_threshold : false;
   const isEnvironmentUnsafe = isAqiBreached || isClimateBreached;
 
   return (
@@ -199,7 +200,7 @@ export default function LiveMonitor() {
             <div>
               <div className="flex items-end gap-1 mb-2">
                 <span className="text-3xl sm:text-4xl font-semibold tracking-tight text-zinc-900 dark:text-white">
-                  {isOffline ? "--" : (data ? Math.round(data.temperature) : "--")}
+                  {isOffline || !data || data.temperature === null ? "--" : Math.round(data.temperature)}
                 </span>
                 <span className="text-zinc-600 dark:text-zinc-400 font-medium mb-1">°C</span>
               </div>
@@ -216,7 +217,7 @@ export default function LiveMonitor() {
             <div>
               <div className="flex items-end gap-1 mb-2">
                 <span className="text-3xl sm:text-4xl font-semibold tracking-tight text-zinc-900 dark:text-white">
-                  {isOffline ? "--" : (data ? Math.round(data.humidity) : "--")}
+                  {isOffline || !data || data.humidity === null ? "--" : Math.round(data.humidity)}
                 </span>
                 <span className="text-zinc-600 dark:text-zinc-400 font-medium mb-1">%</span>
               </div>

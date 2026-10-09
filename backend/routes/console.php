@@ -1,8 +1,10 @@
 <?php
 
-use Illuminate\Support\Facades\Schedule;
-use Illuminate\Support\Facades\Http;
+use App\Models\User;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('clear:data', function () {
     \App\Models\TelemetryLog::query()->delete();
@@ -13,27 +15,18 @@ Artisan::command('clear:data', function () {
     $this->info('All medical and device data cleared! User accounts have been kept.');
 })->describe('Clear all data except users');
 
-/*
-|--------------------------------------------------------------------------
-| Console Routes
-|--------------------------------------------------------------------------
-|
-| This file is where you may define all of your Closure based console
-| commands. Each Closure is bound to a command instance allowing a
-| simple approach to interacting with each command's IO methods.
-|
-*/
-
-// Option 2: Rolling Window (Every 4 Hours)
-// This triggers the Python AI engine to evaluate the last 4 hours of data
-// and optimize the environmental thresholds (PM2.5, Temp) if necessary.
+// Every 4 hours, retrain each account's model on that account's own data.
 Schedule::call(function () {
-    try {
-        Http::timeout(30)->get('http://ai_engine:8000/train');
-    } catch (\Exception $e) {
-        // Log silently
-    }
-})->everyFourHours();
+    User::has('devices')->pluck('id')->each(function ($userId) {
+        try {
+            Http::timeout(30)->get(config('services.ai_engine.url') . '/train', ['user_id' => $userId]);
+        } catch (\Throwable $e) {
+            Log::warning('Scheduled AI training failed', ['user_id' => $userId, 'error' => $e->getMessage()]);
+        }
+    });
+})->everyFourHours()->name('ai-train-per-user')->withoutOverlapping();
 
-// Fetch AI optimized thresholds and push to ESP32 every 5 minutes
-Schedule::command('ai:optimize')->everyFiveMinutes();
+// Every 5 minutes, apply each account's AI-suggested thresholds and push them to that
+// account's devices. Only affects accounts with "AI optimization" enabled; while it is on,
+// manual threshold edits are overwritten on the next run.
+Schedule::command('ai:optimize')->everyFiveMinutes()->withoutOverlapping();

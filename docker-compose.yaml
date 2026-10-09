@@ -1,3 +1,27 @@
+# Secrets come from .env next to this file (see .env.example). Never commit .env.
+
+x-laravel-env: &laravel-env
+  TZ: Asia/Kuala_Lumpur
+  APP_TIMEZONE: Asia/Kuala_Lumpur
+  DB_CONNECTION: mysql
+  DB_HOST: db
+  DB_PORT: 3306
+  DB_DATABASE: asthma_db
+  DB_USERNAME: ${DB_USERNAME}
+  DB_PASSWORD: ${DB_PASSWORD}
+  MAIL_MAILER: smtp
+  MAIL_HOST: smtp-relay.brevo.com
+  MAIL_PORT: 587
+  MAIL_USERNAME: ${MAIL_USERNAME}
+  MAIL_PASSWORD: ${MAIL_PASSWORD}
+  MAIL_ENCRYPTION: tls
+  MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS}
+  MQTT_HOST: mqtt
+  MQTT_PORT: 1883
+  MQTT_USERNAME: ${MQTT_USERNAME}
+  MQTT_PASSWORD: ${MQTT_PASSWORD}
+  AI_ENGINE_URL: http://ai_engine:8000
+
 services:
   frontend:
     image: node:20-alpine
@@ -20,29 +44,14 @@ services:
     restart: unless-stopped
     working_dir: /var/www/html
     command: >
-      sh -c "if [ -f artisan ]; then composer install && php artisan serve --host=0.0.0.0 --port=8000; else echo 'Waiting' && tail -f /dev/null; fi"
+      sh -c "composer install --no-interaction && php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8000"
     ports:
       - "127.0.0.1:8005:8000"
     volumes:
       - ./backend:/var/www/html
     environment:
-      - TZ=Asia/Kuala_Lumpur
-      - APP_TIMEZONE=Asia/Kuala_Lumpur
-      - DB_CONNECTION=mysql
-      - DB_HOST=db
-      - DB_PORT=3306
-      - DB_DATABASE=asthma_db
-      - DB_USERNAME=${DB_USERNAME}
-      - DB_PASSWORD=${DB_PASSWORD}
-      # SMTP Configuration for Forgot Password
-      - MAIL_MAILER=smtp
-      - MAIL_HOST=smtp-relay.brevo.com
-      - MAIL_PORT=587
-      - MAIL_USERNAME=${MAIL_USERNAME}
-      - MAIL_PASSWORD=${MAIL_PASSWORD}
-      - MAIL_ENCRYPTION=tls
-      - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS}
-      - MAIL_FROM_NAME="RespiroSync Dashboard"
+      <<: *laravel-env
+      MAIL_FROM_NAME: "RespiroSync Dashboard"
     depends_on:
       - db
       - mqtt
@@ -52,27 +61,12 @@ services:
     restart: unless-stopped
     working_dir: /var/www/html
     command: >
-      sh -c "while [ ! -d vendor ]; do sleep 2; done; php artisan mqtt:subscribe"
+      sh -c "while [ ! -f vendor/autoload.php ]; do sleep 2; done; php artisan mqtt:subscribe"
     volumes:
       - ./backend:/var/www/html
     environment:
-      - TZ=Asia/Kuala_Lumpur
-      - APP_TIMEZONE=Asia/Kuala_Lumpur
-      - DB_CONNECTION=mysql
-      - DB_HOST=db
-      - DB_PORT=3306
-      - DB_DATABASE=asthma_db
-      - DB_USERNAME=${DB_USERNAME}
-      - DB_PASSWORD=${DB_PASSWORD}
-      # SMTP Configuration for Email Alerts
-      - MAIL_MAILER=smtp
-      - MAIL_HOST=smtp-relay.brevo.com
-      - MAIL_PORT=587
-      - MAIL_USERNAME=${MAIL_USERNAME}
-      - MAIL_PASSWORD=${MAIL_PASSWORD}
-      - MAIL_ENCRYPTION=tls
-      - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS}
-      - MAIL_FROM_NAME="RespiroSync Alerts"
+      <<: *laravel-env
+      MAIL_FROM_NAME: "RespiroSync Alerts"
     depends_on:
       - db
       - mqtt
@@ -85,11 +79,14 @@ services:
     ports:
       - "127.0.0.1:8010:8000"
     environment:
-      - DB_CONNECTION=mysql
+      - TZ=Asia/Kuala_Lumpur
       - DB_HOST=db
       - DB_DATABASE=asthma_db
       - DB_USERNAME=${DB_USERNAME}
       - DB_PASSWORD=${DB_PASSWORD}
+      - MODEL_DIR=/app/models
+    volumes:
+      - ai_models:/app/models   # per-user models survive rebuilds/redeploys
     depends_on:
       - db
 
@@ -98,7 +95,6 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Asia/Kuala_Lumpur
-      - APP_TIMEZONE=Asia/Kuala_Lumpur
       - MYSQL_DATABASE=asthma_db
       - MYSQL_USER=${DB_USERNAME}
       - MYSQL_PASSWORD=${DB_PASSWORD}
@@ -113,6 +109,7 @@ services:
       - "127.0.0.1:1884:1883"
       - "127.0.0.1:9001:9001"
     volumes:
+      # config/ holds mosquitto.conf + acl (in git) and passwd (created on the server, gitignored)
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
@@ -128,16 +125,14 @@ services:
     restart: unless-stopped
     working_dir: /var/www/html
     command: >
-      sh -c "while [ ! -f artisan ]; do sleep 2; done; php artisan schedule:work"
+      sh -c "while [ ! -f vendor/autoload.php ]; do sleep 2; done; php artisan schedule:work"
     volumes:
       - ./backend:/var/www/html
     environment:
-      - TZ=Asia/Kuala_Lumpur
-      - APP_TIMEZONE=Asia/Kuala_Lumpur
+      <<: *laravel-env
     depends_on:
       - backend
 
 volumes:
   dbdata:
-
-    # deploy pipeline test
+  ai_models:

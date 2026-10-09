@@ -1,47 +1,37 @@
 /*
- * RespiroSync - Phase 2 AI: Data Collection Firmware
- * 
- * Purpose: This script reads raw audio data from the INMP441 I2S microphone 
- * and streams it directly to the Serial port. 
- * 
- * Usage: Flash this to the Pico, then run the Edge Impulse CLI on your PC:
- * "edge-impulse-data-forwarder --frequency 16000"
+ * RespiroSync - Phase 2 AI: audio data collection (Raspberry Pi Pico, arduino-pico core)
+ *
+ * Streams raw 16 kHz audio from the INMP441 over USB serial, one 16-bit sample per line.
+ * Usage: flash this, then on your PC run:
+ *   edge-impulse-data-forwarder --frequency 16000
+ *
+ * Wiring is the same as pico_cough_ai.ino: SCK=GP14, WS=GP15, SD=GP13, L/R=GND.
  */
 
 #include <I2S.h>
 
-#define I2S_WS 13
-#define I2S_SCK 14
-#define I2S_SD 15
-const int SAMPLE_RATE = 16000;
-const int BITS_PER_SAMPLE = 32;
+#define I2S_BCLK 14  // WS/LRCLK = GP15
+#define I2S_DATA 13
+
+I2S i2s(INPUT);
 
 void setup() {
   Serial.begin(115200);
-  
-  // Wait for Serial to connect so Edge Impulse doesn't miss the start
-  while (!Serial);
+  while (!Serial) delay(10);  // wait for the forwarder to attach
 
-  I2S.setBCLK(I2S_SCK);
-  I2S.setDATA(I2S_SD);
-  I2S.setBitsPerSample(BITS_PER_SAMPLE);
+  i2s.setBCLK(I2S_BCLK);
+  i2s.setDATA(I2S_DATA);
+  i2s.setBitsPerSample(32);
+  i2s.setFrequency(16000);
 
-  if (!I2S.begin(I2S_PHILIPS_MODE, SAMPLE_RATE)) {
-    Serial.println("Failed to initialize I2S!");
-    while (1);
+  if (!i2s.begin()) {
+    Serial.println("Failed to initialise I2S!");
+    while (true) delay(1000);
   }
 }
 
 void loop() {
-  int32_t sample = 0;
-  
-  // Read raw audio sample from microphone
-  I2S.read(); // dummy read for 32-bit alignment if necessary
-  sample = I2S.read(); // Get actual data
-  
-  // Shift it down to a 16-bit range for Edge Impulse compatibility
-  int16_t outSample = sample >> 12;
-  
-  // Print raw value to serial plotter / data forwarder
-  Serial.println(outSample);
+  int32_t left = 0, right = 0;
+  i2s.read32(&left, &right);         // mic data is on the left slot (L/R = GND)
+  Serial.println((int16_t)(left >> 16));  // top 16 bits
 }

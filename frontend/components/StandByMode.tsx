@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 
 type Telemetry = {
   pm25_level: number;
-  temperature: number;
-  humidity: number;
+  temperature: number | null;
+  humidity: number | null;
   recorded_at: string;
 };
 
@@ -118,7 +118,8 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
     return { color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/20", glow: "shadow-red-500/20" };
   };
 
-  const getTempInfo = (temp: number) => {
+  const getTempInfo = (temp: number | null) => {
+    if (temp === null) return { color: "text-zinc-500", bg: "bg-zinc-500/10", border: "border-zinc-500/20", glow: "shadow-zinc-500/10" };
     if (temp > config.temperature_threshold) return { color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/20", glow: "shadow-red-500/10" };
     if (temp > config.temperature_threshold - 2) return { color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/20", glow: "shadow-orange-500/10" };
     if (temp < 18) return { color: "text-cyan-400", bg: "bg-cyan-500/10", border: "border-cyan-500/20", glow: "shadow-cyan-500/10" };
@@ -199,7 +200,7 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
               </svg>
               {data ? (
                 <span className={`text-6xl lg:text-7xl font-semibold tracking-tight ${getTempInfo(data.temperature).color}`}>
-                  {Math.round(data.temperature)}
+                  {data.temperature === null ? "--" : Math.round(data.temperature)}
                 </span>
               ) : (
                 <span className="text-6xl text-zinc-600">--</span>

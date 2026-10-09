@@ -5,7 +5,7 @@ import { Brain, Activity, Clock } from "lucide-react";
 type AiPrediction = {
   model_stage: string;
   probability_of_attack: number;
-  estimated_time_to_next_inhaler_mins: number;
+  current_inputs?: { coughs_last_hour: number };
   error?: string;
 };
 
@@ -50,18 +50,12 @@ export default function AiRiskAssessment() {
     );
   }
 
-  let activePrediction: AiPrediction;
-  
-  if (!prediction || prediction.error) {
-    // Fallback to a "Learning Mode" instead of a strict UI lockout
-    activePrediction = {
-      model_stage: "Stage 1 (Learning)",
-      probability_of_attack: 0.1, // Default safe 10% risk
-      estimated_time_to_next_inhaler_mins: -1 // Safe
-    };
-  } else {
-    activePrediction = prediction;
-  }
+  // No model yet (or engine unreachable): show "Learning mode" instead of locking the panel,
+  // but never display a made-up risk number.
+  const isLearning = !prediction || !!prediction.error;
+  const activePrediction: AiPrediction = isLearning
+    ? { model_stage: "Learning mode", probability_of_attack: 0 }
+    : (prediction as AiPrediction);
   
   const riskPercent = Math.round(activePrediction.probability_of_attack * 100);
   
@@ -78,6 +72,11 @@ export default function AiRiskAssessment() {
     riskColor = "text-red-400";
     riskBg = "bg-red-400/10";
     riskText = "High Risk";
+  }
+  if (isLearning) {
+    riskColor = "text-zinc-500 dark:text-zinc-400";
+    riskBg = "bg-zinc-500/10";
+    riskText = "Learning";
   }
 
   return (
@@ -103,10 +102,10 @@ export default function AiRiskAssessment() {
           <div>
             <div className="flex items-baseline gap-1">
               <span className={`text-4xl lg:text-5xl font-semibold tracking-tight ${riskColor}`}>
-                {riskPercent}%
+                {isLearning ? "--" : `${riskPercent}%`}
               </span>
             </div>
-            <div className="text-sm text-zinc-600 dark:text-zinc-400 font-medium mt-1">Attack Probability</div>
+            <div className="text-sm text-zinc-600 dark:text-zinc-400 font-medium mt-1">{isLearning ? "Collecting data, no prediction yet" : "Attack Probability"}</div>
           </div>
           <div className={`px-3 py-1 rounded-full text-xs font-semibold ${riskBg} ${riskColor}`}>
             {riskText}
@@ -116,18 +115,14 @@ export default function AiRiskAssessment() {
         {/* Separator */}
         <div className="w-full h-px bg-zinc-100 dark:bg-zinc-800/50"></div>
 
-        {/* Estimated Time */}
+        {/* Recent activity (measured, not predicted) */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Clock className="w-4 h-4 text-zinc-600 dark:text-zinc-400" />
-            <span className="text-sm text-zinc-600 dark:text-zinc-400">Estimated Next Inhaler:</span>
+            <span className="text-sm text-zinc-600 dark:text-zinc-400">Coughs in last hour:</span>
           </div>
           <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-            {activePrediction.estimated_time_to_next_inhaler_mins === -1 
-              ? "Safe (>24 hrs)" 
-              : activePrediction.estimated_time_to_next_inhaler_mins > 900 
-                ? "Safe (>15 hrs)" 
-                : `~${activePrediction.estimated_time_to_next_inhaler_mins} mins`}
+            {activePrediction.current_inputs?.coughs_last_hour ?? "--"}
           </span>
         </div>
 

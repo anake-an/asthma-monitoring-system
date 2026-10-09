@@ -2,82 +2,70 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\TelemetryLog;
 use App\Models\CoughEvent;
+use App\Models\InhalerLog;
+use App\Models\TelemetryLog;
 use Illuminate\Http\Request;
 
-class DashboardController
+/**
+ * Every query here is scoped to the authenticated account: telemetry and cough
+ * events through the user's devices, inhaler logs through user_id.
+ */
+class DashboardController extends Controller
 {
     /**
-     * Fetch the latest 100 environment telemetry logs.
-     * These logs are continuously populated by the MQTT background worker.
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
+     * Latest 100 telemetry rows from the user's devices.
      */
     public function getTelemetry(Request $request)
     {
-        $deviceIds = $request->user()->devices()->pluck('id');
-        
-        $logs = TelemetryLog::whereIn('device_id', $deviceIds)
+        $logs = TelemetryLog::whereIn('device_id', $this->deviceIds($request))
             ->orderBy('recorded_at', 'desc')
             ->take(100)
             ->get();
-            
+
         return response()->json($logs);
     }
 
     /**
-     * Retrieve a paginated list of cough events detected by the AI Engine.
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
+     * Paginated cough events from the user's devices.
      */
     public function getCoughEvents(Request $request)
     {
-        $deviceIds = $request->user()->devices()->pluck('id');
-        $perPage = $request->get('per_page', 10);
-        
-        $events = CoughEvent::whereIn('device_id', $deviceIds)
+        $perPage = min(max((int) $request->get('per_page', 10), 1), 100);
+
+        $events = CoughEvent::whereIn('device_id', $this->deviceIds($request))
             ->orderBy('recorded_at', 'desc')
             ->paginate($perPage);
-            
+
         return response()->json($events);
     }
 
     /**
-     * Verify a cough event and log whether an inhaler was used.
-     * This data acts as the feedback loop to re-train the AI Engine.
-     *
-     * @param Request $request
-     * @param int $id
-     * @return \Illuminate\Http\JsonResponse
+     * Caregiver feedback on a cough event (confirmed / false alarm, inhaler used).
+     * The AI engine excludes events marked as false alarms from training.
      */
     public function verifyCoughEvent(Request $request, $id)
     {
-        $event = CoughEvent::findOrFail($id);
-        
+        $event = CoughEvent::whereIn('device_id', $this->deviceIds($request))->findOrFail($id);
+
         $request->validate([
             'is_verified' => 'required|boolean',
             'inhaler_used' => 'required|boolean',
         ]);
 
         $event->update([
-            'is_verified' => $request->is_verified,
-            'inhaler_used' => $request->inhaler_used,
+            'is_verified' => $request->boolean('is_verified'),
+            'inhaler_used' => $request->boolean('inhaler_used'),
         ]);
 
-        if ($request->inhaler_used) {
-            \App\Models\InhalerLog::firstOrCreate(
+        if ($request->boolean('inhaler_used')) {
+            InhalerLog::firstOrCreate(
                 ['cough_event_id' => $event->id],
-                ['is_manual' => false]
+                ['is_manual' => false, 'user_id' => $request->user()->id, 'device_id' => $event->device_id]
             );
         } else {
-            \App\Models\InhalerLog::where('cough_event_id', $event->id)->delete();
+            InhalerLog::where('cough_event_id', $event->id)->delete();
         }
-
-        // In the future, this is where we would dispatch a job to retrain or update the AI model
-        // with the new validated dataset.
 
         return response()->json($event);
     }
@@ -87,7 +75,7 @@ class DashboardController
         $request->validate([
             'endpoint' => 'required',
             'keys.auth' => 'required',
-            'keys.p256dh' => 'required'
+            'keys.p256dh' => 'required',
         ]);
 
         $request->user()->updatePushSubscription(
@@ -100,86 +88,83 @@ class DashboardController
     }
 
     /**
-     * Fetch the most recent inhaler administration time.
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
+     * Most recent inhaler administration for this account.
      */
     public function getInhalerStatus(Request $request)
     {
-        $lastLog = \App\Models\InhalerLog::orderBy('administered_at', 'desc')->first();
-        
-        $recentRescueCount = \App\Models\InhalerLog::where('type', 'rescue')
+        $logs = $request->user()->inhalerLogs();
+
+        $lastLog = (clone $logs)->orderBy('administered_at', 'desc')->first();
+
+        $recentRescueCount = (clone $logs)->where('type', 'rescue')
             ->where('administered_at', '>=', now()->subHours(4))
             ->count();
 
         return response()->json([
-            'last_administered_at' => $lastLog ? $lastLog->administered_at : null,
-            'recent_rescue_count' => $recentRescueCount
+            'last_administered_at' => $lastLog?->administered_at,
+            'recent_rescue_count' => $recentRescueCount,
         ]);
     }
 
     /**
-     * Log a manual administration of the inhaler.
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
+     * Log a manual inhaler dose for this account.
      */
     public function logManualInhaler(Request $request)
     {
         $request->validate([
-            'type' => 'required|in:rescue,controller'
+            'type' => 'required|in:rescue,controller',
         ]);
 
-        $log = \App\Models\InhalerLog::create([
+        $log = InhalerLog::create([
+            'user_id' => $request->user()->id,
             'is_manual' => true,
             'type' => $request->type,
-        ]);
-        
+        ])->refresh();
+
         return response()->json([
             'message' => 'Manual inhaler usage logged',
-            'last_administered_at' => $log->administered_at
+            'last_administered_at' => $log->administered_at,
         ]);
     }
 
     /**
-     * Generate the data payload for the weekly PDF pediatric report.
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
+     * Data for the weekly activity report, for this account only.
      */
     public function getWeeklyReport(Request $request)
     {
         $startDate = now()->subDays(7);
-        
-        $totalEvents = CoughEvent::where('recorded_at', '>=', $startDate)->count();
-        $highSeverity = CoughEvent::where('recorded_at', '>=', $startDate)->where('severity', '>=', 7)->count();
-        $rescueDoses = \App\Models\InhalerLog::where('administered_at', '>=', $startDate)->where('type', 'rescue')->count();
-        $controllerDoses = \App\Models\InhalerLog::where('administered_at', '>=', $startDate)->where('type', 'controller')->count();
-        $inhalerDoses = $rescueDoses + $controllerDoses;
-        
-        $dailyEvents = CoughEvent::where('recorded_at', '>=', $startDate)
-            ->selectRaw('DATE(recorded_at) as date, COUNT(*) as count')
-            ->groupBy('date')
-            ->orderBy('date')
-            ->get();
+        $deviceIds = $this->deviceIds($request);
+        $userId = $request->user()->id;
 
-        $dailyInhalers = \App\Models\InhalerLog::where('administered_at', '>=', $startDate)
-            ->selectRaw('DATE(administered_at) as date, type, COUNT(*) as count')
-            ->groupBy('date', 'type')
-            ->orderBy('date')
-            ->get();
+        $coughs = fn () => CoughEvent::whereIn('device_id', $deviceIds)->where('recorded_at', '>=', $startDate);
+        $inhalers = fn () => InhalerLog::where('user_id', $userId)->where('administered_at', '>=', $startDate);
+
+        $rescueDoses = $inhalers()->where('type', 'rescue')->count();
+        $controllerDoses = $inhalers()->where('type', 'controller')->count();
 
         return response()->json([
             'start_date' => $startDate->toDateString(),
             'end_date' => now()->toDateString(),
-            'total_events' => $totalEvents,
-            'high_severity_events' => $highSeverity,
-            'inhaler_doses' => $inhalerDoses,
+            'total_events' => $coughs()->count(),
+            'high_severity_events' => $coughs()->where('severity', '>=', CoughEvent::SEVERITY_ALERT)->count(),
+            'inhaler_doses' => $rescueDoses + $controllerDoses,
             'rescue_doses' => $rescueDoses,
             'controller_doses' => $controllerDoses,
-            'daily_breakdown' => $dailyEvents,
-            'daily_inhalers' => $dailyInhalers
+            'daily_breakdown' => $coughs()
+                ->selectRaw('DATE(recorded_at) as date, COUNT(*) as count')
+                ->groupBy('date')
+                ->orderBy('date')
+                ->get(),
+            'daily_inhalers' => $inhalers()
+                ->selectRaw('DATE(administered_at) as date, type, COUNT(*) as count')
+                ->groupBy('date', 'type')
+                ->orderBy('date')
+                ->get(),
         ]);
+    }
+
+    private function deviceIds(Request $request)
+    {
+        return $request->user()->devices()->pluck('id');
     }
 }

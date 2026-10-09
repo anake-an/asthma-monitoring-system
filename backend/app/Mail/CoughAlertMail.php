@@ -2,32 +2,29 @@
 
 namespace App\Mail;
 
+use App\Models\CoughEvent;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Queue\SerializesModels;
-use App\Models\CoughEvent;
 
 class CoughAlertMail extends Mailable
 {
     use Queueable, SerializesModels;
 
-    public $event;
-
-    public function __construct(CoughEvent $event)
+    public function __construct(public CoughEvent $event, public int $clusterCount = 1)
     {
-        $this->event = $event;
     }
 
     public function build()
     {
-        $severityLabel = 'Low';
-        if ($this->event->severity == 2) $severityLabel = 'Medium';
-        if ($this->event->severity == 3) $severityLabel = 'High';
-        
-        return $this->subject('⚠️ URGENT: High Severity Asthma Alert Detected')
-                    ->view('emails.cough_alert')
-                    ->with([
-                        'severityLabel' => $severityLabel
-                    ]);
+        return $this->subject('RespiroSync alert: repeated coughing detected')
+            ->view('emails.cough_alert')
+            ->with([
+                'clusterCount' => $this->clusterCount,
+                'windowMinutes' => \App\Services\DeviceMessageHandler::WINDOW_MINUTES,
+                // Pico detection strength (heuristic 0..1). Null means the device did not report one.
+                'strength' => $this->event->confidence,
+                'dashboardUrl' => config('services.frontend.url'),
+            ]);
     }
 }

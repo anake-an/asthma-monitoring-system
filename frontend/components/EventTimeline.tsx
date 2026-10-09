@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 type CoughEvent = {
   id: number;
   severity: number;
+  confidence: number | null;
   recorded_at: string;
   is_verified: boolean | null;
   inhaler_used: boolean;
@@ -90,10 +91,10 @@ export default function EventTimeline() {
     return () => clearInterval(interval);
   }, [fetchEvents]);
 
+  // Backend severity: 1 = logged only, 3 = met the alert rule (cough cluster)
   const getSeverityInfo = (severity: number) => {
-    if (severity <= 3) return { label: "Low", bg: "bg-emerald-500/10", border: "border-emerald-500/20", text: "text-emerald-400", dot: "bg-emerald-400" };
-    if (severity <= 6) return { label: "Medium", bg: "bg-yellow-500/10", border: "border-yellow-500/20", text: "text-yellow-400", dot: "bg-yellow-400" };
-    return { label: "High", bg: "bg-red-500/10", border: "border-red-500/20", text: "text-red-400", dot: "bg-red-400" };
+    if (severity >= 3) return { label: "Alert", bg: "bg-red-500/10", border: "border-red-500/20", text: "text-red-400", dot: "bg-red-400" };
+    return { label: "Logged", bg: "bg-zinc-500/10", border: "border-zinc-500/20", text: "text-zinc-500 dark:text-zinc-400", dot: "bg-zinc-400" };
   };
 
   return (
@@ -113,8 +114,8 @@ export default function EventTimeline() {
           {/* Table Header */}
           <div className="grid grid-cols-[1fr_80px_80px_180px] gap-3 px-4 py-2.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-400 uppercase tracking-wider bg-gray-50 dark:bg-[#0e0e18] border-b border-zinc-200 dark:border-[#1e1e30]">
             <span>Timestamp</span>
-            <span>Severity</span>
-            <span>Level</span>
+            <span title="Sound-level heuristic from the Pico, not a probability">Strength</span>
+            <span>Status</span>
             <span className="text-right">AI Feedback</span>
           </div>
 
@@ -140,7 +141,7 @@ export default function EventTimeline() {
                   </div>
                 </div>
                 <span className="text-sm text-zinc-700 dark:text-zinc-300" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                  {ev.severity}/10
+                  {ev.confidence !== null && ev.confidence !== undefined ? `${Math.round(ev.confidence * 100)}%` : "n/a"}
                 </span>
                 <div>
                   <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${sev.bg} ${sev.text} border ${sev.border} inline-block`}>

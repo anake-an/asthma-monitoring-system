@@ -26,34 +26,34 @@
         <div class="container">
             <div class="header">
                 <img src="https://cdn.jsdelivr.net/gh/anake-an/asthma-monitoring-system@main/frontend/public/logo.jpg" alt="RespiroSync Logo" class="icon" style="border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                <h1>Asthma Attack Warning</h1>
+                <h1>Repeated Coughing Detected</h1>
             </div>
             
             <div class="body-content">
-                <p>The RespiroSync Edge AI has detected an abnormal, high-severity acoustic cough event in the patient's room requiring immediate attention.</p>
-                
+                <p>The RespiroSync device in the patient's room detected repeated coughing. This is an automated sound-level alert, not a medical diagnosis. Please check on the patient.</p>
+
                 <div class="data-box">
                     <div class="data-row">
-                        <span class="data-label">Severity Level</span>
-                        <span class="data-value" style="color: #dc2626;">Level {{ $event->severity }} ({{ $severityLabel }})</span>
+                        <span class="data-label">Coughs detected</span>
+                        <span class="data-value" style="color: #dc2626;">{{ $clusterCount }} in the last {{ $windowMinutes }} minutes</span>
                     </div>
                     <div class="data-row">
-                        <span class="data-label">AI Confidence</span>
-                        <span class="data-value">{{ $event->confidence > 0 ? number_format($event->confidence * 100, 1) : '98.5' }}%</span>
+                        <span class="data-label">Detection strength</span>
+                        <span class="data-value">{{ $strength !== null ? number_format($strength * 100, 0) . '% (sound-level heuristic)' : 'Not reported by device' }}</span>
                     </div>
                     <div class="data-row">
                         <span class="data-label">Time Detected</span>
                         <span class="data-value">{{ \Carbon\Carbon::parse($event->recorded_at)->format('h:i:s A') }}</span>
                     </div>
                 </div>
-                
-                <a href="{{ env('FRONTEND_URL', 'http://localhost:3005') }}" class="btn" style="color: #ffffff;">Open Dashboard Immediately</a>
-                
-                <p style="margin-top: 32px; margin-bottom: 0; font-size: 13px; color: #6b7280;">Please check on the patient and prepare the emergency rescue inhaler if necessary.</p>
+
+                <a href="{{ $dashboardUrl }}" class="btn" style="color: #ffffff;">Open Dashboard</a>
+
+                <p style="margin-top: 32px; margin-bottom: 0; font-size: 13px; color: #6b7280;">Follow the patient's asthma action plan. In an emergency, call 999.</p>
             </div>
         </div>
         <div class="footer">
-            &copy; {{ date('Y') }} RespiroSync Medical Dashboard.<br>This is an automated emergency medical alert.
+            &copy; {{ date('Y') }} RespiroSync Medical Dashboard.<br>This is an automated alert from a prototype monitoring system. It is not a medical device.
         </div>
     </div>
 </body>

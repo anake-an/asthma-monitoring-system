@@ -1,0 +1,23 @@
+# RespiroSync topic ACL
+#
+# Topic layout (one namespace per device, keyed by its 6-character pairing token):
+#   respirosync/devices/<token>/telemetry   device -> cloud  sensor readings every 5 s
+#   respirosync/devices/<token>/events      device -> cloud  cough detections
+#   respirosync/devices/<token>/config      cloud -> device  thresholds (retained)
+#   respirosync/devices/<token>/commands    cloud -> device  factory_reset, buzzer_on, buzzer_off
+#
+# Devices connect with client id = their token, so %c below pins each device to
+# its own namespace. A device can never read another device's data or token.
+
+# Applies to every authenticated client
+pattern write respirosync/devices/%c/telemetry
+pattern write respirosync/devices/%c/events
+pattern read respirosync/devices/%c/config
+pattern read respirosync/devices/%c/commands
+
+# Backend service account
+user respirosync_backend
+topic readwrite respirosync/#
+
+# Shared device account: no topic rules of its own, only the patterns above
+user respirosync_device

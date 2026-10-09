@@ -12,7 +12,17 @@ class HardwareConfig extends Model
     const UPDATED_AT = 'updated_at';
     const CREATED_AT = null;
 
+    public const DEFAULTS = [
+        'pm25_threshold' => 35.0,
+        'temperature_threshold' => 35.0,
+        'humidity_threshold' => 60.0,
+        'mq135_threshold' => 300.0,
+        'is_buzzer_muted' => false,
+        'ai_optimization_enabled' => true,
+    ];
+
     protected $fillable = [
+        'user_id',
         'pm25_threshold',
         'temperature_threshold',
         'humidity_threshold',
@@ -29,4 +39,31 @@ class HardwareConfig extends Model
         'is_buzzer_muted' => 'boolean',
         'ai_optimization_enabled' => 'boolean',
     ];
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Each account owns exactly one threshold profile, created on first use.
+     */
+    public static function forUser(User $user): self
+    {
+        return static::firstOrCreate(['user_id' => $user->id], self::DEFAULTS);
+    }
+
+    /**
+     * The JSON the ESP32 receives on respirosync/devices/{token}/config.
+     */
+    public function toDevicePayload(): array
+    {
+        return [
+            'pm25_threshold' => $this->pm25_threshold,
+            'temperature_threshold' => $this->temperature_threshold,
+            'humidity_threshold' => $this->humidity_threshold,
+            'mq135_threshold' => $this->mq135_threshold,
+            'is_buzzer_muted' => $this->is_buzzer_muted,
+        ];
+    }
 }

@@ -3,11 +3,11 @@
 ![Version](https://img.shields.io/badge/version-v4.3.0-blue)
 ![Next.js](https://img.shields.io/badge/Next.js-14-black.svg) 
 ![Laravel](https://img.shields.io/badge/Laravel-11-red.svg) 
-![Python](https://img.shields.io/badge/Python-3.11-yellow.svg) 
+![Python](https://img.shields.io/badge/Python-3.10-yellow.svg) 
 ![Docker](https://img.shields.io/badge/Docker-Compose-blue.svg)
 ![License](https://img.shields.io/badge/license-GPLv3-green.svg)
 
-**RespiroSync** is a professional, full-stack IoT medical telemetry platform. It utilizes a Dual-Processor Hardware Architecture (ESP32 + Raspberry Pi Pico) to perform acoustic AI cough detection and environmental monitoring at the edge, beaming data securely to a Next.js / Laravel cloud dashboard.
+**RespiroSync** is a professional, full-stack IoT medical telemetry platform. It uses a dual-processor device (ESP32 + Raspberry Pi Pico) for sound-based cough detection and environmental monitoring, and sends data over authenticated, encrypted MQTT to a Next.js / Laravel dashboard.
 
 ---
 
@@ -27,14 +27,14 @@ The cloud platform features a responsive, dark-mode native dashboard designed fo
 
 | Feature | Technology Used | Description |
 |---|---|---|
-| **Edge Acoustic AI** | `Raspberry Pi Pico` | High-speed I2S microphone (INMP441) sampling and energy-heuristic algorithms to detect human coughs with confidence scoring. |
-| **Environmental Telemetry** | `ESP32` | Polls DHT22 (Temp/Hum), MQ-135 (Gas), and Sharp Dust (PM2.5) sensors. |
-| **Secure IoT Transport** | `Cloudflare WebSockets` | Bi-directional WSS (Secure WebSockets) payload delivery bypassing home router NATs. |
-| **Predictive AI Engine** | `Python / scikit-learn` | Dedicated Python microservice running Random Forest models to detect abnormal breathing patterns. |
-| **REST API & Workers** | `Laravel 11 / PHP 8.2` | Manages device authentication, token issuance, and background MQTT worker daemons. |
-| **Interactive UI** | `Next.js / Tailwind CSS` | Real-time React frontend with interactive Recharts, Sleep Mode, and Command Center. |
-| **Emergency Alerts** | `Brevo SMTP / Push` | Automated, intelligent anti-spam dispatch of clinical HTML emails and Web Push notifications. |
-| **Identity Management** | `Laravel Sanctum` | Secure multi-tenant authentication with tokenized forgot/reset password flows. |
+| **Acoustic cough detection** | `Raspberry Pi Pico` | INMP441 I2S microphone. A sound-level heuristic flags short loud bursts and reports a 0–1 *detection strength*. It cannot yet tell a cough from other loud sounds (see `hardware/README.md`, Phase 2). |
+| **Environmental Telemetry** | `ESP32` | DHT22 (temp/humidity), MQ-135 (gas, raw ADC), Sharp GP2Y1014AU0F (dust). Local buzzer/LED alarm when a reading crosses its threshold, even offline. |
+| **Secure IoT Transport** | `Mosquitto + Cloudflare Tunnel` | MQTT over WSS. No anonymous access; each device can only publish/subscribe under its own token (broker ACL). |
+| **Predictive AI Engine** | `Python / scikit-learn` | One model per account. Stage 1: anomaly check against the room's own baseline. Stage 2: Random Forest predicting an asthma-like event in the next hour, with held-out validation. Caregiver "false alarm" labels are excluded from training. |
+| **REST API & Workers** | `Laravel 11 / PHP 8.2` | API, MQTT worker, scheduler. All data is scoped to the signed-in account. |
+| **Interactive UI** | `Next.js / Tailwind CSS` | Live monitor, Sleep Mode, Command Center (thresholds sync to the device), weekly report. |
+| **Alerts** | `Brevo SMTP` | Email when coughs cluster (3 in 10 min, or 2 strong detections), at most one per device per 10 minutes. Web Push is implemented server-side; the browser subscription UI is not wired yet. |
+| **Identity Management** | `Laravel Sanctum` | Token auth, forgot/reset password (links expire after 60 minutes). |
 
 ---
 
@@ -42,14 +42,26 @@ The cloud platform features a responsive, dark-mode native dashboard designed fo
 
 ```mermaid
 graph LR
-    Pico[Raspberry Pi Pico\nINMP441 AI] -- UART --> ESP32[ESP32 Gateway\nSensors]
-    ESP32 -- WSS/MQTT --> Cloudflare[Cloudflare Tunnel]
-    Cloudflare -- Port 1883 --> Mosquitto[Mosquitto Broker]
-    Mosquitto -- Sub --> Laravel[Laravel API Worker]
-    Laravel -- REST --> NextJS[Next.js Dashboard]
-    Laravel -- REST --> Python[Python AI Engine]
-    Laravel -- SMTP --> Brevo[Brevo Email Alerts]
+    Pico[Raspberry Pi Pico\nINMP441 mic] -- UART COUGH:level,strength --> ESP32[ESP32 Gateway\nSensors + alarm]
+    ESP32 -- MQTT over WSS :443 --> Cloudflare[Cloudflare Tunnel]
+    Cloudflare -- WebSockets :9001 --> Mosquitto[Mosquitto\nauth + ACL]
+    Mosquitto -- respirosync/devices/+/telemetry,events --> Worker[Laravel MQTT Worker]
+    API[Laravel API] -- respirosync/devices/token/config, commands --> Mosquitto
+    NextJS[Next.js Dashboard] -- REST /api --> API
+    API -- HTTP ?user_id= --> Python[Python AI Engine]
+    Worker -- SMTP --> Brevo[Brevo Email Alerts]
 ```
+
+### MQTT topics
+
+| Topic | Direction | Payload |
+|---|---|---|
+| `respirosync/devices/<token>/telemetry` | device → cloud | `{"pm25_level":12.3,"temperature":29.1,"humidity":70,"mq135_level":410}` (`null` for a failed sensor) |
+| `respirosync/devices/<token>/events` | device → cloud | `{"event":"cough","level":2,"confidence":0.42}` (`confidence` = Pico detection strength) |
+| `respirosync/devices/<token>/config` | cloud → device (retained) | `{"pm25_threshold":35,"temperature_threshold":35,"humidity_threshold":60,"mq135_threshold":300,"is_buzzer_muted":false}` |
+| `respirosync/devices/<token>/commands` | cloud → device | `{"command":"factory_reset"}`, `buzzer_on`, `buzzer_off` |
+
+The device connects with **client id = its 6-character token**; `mosquitto/config/acl` restricts it to its own four topics.
 
 ---
 
@@ -57,59 +69,65 @@ graph LR
 
 ```text
 asthma-monitoring-system/
-├── frontend/               # Next.js Application (Port 3000)
-├── backend/                # Laravel API Application (Port 8000)
-├── ai_engine/              # Python Machine Learning Microservice (Port 5000)
-├── hardware/               # ESP32 and Pico Firmware (C++)
-├── mosquitto/              # MQTT Broker Configuration (Port 1883)
-└── docker-compose.yaml     # Orchestrates all 5 microservices
+├── frontend/               # Next.js application (port 3000, published on 127.0.0.1:3005)
+├── backend/                # Laravel 11 API, MQTT worker, scheduler (port 8000 → 127.0.0.1:8005)
+│   └── tests/              # PHPUnit tests (in-memory SQLite)
+├── ai_engine/              # Python FastAPI + scikit-learn service (127.0.0.1:8010)
+├── hardware/               # ESP32 and Pico firmware (Arduino)
+├── mosquitto/config/       # mosquitto.conf + acl (passwd is created on the server, never committed)
+├── .env.example            # docker-compose variables
+└── docker-compose.yaml
 ```
 
 ---
 
 ## 🌍 Infrastructure & Hosting Architecture
 
-The backend infrastructure of RespiroSync is optimized to run on high-availability, low-power Edge/Home Servers rather than expensive public cloud instances. 
-
-**Our Reference Deployment:**
-*   **Hardware Host:** Ugreen NAS DXP4800 Plus
-*   **Container Engine:** UGOS Pro Docker App
-*   **Zero-Trust Networking:** The NAS exposes the Mosquitto Broker and Next.js frontend to the public internet securely using **Cloudflare Tunnels**. This eliminates the need to open dangerous ports on the local home router while ensuring all WebSockets traffic (WSS) from the ESP32 is encrypted end-to-end.
-*   **Automated Deployments:** A `crontab` job runs securely on the NAS to automatically `git pull` updates from this repository and rebuild the 5 Docker containers seamlessly.
+**Reference deployment:** UGREEN NAS DXP4800 Plus running the UGOS Pro Docker app. A Cloudflare Tunnel publishes the dashboard and the broker's WebSocket listener, so no router ports are opened. A cron job on the NAS pulls this repository and rebuilds the containers.
 
 ---
 
 ## 🛠️ Deployment (Docker)
 
-To deploy the entire cloud infrastructure on a Linux VPS or Synology NAS:
-
-1. **Clone the repository:**
+1. **Clone and configure**
    ```bash
    git clone https://github.com/anake-an/asthma-monitoring-system.git
    cd asthma-monitoring-system
+   cp .env.example .env                 # fill in DB, mail, MQTT and Cloudflare values
+   cp backend/.env.example backend/.env
    ```
 
-2. **Boot the Cloud Environment:**
+2. **Broker credentials** (once per server; the broker will not start without them)
+   ```bash
+   # generate two strong passwords, e.g. with: openssl rand -base64 24
+   docker run --rm -v "$PWD/mosquitto/config:/mosquitto/config" eclipse-mosquitto:2.0 \
+     mosquitto_passwd -c -b /mosquitto/config/passwd respirosync_backend 'BACKEND_PASSWORD'
+   docker run --rm -v "$PWD/mosquitto/config:/mosquitto/config" eclipse-mosquitto:2.0 \
+     mosquitto_passwd -b /mosquitto/config/passwd respirosync_device 'DEVICE_PASSWORD'
+   sudo chown 1883:1883 mosquitto/config/passwd && sudo chmod 600 mosquitto/config/passwd
+   ```
+   Put `BACKEND_PASSWORD` in `.env` as `MQTT_PASSWORD`, and `DEVICE_PASSWORD` in the firmware's `secrets.h`.
+
+3. **Boot**
    ```bash
    docker compose up -d --build
+   docker compose exec backend php artisan key:generate   # first install only
    ```
+   The backend runs `php artisan migrate --force` on every start, so schema changes apply automatically on deploy.
 
-3. **Initialize the Database:**
-   Wait 15 seconds for MySQL to boot, then run:
+4. **Run the tests** (in-memory SQLite, never touches the real database)
    ```bash
-   docker compose exec backend php artisan migrate:fresh --seed
+   docker compose exec backend php artisan test
    ```
 
-The dashboard will now be accessible at `http://YOUR_SERVER_IP:3000`.
+The dashboard is served on `127.0.0.1:3005` and published through the Cloudflare Tunnel.
 
 ## ⚡ Hardware Setup
 
-To assemble and flash the physical hardware unit:
-1. Navigate to the `hardware/` directory.
-2. Read `WIRING_GUIDE.md` for exact pinout instructions.
-3. Flash `hardware/pico_cough_ai/pico_cough_ai.ino` to the Raspberry Pi Pico.
-4. Rename `hardware/esp32_firmware/esp32_firmware.example.ino` to `esp32_firmware.ino` and flash it to the ESP32.
-5. Connect your phone to the "RespiroSync-Setup" WiFi hotspot to input your Dashboard Device Token!
+1. Wire everything as described in `hardware/WIRING_GUIDE.md` (note the voltage dividers on the two 5 V analog sensors).
+2. Flash `hardware/pico_cough_ai/pico_cough_ai.ino` to the Pico using the **arduino-pico** core ("Raspberry Pi Pico/RP2040" by Earle Philhower).
+3. Copy `hardware/esp32_firmware/secrets.example.h` to `secrets.h`, fill in the broker URL and device password, then flash `esp32_firmware.ino` to the ESP32.
+4. In the dashboard, generate a pairing token, connect your phone to the **RespiroSync-Setup** Wi-Fi hotspot, and enter Wi-Fi details and the token.
 
 > [!WARNING]
 > **Hardware Liability Disclaimer:** 

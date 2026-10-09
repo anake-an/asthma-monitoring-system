@@ -2,20 +2,19 @@
 
 namespace App\Notifications;
 
+use App\Mail\CoughAlertMail;
+use App\Models\CoughEvent;
 use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Notification;
-use NotificationChannels\WebPush\WebPushMessage;
 use NotificationChannels\WebPush\WebPushChannel;
+use NotificationChannels\WebPush\WebPushMessage;
 
 class CoughAlertNotification extends Notification
 {
     use Queueable;
 
-    public $event;
-
-    public function __construct($event)
+    public function __construct(public CoughEvent $event, public int $clusterCount = 1)
     {
-        $this->event = $event;
     }
 
     public function via($notifiable)
@@ -25,16 +24,16 @@ class CoughAlertNotification extends Notification
 
     public function toMail($notifiable)
     {
-        return (new \App\Mail\CoughAlertMail($this->event))
-                    ->to($notifiable->email);
+        return (new CoughAlertMail($this->event, $this->clusterCount))
+            ->to($notifiable->email);
     }
 
     public function toWebPush($notifiable, $notification)
     {
         return (new WebPushMessage)
-            ->title('Asthma Alert!')
-            ->icon('/icon-192x192.jpg')
-            ->body('High severity cough detected (Level ' . $this->event->severity . '). Please check on the patient and prepare the inhaler!')
+            ->title('RespiroSync cough alert')
+            ->icon('/icon.jpg')
+            ->body("{$this->clusterCount} coughs detected in the last 10 minutes. Please check on the patient.")
             ->action('View Dashboard', 'view_dashboard')
             ->vibrate([100, 50, 100]);
     }

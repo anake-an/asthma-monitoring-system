@@ -48,7 +48,7 @@ export default function PrivacyPolicyPage() {
             <ul className="list-disc pl-5 space-y-2 text-zinc-600 dark:text-zinc-400">
               <li><strong>Environmental Telemetry:</strong> PM2.5 (Dust), VOC (Gas), Temperature, and Humidity readings collected via your local IoT device.</li>
               <li><strong>Medical Events:</strong> Logs of inhaler usage and automated microphone-based cough detection frequencies.</li>
-              <li><strong>Account Data:</strong> Name, Email Address, and encrypted authentication tokens.</li>
+              <li><strong>Account Data:</strong> Name, Email Address, and hashed authentication tokens.</li>
             </ul>
           </section>
 
@@ -59,7 +59,7 @@ export default function PrivacyPolicyPage() {
             </h2>
             <p className="mb-3">Your data is strictly processed to provide the core services of RespiroSync:</p>
             <ul className="list-disc pl-5 space-y-2 text-zinc-600 dark:text-zinc-400">
-              <li>To feed the Edge AI Machine Learning algorithm to predict localized asthma attack probabilities based on your unique environmental triggers.</li>
+              <li>To train a prediction model on your own account's data only, estimating the risk of an asthma-like event from your room's environmental readings.</li>
               <li>To generate personalized "Hybrid Thresholds" for your room's physical buzzer alarms.</li>
               <li>To provide you with a historical dashboard of your respiratory health.</li>
             </ul>
@@ -78,7 +78,7 @@ export default function PrivacyPolicyPage() {
             </p>
             <ul className="list-disc pl-5 space-y-2 text-zinc-600 dark:text-zinc-400">
               <li>Cryptographic hashing (Bcrypt) for all account passwords.</li>
-              <li>JSON Web Tokens (JWT/Sanctum) for secure device and app authentication.</li>
+              <li>Laravel Sanctum bearer tokens for the web app, and authenticated broker accounts with per-device topic access control for IoT devices.</li>
             </ul>
             <p className="mt-3">
               In the unlikely event of a data breach compromising your Sensitive Personal Data, we are legally bound to notify the <strong>Jabatan Perlindungan Data Peribadi (JPDP)</strong> and you within the mandated 72-hour window.

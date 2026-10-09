@@ -34,4 +34,22 @@ class User extends Authenticatable
     {
         return $this->hasMany(Device::class);
     }
+
+    public function inhalerLogs()
+    {
+        return $this->hasMany(InhalerLog::class);
+    }
+
+    public function hardwareConfig()
+    {
+        return $this->hasOne(HardwareConfig::class);
+    }
+
+    /**
+     * Cough events from every device this account owns.
+     */
+    public function coughEvents()
+    {
+        return $this->hasManyThrough(CoughEvent::class, Device::class);
+    }
 }

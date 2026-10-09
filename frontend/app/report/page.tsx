@@ -76,7 +76,8 @@ export default function ReportPage() {
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().split('T')[0];
+    // Local calendar date (the API groups by the server's local date, not UTC)
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const foundCough = data.daily_breakdown.find(b => b.date === dateStr);
     const rescueCount = data.daily_inhalers?.find(b => b.date === dateStr && b.type === 'rescue')?.count || 0;
     const controllerCount = data.daily_inhalers?.find(b => b.date === dateStr && b.type === 'controller')?.count || 0;

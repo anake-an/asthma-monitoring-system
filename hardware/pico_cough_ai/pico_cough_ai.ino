@@ -1,100 +1,108 @@
 /*
- * RespiroSync - Acoustic AI Cough Detection (Raspberry Pi Pico)
- * Hardware: Raspberry Pi Pico (Standard or W) + INMP441 I2S Microphone
- * 
- * Since we are not sure if you have a Pico or Pico W, we will use a highly robust UART Architecture!
- * The Pico will act purely as the "AI Audio Brain" and send signals to the ESP32.
- * The ESP32 remains the "Master Gateway" for all WiFi and MQTT traffic.
- * 
- * Wiring (INMP441 -> Pico):
- * VDD  -> 3.3V
- * GND  -> GND
- * L/R  -> GND (Sets to Left channel)
- * WS   -> GPIO 13 (Word Select / LRCLK)
- * SCK  -> GPIO 14 (Bit Clock / BCLK)
- * SD   -> GPIO 15 (Data)
- * 
- * Wiring (Pico -> ESP32 Gateway):
- * Pico GP0 (UART0 TX) -> ESP32 GPIO 16 (RX2)
- * Pico GP1 (UART0 RX) -> ESP32 GPIO 17 (TX2)
- * Pico GND            -> ESP32 GND (CRITICAL: Must share ground!)
+ * RespiroSync - Acoustic cough detector (Raspberry Pi Pico)
+ * Core:     Earle Philhower "arduino-pico" (Boards Manager: "Raspberry Pi Pico/RP2040")
+ * Hardware: Raspberry Pi Pico (or Pico W) + INMP441 I2S microphone
+ *
+ * WHAT THIS IS (and is not):
+ *   A sound-level heuristic. It flags short, loud bursts and reports a
+ *   "detection strength" between 0 and 1. It does NOT tell a cough apart from a
+ *   clap, a door slam or a shout. See README "Phase 2" for a trained classifier.
+ *
+ * Wiring (INMP441 -> Pico). arduino-pico requires LRCLK = BCLK + 1:
+ *   VDD -> 3V3(OUT)      GND -> GND      L/R -> GND (left channel)
+ *   SCK -> GP14 (BCLK)
+ *   WS  -> GP15 (LRCLK)
+ *   SD  -> GP13 (DATA)
+ *
+ * Wiring (Pico -> ESP32):
+ *   GP0 (UART0 TX) -> ESP32 GPIO16 (RX2)
+ *   GP1 (UART0 RX) -> ESP32 GPIO17 (TX2)
+ *   GND            -> ESP32 GND (shared ground is required)
+ *
+ * UART message (9600 baud, one line per detection):
+ *   COUGH:<level 1-4>,<strength 0.00-1.00>
  */
 
 #include <I2S.h>
+#include <math.h>
 
-// I2S Pins for Pi Pico
-#define I2S_WS 13
-#define I2S_SCK 14
-#define I2S_SD 15
+#define I2S_BCLK 14  // LRCLK/WS is automatically BCLK + 1 = GP15
+#define I2S_DATA 13
 
-// Acoustic tuning parameters
 const int SAMPLE_RATE = 16000;
-const int BITS_PER_SAMPLE = 32;
-const int ENERGY_THRESHOLD = 5000000; // Adjust this sensitivity during testing!
-const int DEBOUNCE_MS = 1500;         // Prevent multi-counting a single cough
+const int FRAMES_PER_BLOCK = 256;  // 16 ms per analysis block
 
+// RMS level (24-bit full scale = 8388608) that counts as a burst.
+// INMP441: 94 dB SPL ~ -26 dBFS. 50,000 ~ -44.5 dBFS ~ 75 dB SPL at the mic.
+// Calibrate in your room with DEBUG_LEVELS 1 (Serial Plotter) and adjust.
+const float RMS_THRESHOLD = 50000.0f;
+const unsigned long DEBOUNCE_MS = 1500;  // one cough = one event
+#define DEBUG_LEVELS 0
+
+I2S i2s(INPUT);
 unsigned long lastCoughTime = 0;
 
 void setup() {
-  Serial.begin(115200);   // USB Debugging Output
-  
-  // Initialize UART communication with ESP32 at 9600 baud
-  // On Raspberry Pi Pico, Serial1 defaults to GP0 (TX) and GP1 (RX)
-  Serial1.begin(9600);    
+  Serial.begin(115200);  // USB debug
+  Serial1.begin(9600);   // UART0 on GP0/GP1 -> ESP32
 
-  Serial.println("Initializing Pico Acoustic AI...");
+  i2s.setBCLK(I2S_BCLK);
+  i2s.setDATA(I2S_DATA);
+  i2s.setBitsPerSample(32);  // INMP441 sends 24-bit samples in 32-bit slots
+  i2s.setFrequency(SAMPLE_RATE);
 
-  // Setup I2S Microphone
-  I2S.setBCLK(I2S_SCK);
-  I2S.setDATA(I2S_SD);
-  I2S.setBitsPerSample(BITS_PER_SAMPLE);
-
-  if (!I2S.begin(I2S_PHILIPS_MODE, SAMPLE_RATE)) {
-    Serial.println("Failed to initialize I2S! Check INMP441 wiring.");
-    while (1);
+  if (!i2s.begin()) {
+    Serial.println("Failed to initialise I2S. Check INMP441 wiring (SCK=GP14, WS=GP15, SD=GP13).");
+    while (true) delay(1000);
   }
-  
-  Serial.println("I2S Microphone Ready. Listening for cough patterns...");
+  Serial.println("I2S microphone ready. Listening...");
 }
 
 void loop() {
-  int32_t sample = 0;
-  long energy = 0;
-  
-  // Read a small 256-sample chunk of audio (about 16ms of audio)
-  for (int i = 0; i < 256; i++) {
-    I2S.read(); // Read the 32-bit sample
-    sample = I2S.read(); // Get actual data
-    
-    // Shift down to avoid math overflow
-    sample = sample >> 12; 
-    
-    // Calculate acoustic energy (Amplitude squared)
-    energy += (sample * sample);
+  int64_t sum = 0;
+  int64_t sumSq = 0;
+
+  for (int i = 0; i < FRAMES_PER_BLOCK; i++) {
+    int32_t left = 0, right = 0;
+    i2s.read32(&left, &right);  // blocking; L/R tied to GND => data is on the left slot
+    int32_t s = left >> 8;      // 24-bit signed sample
+    sum += s;
+    sumSq += (int64_t)s * s;    // 64-bit: no overflow (max 2^46 per sample)
   }
 
-  // AI Acoustic Heuristic Check (Sudden, loud burst)
-  if (energy > ENERGY_THRESHOLD) {
-    
-    // Make sure we don't count the same cough twice in 1.5 seconds
-    if (millis() - lastCoughTime > DEBOUNCE_MS) { 
-      Serial.println("⚠️ COUGH DETECTED! Analyzing waveform...");
-      
-      // Determine severity based on acoustic energy
-      int severity = 1;
-      if (energy > ENERGY_THRESHOLD * 2) severity = 2;
-      if (energy > ENERGY_THRESHOLD * 4) severity = 3;
-      if (energy > ENERGY_THRESHOLD * 6) severity = 4;
-      
-      Serial.print("Severity Level Calculated: ");
-      Serial.println(severity);
+  // RMS with the DC offset removed
+  double mean = (double)sum / FRAMES_PER_BLOCK;
+  double variance = (double)sumSq / FRAMES_PER_BLOCK - mean * mean;
+  float rms = variance > 0 ? (float)sqrt(variance) : 0.0f;
 
-      // Transmit the event to the ESP32 Master Gateway via UART wires
-      // Format: COUGH:SEVERITY (Example: "COUGH:3")
-      Serial1.print("COUGH:");
-      Serial1.println(severity);
+#if DEBUG_LEVELS
+  Serial.println(rms);
+#endif
 
-      lastCoughTime = millis();
-    }
-  }
+  if (rms < RMS_THRESHOLD) return;
+
+  unsigned long now = millis();
+  if (now - lastCoughTime < DEBOUNCE_MS) return;
+  lastCoughTime = now;
+
+  // Strength: 0 at the threshold, 1 at 8x the threshold (+18 dB). A heuristic, not a probability.
+  float ratio = rms / RMS_THRESHOLD;
+  float strength = log2f(ratio) / 3.0f;
+  if (strength < 0) strength = 0;
+  if (strength > 1) strength = 1;
+
+  int level = 1;
+  if (ratio >= 2) level = 2;
+  if (ratio >= 4) level = 3;
+  if (ratio >= 6) level = 4;
+
+  Serial1.print("COUGH:");
+  Serial1.print(level);
+  Serial1.print(",");
+  Serial1.println(strength, 2);
+
+  Serial.print("Burst detected: level ");
+  Serial.print(level);
+  Serial.print(", strength ");
+  Serial.println(strength, 2);
 }

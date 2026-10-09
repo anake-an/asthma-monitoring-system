@@ -1,227 +1,252 @@
-from fastapi import FastAPI, HTTPException
-import pandas as pd
-import numpy as np
-from sqlalchemy import create_engine
-from sklearn.ensemble import RandomForestClassifier
-import joblib
-import os
+"""
+RespiroSync AI engine.
+
+Every endpoint is scoped to one account (?user_id=). The engine only reads that
+user's devices and inhaler logs, and keeps one model per user under MODEL_DIR.
+
+Stage 1 (no asthma events yet): z-score anomaly check against the room's own baseline.
+Stage 2 (events recorded):      Random Forest predicting "attack-like event in the next hour".
+
+These are prototype models trained on small, self-reported data. The reported
+accuracy is measured on a held-out, later slice of the data when there is
+enough of it; otherwise no accuracy is claimed.
+"""
 import math
+import os
+from datetime import datetime, timedelta
 
-app = FastAPI(title="Asthma AI Engine")
+import joblib
+import numpy as np
+import pandas as pd
+from fastapi import FastAPI, HTTPException, Query
+from sklearn.ensemble import RandomForestClassifier
+from sqlalchemy import create_engine, text
 
-# MySQL Connection (uses the exact same env vars as Laravel for the db container)
-DB_USER = os.getenv("DB_USERNAME", "laravel")
-DB_PASS = os.getenv("DB_PASSWORD", "secret")
-DB_HOST = os.getenv("DB_HOST", "db")
-DB_NAME = os.getenv("DB_DATABASE", "asthma_db")
-engine = create_engine(f"mysql+mysqlconnector://{DB_USER}:{DB_PASS}@{DB_HOST}/{DB_NAME}")
+app = FastAPI(title="RespiroSync AI Engine")
 
-MODEL_PATH = "asthma_model.pkl"
-BASELINE_PATH = "baseline_model.pkl"
+DB_URL = os.getenv("DB_URL") or "mysql+mysqlconnector://{u}:{p}@{h}/{d}".format(
+    u=os.getenv("DB_USERNAME", ""),
+    p=os.getenv("DB_PASSWORD", ""),
+    h=os.getenv("DB_HOST", "db"),
+    d=os.getenv("DB_DATABASE", "asthma_db"),
+)
+engine = create_engine(DB_URL, pool_pre_ping=True)
+
+MODEL_DIR = os.getenv("MODEL_DIR", "/app/models")
+os.makedirs(MODEL_DIR, exist_ok=True)
+
+FEATURES = ["pm25_level", "temperature", "humidity", "cough_count"]
+WINDOW = "10min"
+HORIZON = 6  # windows = 60 minutes
+MAX_INTERPOLATE_WINDOWS = 3  # bridge gaps up to 30 min; longer gaps (device offline) are dropped
+MIN_STD = {"pm25_level": 2.0, "temperature": 0.5, "humidity": 2.0}
+
+DEFAULT_THRESHOLDS = {
+    "pm25_threshold": 35.0,
+    "temperature_threshold": 35.0,
+    "humidity_threshold": 75.0,  # Malaysian indoor baseline
+    "mq135_threshold": 300.0,
+}
+
+
+def model_path(user_id: int) -> str:
+    return os.path.join(MODEL_DIR, f"user_{user_id}_model.pkl")
+
+
+def baseline_path(user_id: int) -> str:
+    return os.path.join(MODEL_DIR, f"user_{user_id}_baseline.pkl")
+
 
 def safe_val(val, default=0.0):
     try:
         f = float(val)
-        if math.isnan(f) or math.isinf(f): return default
-        return f
-    except:
+        return default if (math.isnan(f) or math.isinf(f)) else f
+    except (TypeError, ValueError):
         return default
 
-def fetch_data():
-    try:
-        telemetry = pd.read_sql("SELECT * FROM telemetry_logs", engine)
-        coughs = pd.read_sql("SELECT * FROM cough_events", engine)
-        inhaler = pd.read_sql("SELECT * FROM inhaler_logs", engine)
-        
-        telemetry['recorded_at'] = pd.to_datetime(telemetry['recorded_at'])
-        coughs['recorded_at'] = pd.to_datetime(coughs['recorded_at'])
-        if 'administered_at' in inhaler.columns:
-            inhaler['recorded_at'] = pd.to_datetime(inhaler['administered_at'])
-        else:
-            inhaler['recorded_at'] = pd.to_datetime(inhaler['recorded_at'])
-        
-        return telemetry, coughs, inhaler
-    except Exception as e:
-        print(f"DB Error: {e}")
-        return None, None, None
+
+def device_ids(user_id: int) -> list:
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT id FROM devices WHERE user_id = :u"), {"u": user_id}).fetchall()
+    return [r[0] for r in rows]
+
+
+def in_clause(ids: list) -> str:
+    # ids come from the database as integers; never from the request.
+    return ",".join(str(int(i)) for i in ids)
+
+
+def db_now() -> datetime:
+    """Use the database clock so 'last hour' matches how recorded_at was stored."""
+    with engine.connect() as conn:
+        if engine.dialect.name == "sqlite":
+            return pd.to_datetime(conn.execute(text("SELECT CURRENT_TIMESTAMP")).scalar()).to_pydatetime()
+        return conn.execute(text("SELECT NOW()")).scalar()
+
+
+def fetch_user_data(user_id: int):
+    ids = device_ids(user_id)
+    if not ids:
+        raise HTTPException(status_code=404, detail="This account has no paired devices.")
+    dev = in_clause(ids)
+    telemetry = pd.read_sql(
+        f"SELECT recorded_at, pm25_level, temperature, humidity FROM telemetry_logs WHERE device_id IN ({dev})", engine
+    )
+    # Events the caregiver marked as false alarms (is_verified = 0) are excluded from training.
+    coughs = pd.read_sql(
+        f"SELECT recorded_at FROM cough_events WHERE device_id IN ({dev}) "
+        f"AND (is_verified IS NULL OR is_verified = 1)",
+        engine,
+    )
+    inhaler = pd.read_sql(
+        text("SELECT administered_at AS recorded_at FROM inhaler_logs WHERE user_id = :u"), engine, params={"u": user_id}
+    )
+    for df in (telemetry, coughs, inhaler):
+        df["recorded_at"] = pd.to_datetime(df["recorded_at"])
+    return telemetry, coughs, inhaler
+
+
+def forward_window(series: pd.Series, n: int, how: str) -> pd.Series:
+    """Aggregate the NEXT n windows (t+1 .. t+n), excluding the current one."""
+    rev = series[::-1].rolling(n, min_periods=1)
+    agg = rev.max() if how == "max" else rev.sum()
+    return agg[::-1].shift(-1)
+
+
+def build_dataset(telemetry, coughs, inhaler) -> pd.DataFrame:
+    tel = telemetry.set_index("recorded_at").sort_index()
+    df = tel.resample(WINDOW).mean()
+    # Bridge short gaps only. Long gaps stay NaN and are dropped: no invented readings.
+    df = df.interpolate(limit=MAX_INTERPOLATE_WINDOWS, limit_area="inside")
+
+    df["cough_count"] = coughs.set_index("recorded_at").resample(WINDOW).size().reindex(df.index).fillna(0) \
+        if not coughs.empty else 0
+    inh = (inhaler.set_index("recorded_at").resample(WINDOW).size() > 0).astype(int).reindex(df.index).fillna(0) \
+        if not inhaler.empty else pd.Series(0, index=df.index)
+
+    future_inhaler = forward_window(inh, HORIZON, "max")
+    future_coughs = forward_window(df["cough_count"], HORIZON, "sum")
+    df["target_attack_soon"] = ((future_inhaler > 0) | (future_coughs >= 2)).astype(int)
+    df["_has_future"] = future_coughs.notna()
+
+    df = df.dropna(subset=FEATURES)
+    return df[df["_has_future"]].drop(columns="_has_future")
+
 
 @app.get("/train")
-def train_model():
-    telemetry, coughs, inhaler = fetch_data()
-    if telemetry is None or telemetry.empty:
+def train_model(user_id: int = Query(..., ge=1)):
+    telemetry, coughs, inhaler = fetch_user_data(user_id)
+    if telemetry.empty:
         raise HTTPException(status_code=400, detail="Not enough data to train.")
-    
-    # Simple Time-Series Preprocessing
-    # Resample everything to 10-minute windows
-    telemetry.set_index('recorded_at', inplace=True)
-    coughs.set_index('recorded_at', inplace=True)
-    inhaler.set_index('recorded_at', inplace=True)
-    
-    # Aggregate data
-    df = telemetry.resample('10min').mean().interpolate()
-    
-    # If the user hasn't plugged in PM2.5 or other sensors yet, fill them so we don't drop all rows
-    if 'pm25_level' in df.columns:
-        df['pm25_level'] = df['pm25_level'].fillna(15.0)
-    if 'temperature' in df.columns:
-        df['temperature'] = df['temperature'].fillna(30.0)
-    if 'humidity' in df.columns:
-        df['humidity'] = df['humidity'].fillna(60.0)
-    
-    if not coughs.empty:
-        df['cough_count'] = coughs.resample('10min').size()
-    else:
-        df['cough_count'] = 0
-        
-    if not inhaler.empty:
-        df['inhaler_used'] = inhaler.resample('10min').size().apply(lambda x: 1 if x > 0 else 0)
-    else:
-        df['inhaler_used'] = 0
-        
-    df['cough_count'] = df['cough_count'].fillna(0)
-    df['inhaler_used'] = df['inhaler_used'].fillna(0)
-    
-    # Target Label: True if inhaler is used OR if there are multiple coughs in the NEXT 60 minutes
-    df['future_inhaler'] = df['inhaler_used'].shift(-6).fillna(0)
-    df['future_coughs'] = df['cough_count'].rolling(window=6).sum().shift(-6).fillna(0)
-    
-    # 1 if inhaler used, or 2+ coughs detected in the next hour
-    df['target_attack_soon'] = ((df['future_inhaler'] > 0) | (df['future_coughs'] >= 2)).astype(int)
-    
-    # Drop rows with NaN targets
-    df.dropna(inplace=True)
-    
+
+    df = build_dataset(telemetry, coughs, inhaler)
     if len(df) == 0:
         raise HTTPException(status_code=400, detail="Not enough valid data after preprocessing. Please wait for more telemetry.")
-    
-    features = ['pm25_level', 'temperature', 'humidity', 'cough_count']
-    X = df[features]
-    y = df['target_attack_soon']
-    
-    if sum(y) == 0:
-        # Stage 1: No medical events yet. Create a "Normalcy Baseline" based on room averages
-        baseline = {
-            "temp_mean": safe_val(df['temperature'].mean(), 30.0),
-            "temp_std": safe_val(df['temperature'].std(), 1.0),
-            "hum_mean": safe_val(df['humidity'].mean(), 60.0),
-            "hum_std": safe_val(df['humidity'].std(), 1.0),
-            "pm25_mean": safe_val(df['pm25_level'].mean(), 15.0),
-            "pm25_std": safe_val(df['pm25_level'].std(), 1.0)
-        }
-        joblib.dump(baseline, BASELINE_PATH)
-        return {"message": "No asthma events recorded. Stage 1 Baseline (Normalcy) model created.", "baseline": baseline}
 
-    # Stage 2: We have medical events! Train the Personalized Random Forest
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    X, y = df[FEATURES], df["target_attack_soon"]
+
+    if y.sum() == 0:
+        baseline = {}
+        for col in ("pm25_level", "temperature", "humidity"):
+            baseline[f"{col}_mean"] = safe_val(df[col].mean())
+            baseline[f"{col}_std"] = max(safe_val(df[col].std(), 0.0), MIN_STD[col])
+        joblib.dump(baseline, baseline_path(user_id))
+        if os.path.exists(model_path(user_id)):
+            os.remove(model_path(user_id))
+        return {"message": "No asthma events recorded yet. Stage 1 baseline (anomaly detection) created.",
+                "windows_used": len(df), "baseline": baseline}
+
+    # Time-ordered hold-out: train on the earliest 75%, validate on the latest 25%.
+    split = int(len(df) * 0.75)
+    validation_accuracy = None
+    note = "Not enough data for a held-out validation; accuracy not reported."
+    if split >= 20 and len(df) - split >= 5 and y.iloc[:split].nunique() == 2:
+        probe = RandomForestClassifier(n_estimators=100, random_state=42, class_weight="balanced")
+        probe.fit(X.iloc[:split], y.iloc[:split])
+        validation_accuracy = round(float(probe.score(X.iloc[split:], y.iloc[split:])), 3)
+        note = "Accuracy on the most recent 25% of windows, which the model did not train on."
+
+    model = RandomForestClassifier(n_estimators=100, random_state=42, class_weight="balanced")
     model.fit(X, y)
-    
-    joblib.dump(model, MODEL_PATH)
-    
-    accuracy = safe_val(model.score(X, y), 1.0)
-    return {"message": "Personalized Stage 2 Model trained successfully and saved.", "accuracy_estimate": accuracy}
+    joblib.dump(model, model_path(user_id))
+
+    return {
+        "message": "Stage 2 personalised model trained.",
+        "windows_used": len(df),
+        "positive_windows": int(y.sum()),
+        "validation_accuracy": validation_accuracy,
+        "note": note,
+    }
+
 
 @app.get("/predict")
-def predict_attack():
-    has_stage2 = os.path.exists(MODEL_PATH)
-    has_stage1 = os.path.exists(BASELINE_PATH)
-    
+def predict_attack(user_id: int = Query(..., ge=1)):
+    has_stage2 = os.path.exists(model_path(user_id))
+    has_stage1 = os.path.exists(baseline_path(user_id))
     if not has_stage2 and not has_stage1:
         raise HTTPException(status_code=400, detail="Model not trained yet. Call /train first.")
-        
-    # Fetch last 60 minutes of data to predict next 60 minutes
-    query = """
-    SELECT AVG(pm25_level) as pm25, AVG(temperature) as temp, AVG(humidity) as hum
-    FROM telemetry_logs 
-    WHERE recorded_at >= NOW() - INTERVAL 1 HOUR
-    """
-    recent_telemetry = pd.read_sql(query, engine)
-    
-    cough_query = "SELECT COUNT(*) as cough_count FROM cough_events WHERE recorded_at >= NOW() - INTERVAL 1 HOUR"
-    recent_coughs = pd.read_sql(cough_query, engine)
-    
-    if recent_telemetry['pm25'].isnull()[0]:
-        raise HTTPException(status_code=400, detail="No telemetry data in the last hour.")
-        
-    pm25 = recent_telemetry['pm25'][0]
-    temp = recent_telemetry['temp'][0]
-    hum = recent_telemetry['hum'][0]
-    cough_count = recent_coughs['cough_count'][0]
-    
-    X_new = pd.DataFrame([[pm25, temp, hum, cough_count]], columns=['pm25_level', 'temperature', 'humidity', 'cough_count'])
-    
-    probability = 0.0
-    is_stage2 = False
-    
+
+    ids = device_ids(user_id)
+    if not ids:
+        raise HTTPException(status_code=404, detail="This account has no paired devices.")
+    dev = in_clause(ids)
+    now = db_now()
+    # Features must match training: the latest 10-minute window (readings averaged, coughs counted).
+    since = now - timedelta(minutes=10)
+
+    recent = pd.read_sql(
+        text(f"SELECT AVG(pm25_level) AS pm25, AVG(temperature) AS temp, AVG(humidity) AS hum "
+             f"FROM telemetry_logs WHERE device_id IN ({dev}) AND recorded_at >= :since"),
+        engine, params={"since": since},
+    )
+
+    def count_coughs(start):
+        return int(pd.read_sql(
+            text(f"SELECT COUNT(*) AS c FROM cough_events WHERE device_id IN ({dev}) AND recorded_at >= :since "
+                 f"AND (is_verified IS NULL OR is_verified = 1)"),
+            engine, params={"since": start},
+        )["c"][0])
+
+    cough_count = count_coughs(since)
+    coughs_last_hour = count_coughs(now - timedelta(hours=1))
+
+    if recent[["pm25", "temp", "hum"]].isnull().any(axis=None):
+        raise HTTPException(status_code=400, detail="No complete telemetry in the last 10 minutes.")
+
+    pm25, temp, hum = (float(recent[c][0]) for c in ("pm25", "temp", "hum"))
+    X_new = pd.DataFrame([[pm25, temp, hum, cough_count]], columns=FEATURES)
+    thresholds = dict(DEFAULT_THRESHOLDS)
+
     if has_stage2:
-        # Stage 2: Personalized Prediction
-        model = joblib.load(MODEL_PATH)
-        probability = model.predict_proba(X_new)[0][1] # Probability of class 1
-        is_stage2 = True
+        model = joblib.load(model_path(user_id))
+        probability = float(model.predict_proba(X_new)[0][list(model.classes_).index(1)])
+        # Lower a threshold by up to 50% in proportion to that feature's importance and the current risk.
+        imp = dict(zip(FEATURES, model.feature_importances_))
+        for key, feat in (("pm25_threshold", "pm25_level"), ("temperature_threshold", "temperature"),
+                          ("humidity_threshold", "humidity")):
+            thresholds[key] -= thresholds[key] * imp[feat] * probability * 0.5
+        thresholds["mq135_threshold"] -= thresholds["mq135_threshold"] * probability * 0.3
+        floors = {"pm25_threshold": 15.0, "temperature_threshold": 26.0, "humidity_threshold": 55.0, "mq135_threshold": 150.0}
+        thresholds = {k: round(max(floors[k], v), 1) for k, v in thresholds.items()}
+        stage = "Stage 2 (Personalised)"
     else:
-        # Stage 1: Anomaly Detection (How far is current room from the historical normal?)
-        baseline = joblib.load(BASELINE_PATH)
-        temp_z = (temp - baseline['temp_mean']) / baseline['temp_std']
-        hum_z = (hum - baseline['hum_mean']) / baseline['hum_std']
-        
-        # If room spikes 2.5 standard deviations above normal, flag high risk
-        if temp_z > 2.5 or hum_z > 2.5:
-            probability = 0.8
-        elif temp_z > 1.5 or hum_z > 1.5:
-            probability = 0.5
-        else:
-            probability = 0.1
-    
-    suggested_pm25 = 35.0
-    suggested_temp = 35.0
-    suggested_hum = 75.0 # Adapted for Malaysian default baseline
-    suggested_gas = 300.0
-    
-    if is_stage2:
-        # Stage 2: Hybrid Thresholding using Feature Importance
-        # features array in train() is: ['pm25_level', 'temperature', 'humidity', 'cough_count']
-        importances = model.feature_importances_
-        pm25_imp = importances[0]
-        temp_imp = importances[1]
-        hum_imp = importances[2]
-        
-        # We allow the AI to lower the threshold by up to 50% if the feature is a massive trigger
-        severity_factor = 0.5 
-        
-        suggested_pm25 -= (suggested_pm25 * pm25_imp * probability * severity_factor)
-        suggested_temp -= (suggested_temp * temp_imp * probability * severity_factor)
-        suggested_hum -= (suggested_hum * hum_imp * probability * severity_factor)
-        suggested_gas -= (suggested_gas * probability * 0.3) # Generic scaling for gas
-        
-        # Apply safety floor limits so thresholds don't drop to impossible levels
-        suggested_pm25 = round(max(15.0, suggested_pm25), 1)
-        suggested_temp = round(max(26.0, suggested_temp), 1)
-        suggested_hum = round(max(55.0, suggested_hum), 1)
-        suggested_gas = round(max(150.0, suggested_gas), 1)
-        
-    else:
-        # Stage 1: Fallback generic scaling
+        b = joblib.load(baseline_path(user_id))
+        z = max((pm25 - b["pm25_level_mean"]) / b["pm25_level_std"],
+                (temp - b["temperature_mean"]) / b["temperature_std"],
+                (hum - b["humidity_mean"]) / b["humidity_std"])
+        probability = 0.8 if z > 2.5 else 0.5 if z > 1.5 else 0.1
         if probability > 0.7:
-            suggested_pm25 = 20.0
-            suggested_temp = 30.0
-            suggested_hum = 60.0
-            suggested_gas = 150.0
+            thresholds = {"pm25_threshold": 20.0, "temperature_threshold": 30.0, "humidity_threshold": 60.0, "mq135_threshold": 150.0}
         elif probability > 0.4:
-            suggested_pm25 = 25.0
-            suggested_temp = 32.0
-            suggested_hum = 65.0
-            suggested_gas = 200.0
-        
+            thresholds = {"pm25_threshold": 25.0, "temperature_threshold": 32.0, "humidity_threshold": 65.0, "mq135_threshold": 200.0}
+        stage = "Stage 1 (Anomaly Detection)"
+
     return {
-        "model_stage": "Stage 2 (Personalized)" if is_stage2 else "Stage 1 (Anomaly Detection)",
-        "probability_of_attack": round(float(probability), 2),
-        "estimated_time_to_next_inhaler_mins": int((1.0 - probability) * 60) if probability > 0 else -1,
-        "suggested_thresholds": {
-            "pm25_threshold": suggested_pm25,
-            "temperature_threshold": suggested_temp,
-            "humidity_threshold": suggested_hum,
-            "mq135_threshold": suggested_gas
-        },
+        "model_stage": stage,
+        "probability_of_attack": round(probability, 2),
+        "suggested_thresholds": thresholds,
         "current_inputs": {
-            "pm25": pm25, "temperature": temp, "humidity": hum, "recent_coughs": int(cough_count)
-        }
+            "pm25": round(pm25, 1), "temperature": round(temp, 1), "humidity": round(hum, 1),
+            "coughs_last_10_min": cough_count, "coughs_last_hour": coughs_last_hour,
+        },
     }

@@ -1,88 +1,70 @@
-# 🫁 RespiroSync: Full System Architecture & Code Explanation
+# 🫁 RespiroSync: System Architecture & Code Explanation
 
-This document serves as a comprehensive breakdown of the RespiroSync v4.3.0 project. It explains how the hardware, AI, cloud backend, and frontend communicate to form a complete IoT medical telemetry system, alongside exactly where the code is located.
-
----
-
-## 1. The Hardware Architecture (Dual-Processor)
-
-To prevent the system from crashing under heavy load, the hardware is split into two separate microcontrollers:
-
-### 🎤 Raspberry Pi Pico (The Audio & Edge AI Processor)
-*   **Hardware:** Raspberry Pi Pico + INMP441 (I2S Digital Microphone).
-*   **Purpose:** Processing audio requires intense CPU cycles. If we made the ESP32 do this while also handling WiFi and MQTT, it would crash. The Pico acts as a dedicated Digital Signal Processor (DSP).
-*   **How it works:** It continuously listens to the room using the INMP441 mic. It runs a lightweight **Edge AI model** to distinguish a human cough from background noise. 
-*   **Code Location:** `hardware/pico_cough_ai/pico_cough_ai.ino`
-*   **Output:** When it detects a cough, it calculates a "confidence score" (e.g., 85% sure it's a cough) and sends a simple serial signal over UART to the ESP32.
-
-### 📡 ESP32 (The IoT Gateway & Environment Tracker)
-*   **Hardware:** ESP32 + DHT22 (Temperature/Humidity) + MQ-135 (Gas/VOCs) + Sharp GP2Y1014AU0F (PM2.5 Dust).
-*   **Feedback Hardware:** Active Buzzer (Alarm), Red & Green LEDs (Status indicators), and a 16x2 I2C LCD (Live status display).
-*   **Purpose:** Acts as the brain of the physical device. It handles all internet connectivity, reads environmental sensors, controls feedback hardware, and forwards data to the cloud.
-*   **How it works:** 
-    *   It connects to the local WiFi. Every few seconds, it reads the room's air quality. 
-    *   If the sensors exceed safe thresholds (or if an MQTT message tells it to), the ESP32 triggers the **Buzzer** and **Red LED** to alert the patient physically. 
-    *   The **LCD Display** continuously updates to show live PM2.5 levels, WiFi status, and AI alerts. The **Green LED** indicates the system is armed and normal.
-    *   If it receives a "cough signal" from the Pico, it bundles the cough event along with the current environmental data.
-*   **Code Location:** `hardware/esp32_firmware/esp32_firmware.example.ino`
-*   **Output:** It publishes this bundled JSON data to the Cloud via the MQTT protocol.
+How the hardware, AI, backend and frontend fit together, what each part really does, and where the code lives.
 
 ---
 
-## 2. The Artificial Intelligence (AI) Engines
+## 1. Hardware (dual-processor)
 
-RespiroSync uses a **Two-Tiered AI Architecture** (Edge + Cloud):
+### 🎤 Raspberry Pi Pico: sound-level cough detector
+*   **Hardware:** Raspberry Pi Pico + INMP441 I2S microphone.
+*   **Why a second chip:** continuous 16 kHz audio sampling is kept off the ESP32, which handles Wi-Fi, TLS and sensors.
+*   **How it works:** every 16 ms it computes the RMS sound level (DC offset removed). A burst above the threshold, at most once per 1.5 s, is reported as a cough candidate with a **detection strength** from 0 (just above threshold) to 1 (8× threshold, +18 dB).
+*   **Limits (be honest in the report):** this is a loudness heuristic, not a classifier. Claps, door slams and shouting also trigger it. `pico_cough_ai/data_collection/` and `hardware/README.md` describe the Phase 2 path to a trained model (Edge Impulse).
+*   **Code:** `hardware/pico_cough_ai/pico_cough_ai.ino`
+*   **Output:** `COUGH:<level 1-4>,<strength 0.00-1.00>` over UART to the ESP32.
 
-### A. Edge AI (Acoustic Classification)
-*   **Where it lives:** On the Raspberry Pi Pico (`hardware/pico_cough_ai/pico_cough_ai.ino`).
-*   **What it does:** Audio pattern recognition. It doesn't know anything about asthma; it is strictly trained to identify the specific soundwave frequencies of a cough, filtering out talking, clapping, or television noises.
-
-### B. Cloud AI (Predictive Risk Engine)
-*   **Where it lives:** In the Dockerized `ai_engine` container (built with Python & FastAPI).
-*   **Code Location:** `ai_engine/main.py`
-*   **Model Used:** **Random Forest Classifier** (Machine Learning).
-*   **What it does:** This is the predictive brain. It takes all historical data from the MySQL database (how many coughs happened in the last hour, was the PM2.5 high, is the room too hot?) and predicts the probability of an asthma attack.
-*   **Smart Optimization:** It doesn't just predict; it adapts. If the AI notices the patient coughs heavily whenever the PM2.5 hits 40 µg/m³, it will automatically communicate with the backend to lower the "Safe PM2.5 Threshold" for that specific patient.
-
----
-
-## 3. The Backend & Cloud Infrastructure
-
-The backend is responsible for receiving hardware data, routing it to the AI, and alerting the users.
-
-### 📨 Eclipse Mosquitto (MQTT Broker)
-*   **Configuration Location:** `mosquitto/config/mosquitto.conf`
-*   **Why MQTT?:** Standard HTTP requests are too slow for IoT. MQTT is an ultra-lightweight, real-time messaging protocol.
-*   **How it works:** The ESP32 "publishes" a message to a topic. The backend "subscribes" to that topic to receive it instantly.
-
-### ⚙️ Laravel 11 (The Core Backend & Worker)
-*   **The MQTT Worker:** A PHP daemon that constantly listens to the Mosquitto broker. 
-    *   **Code Location:** `backend/app/Console/Commands/MqttSubscribe.php`
-*   **Smart Spam Filtering:** When the worker receives a cough event, it checks the Pico's "confidence score". If the score is `< 80%`, and there haven't been at least 3 coughs in the last 10 minutes, it logs the data but **blocks** the emergency email. This prevents parents/doctors from getting spammed by false alarms.
-*   **Brevo SMTP:** If a true emergency is detected (or the Python AI flags a 90% risk), Laravel compiles a beautiful HTML medical alert template (`backend/resources/views/emails/cough_alert.blade.php`) and fires it via Brevo to the caretaker's email.
-*   **REST API:** Laravel also provides secure API endpoints (`backend/routes/api.php`), protected by Sanctum tokens, so the Next.js frontend can fetch charts and settings.
+### 📡 ESP32: gateway and environment monitor
+*   **Hardware:** ESP32 + DHT22 + MQ-135 + Sharp GP2Y1014AU0F, active buzzer, red/green LEDs, 16x2 I2C LCD.
+*   **How it works:**
+    *   Reads the sensors every 5 s and publishes them to `respirosync/devices/<token>/telemetry`. A failed DHT22 read is sent as `null`, never as 0.
+    *   Forwards each Pico detection to `respirosync/devices/<token>/events`.
+    *   Receives its owner's thresholds on `respirosync/devices/<token>/config` (a retained message, so they arrive again after every reconnect) and sounds the buzzer/red LED when a reading crosses a threshold. This works offline too, using the last thresholds received. The dashboard can mute the buzzer.
+    *   Obeys `factory_reset`, `buzzer_on` and `buzzer_off` on `respirosync/devices/<token>/commands`.
+*   **Code:** `hardware/esp32_firmware/esp32_firmware.ino` (credentials in a gitignored `secrets.h`).
 
 ---
 
-## 4. The Frontend Dashboard
+## 2. AI
 
-### 🖥️ Next.js 14 & Tailwind CSS
-*   **Code Location:** All files within the `frontend/` directory.
-*   **Purpose:** The clinical UI for doctors and guardians.
-*   **Key Features:**
-    *   **Live Monitor (`frontend/components/LiveMonitor.tsx`):** Displays real-time PM2.5, Gas, Temp, and Humidity pulled from Laravel.
-    *   **Command Center (`frontend/components/CommandCenter.tsx`):** Allows users to change hardware thresholds (e.g., set max temperature to 30°C). When saved, Laravel pushes an MQTT message *back* to the ESP32 to update its internal rules instantly, which might turn off the buzzer or update the LCD.
-    *   **UX/UI:** Features modern, dark-mode aesthetics with smooth state transitions, built using Tailwind CSS. 
+### A. On-device detection
+The Pico heuristic above. It produces candidate events and a strength value; it does not diagnose anything.
+
+### B. Cloud risk model (`ai_engine/main.py`, FastAPI + scikit-learn)
+*   **Per account:** every call carries `user_id`; the engine reads only that user's devices and inhaler logs and stores `user_<id>_model.pkl` / `user_<id>_baseline.pkl` in the `ai_models` volume.
+*   **Data:** 10-minute windows of average PM2.5, temperature and humidity plus cough count. Gaps up to 30 minutes are interpolated; longer gaps (device offline) are dropped rather than invented. Cough events the caregiver marked as **false alarm** are excluded.
+*   **Label:** "an inhaler dose or 2+ coughs within the next 60 minutes".
+*   **Stage 1 (no events yet):** z-score of the current readings against the room's own baseline → low / moderate / high risk.
+*   **Stage 2 (events exist):** Random Forest (balanced class weights). Accuracy is reported on the most recent 25% of windows, which the model did not train on; with too little data, no accuracy is claimed.
+*   **Threshold suggestions:** `/predict` returns suggested thresholds. The scheduler runs `php artisan ai:optimize` every 5 minutes, which applies them for every account with "AI optimization" enabled (overwriting that account's manual thresholds) and pushes them to its devices.
 
 ---
 
-## 5. Deployment & Security (Zero-Trust)
+## 3. Backend & cloud infrastructure
 
-### 🐳 Docker Compose
-*   **Configuration Location:** `docker-compose.yaml` at the root of the project.
-*   The entire cloud stack (Next.js, Laravel, Python AI, MySQL, Mosquitto) is bundled into this single file. Passwords are securely injected using `.env` variables so they are never hardcoded on GitHub.
+### 📨 Mosquitto (MQTT broker): `mosquitto/config/`
+*   `allow_anonymous false`, with two accounts: `respirosync_backend` (full access to `respirosync/#`) and `respirosync_device` (shared by devices).
+*   `acl` pins every device to `respirosync/devices/<its client id>/...`. A device cannot read another device's data, learn other tokens, or publish as another device. The password file is created on the server and never committed.
 
-### 🛡️ Cloudflare Tunnels (Zero-Trust)
-*   The system is hosted on a local NAS (NOVAFORTRESS). 
-*   Normally, to put this on the internet, you have to "Port Forward" your home router, which invites hackers.
-*   Instead, RespiroSync uses a **Cloudflare Tunnel** (configured in the `docker-compose.yaml`). A daemon inside the NAS creates an outbound, encrypted tunnel to Cloudflare's servers. Users visit the domain name, and Cloudflare routes the traffic securely into the Next.js container, completely hiding the NAS's true IP address and keeping the database isolated from the public internet.
+### ⚙️ Laravel 11
+*   **MQTT worker:** `app/Console/Commands/MqttSubscribe.php` subscribes to `respirosync/devices/+/telemetry` and `/events` and hands each message to `app/Services/DeviceMessageHandler.php`. Device identity comes from the topic, never from the payload.
+*   **Alert rule:** a cough raises an alert when there are **3 coughs in 10 minutes**, or **2 coughs in 10 minutes where this one has strength ≥ 0.8**. A single loud sound never alerts on its own. At most **one email per device per 10 minutes**. A mail failure is logged and never stops the worker.
+*   **Alert email:** `resources/views/emails/cough_alert.blade.php` shows the cough count and the device-reported strength, or "Not reported by device". It never shows an invented confidence.
+*   **Per-account data:** thresholds (`hardware_configs.user_id`), inhaler logs (`inhaler_logs.user_id`), cough events and telemetry (through the user's devices), reports and AI calls are all scoped to the signed-in user.
+*   **REST API:** `routes/api.php`, protected by Sanctum tokens.
+*   **Tests:** `backend/tests/` (`php artisan test`).
+
+---
+
+## 4. Frontend (`frontend/`)
+*   **Live Monitor:** latest readings; shows "Sensor Error" when the DHT22 failed.
+*   **Command Center:** thresholds and buzzer mute. Saving pushes the new config to every device on the account.
+*   **AI Risk panel:** model stage, risk level, and coughs in the last hour.
+*   **Cough History:** each event's detection strength and whether it was an Alert or only Logged; caregivers can mark events as false alarms, which then feeds into training.
+
+---
+
+## 5. Deployment & security
+*   **Docker Compose:** frontend, backend, MQTT worker, scheduler, AI engine, MySQL, Mosquitto, cloudflared. Secrets come from `.env` (see `.env.example`).
+*   **Cloudflare Tunnel:** the NAS opens an outbound tunnel. The dashboard and the broker's WebSocket listener are reachable through Cloudflare without port forwarding, and every service binds only to `127.0.0.1` on the host.
+*   **Broker hardening:** authentication + per-device ACL (above). TLS terminates at Cloudflare, and the ESP32 verifies Cloudflare's certificate.

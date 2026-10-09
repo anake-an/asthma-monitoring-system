@@ -7,11 +7,15 @@ The ESP32 is the central brain of the hardware system.
 *   **Connectivity:** Uses `WiFiManager` to broadcast a "RespiroSync-Setup" Hotspot if it can't find WiFi. Securely connects to Cloudflare WebSockets (WSS).
 *   **Environment:** Polls the DHT22 (Climate), Sharp GP2Y1014AU (Dust/PM2.5), and MQ-135 (Gas) sensors every 5 seconds.
 *   **Comms:** Listens to UART2 (Serial2) for acoustic triggers from the Raspberry Pi Pico.
+*   **Broker:** connects as the `respirosync_device` account with client id = its pairing token, and only uses `respirosync/devices/<token>/...` topics.
+*   **Local alarm:** applies the thresholds it receives from the dashboard (retained `config` topic) and beeps/turns the red LED on when a reading crosses one, even when offline.
 
 ## 2. Raspberry Pi Pico (Acoustic AI Coprocessor)
 The Raspberry Pi Pico is dedicated entirely to high-speed audio sampling.
-*   **Phase 1 (Heuristic AI):** `pico_cough_ai/pico_cough_ai.ino` uses mathematical amplitude-squaring to detect loud bursts of acoustic energy and calculates a severity score.
-*   **Phase 2 (True Machine Learning):** Instructions below for training a Neural Network using Edge Impulse.
+*   **Phase 1 (current, heuristic):** `pico_cough_ai/pico_cough_ai.ino` measures the RMS sound level of each 16 ms block and reports loud bursts as `COUGH:<level>,<strength>`. Strength is 0 at the threshold and 1 at 8× the threshold. It is a loudness measure, **not** a cough classifier: claps and door slams also trigger it.
+*   **Phase 2 (not implemented yet):** train a real cough/noise classifier with Edge Impulse (steps below).
+*   **Core:** use the **arduino-pico** core by Earle Philhower ("Raspberry Pi Pico/RP2040" in Boards Manager). The sketches use its `I2S i2s(INPUT)` API.
+*   **Calibration:** set `DEBUG_LEVELS 1`, open the Serial Plotter, and set `RMS_THRESHOLD` above your room's normal speech level.
 
 ---
 
@@ -32,9 +36,10 @@ To upgrade the Pico from Phase 1 math-based logic to Phase 2 True AI (Distinguis
 ## Setup Instructions
 
 1.  Open `WIRING_GUIDE.md` and wire all hardware exactly as specified.
-2.  Open `esp32_firmware/esp32_firmware.ino` in the Arduino IDE.
+2.  Copy `esp32_firmware/secrets.example.h` to `esp32_firmware/secrets.h` and fill in the broker URL and device password. Delete `esp32_firmware.example.ino` if it is still in the folder (the IDE compiles every `.ino` in a sketch folder together).
+    Open `esp32_firmware/esp32_firmware.ino` in the Arduino IDE (libraries: WiFiManager, ArduinoJson 6 or 7, DHT sensor library, LiquidCrystal_I2C).
 3.  Connect your ESP32 via USB and click **Upload**.
 4.  Once booted, use your phone to connect to the **RespiroSync-Setup** WiFi network to configure your WiFi password and enter your Dashboard Device Token!
-5.  Open `pico_cough_ai/pico_cough_ai.ino` in the Arduino IDE.
+5.  Open `pico_cough_ai/pico_cough_ai.ino` in the Arduino IDE with the arduino-pico core selected.
 6.  Connect your Raspberry Pi Pico via USB and click **Upload**.
 7.  Mount the hardware in the bedroom and monitor the dashboard!
