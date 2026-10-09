@@ -1,0 +1,84 @@
+name: CI
+
+# Runs on every push and pull request. The NAS only deploys from main, so test
+# changes on a branch and merge after this is green.
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests (Laravel, in-memory SQLite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, pdo_sqlite, sqlite3, bcmath, gmp, curl, openssl, intl
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate --ansi
+
+      # phpunit.xml forces in-memory SQLite and tests/TestCase.php refuses anything else.
+      - name: Run tests
+        run: php artisan test
+
+  frontend:
+    name: Frontend type check and build (Next.js)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+  ai_engine:
+    name: AI engine (install and syntax check)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai_engine
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: ai_engine/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Syntax check
+        run: python -m py_compile main.py
