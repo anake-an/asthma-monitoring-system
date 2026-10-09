@@ -50,15 +50,17 @@ export default function AiRiskAssessment() {
     );
   }
 
+  let activePrediction: AiPrediction;
+  
   if (!prediction || prediction.error) {
     // Fallback to a "Learning Mode" instead of a strict UI lockout
-    var activePrediction = {
+    activePrediction = {
       model_stage: "Stage 1 (Learning)",
       probability_of_attack: 0.1, // Default safe 10% risk
       estimated_time_to_next_inhaler_mins: -1 // Safe
     };
   } else {
-    var activePrediction = prediction;
+    activePrediction = prediction;
   }
   
   const riskPercent = Math.round(activePrediction.probability_of_attack * 100);
