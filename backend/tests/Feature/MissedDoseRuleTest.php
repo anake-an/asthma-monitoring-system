@@ -22,12 +22,14 @@ class MissedDoseRuleTest extends TestCase
 
     private User $user;
 
+    private Device $device;
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->user = User::factory()->create();
-        Device::create(['user_id' => $this->user->id, 'device_token' => 'DOSE01']);
-        HardwareConfig::forUser($this->user); // 35 / 35 / 75 / 1000
+        $this->device = Device::create(['user_id' => $this->user->id, 'device_token' => 'DOSE01']);
+        HardwareConfig::forDevice($this->device); // 35 / 35 / 75 / 1000
         Http::fake(['*/predict*' => Http::response(['detail' => 'Model not trained yet'], 400)]); // AI learning
     }
 
@@ -38,12 +40,12 @@ class MissedDoseRuleTest extends TestCase
 
     private function config(): HardwareConfig
     {
-        return HardwareConfig::forUser($this->user)->fresh();
+        return HardwareConfig::forDevice($this->device)->fresh();
     }
 
     public function test_a_missed_daily_dose_lowers_unlocked_limits_until_one_is_logged(): void
     {
-        HardwareConfig::forUser($this->user)->update(['humidity_locked' => true]);
+        HardwareConfig::forDevice($this->device)->update(['humidity_locked' => true]);
         $this->controllerDose('30 hours');
 
         $this->artisan('ai:optimize')->assertSuccessful();

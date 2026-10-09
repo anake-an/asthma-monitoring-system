@@ -18,7 +18,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/user', [AuthController::class, 'deleteAccount']);
     Route::post('/logout', [AuthController::class, 'logout']);
     
+    Route::get('/patients', [\App\Http\Controllers\PatientController::class, 'index']);
+    Route::post('/patients', [\App\Http\Controllers\PatientController::class, 'store']);
+    Route::patch('/patients/{id}', [\App\Http\Controllers\PatientController::class, 'update']);
+    Route::delete('/patients/{id}', [\App\Http\Controllers\PatientController::class, 'destroy']);
+
     Route::get('/devices', [\App\Http\Controllers\DeviceController::class, 'getDevices']);
+    Route::patch('/devices/{id}', [\App\Http\Controllers\DeviceController::class, 'updateDevice']);
     Route::delete('/devices/{id}', [\App\Http\Controllers\DeviceController::class, 'deleteDevice']);
     Route::post('/devices/generate-token', [\App\Http\Controllers\DeviceController::class, 'generateToken']);
     

@@ -4,16 +4,24 @@ namespace App\Http\Controllers;
 
 use App\Models\Device;
 use App\Models\HardwareConfig;
+use App\Models\Patient;
 use App\Support\Mqtt;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
+/**
+ * Devices (one per room). Pairing, renaming, assigning to a child and removal need "configure"
+ * (DevicePolicy); listing shows every device the user can see.
+ */
 class DeviceController extends Controller
 {
     public function generateToken(Request $request, Mqtt $mqtt)
     {
+        $request->validate(['patient_id' => 'nullable|integer']);
         $user = $request->user();
+        // The new room belongs to the chosen child (one the user owns), by default the first one.
+        $patient = $this->patient($request, 'manage');
 
         // 6-character uppercase token, also used as the device's MQTT client id
         do {
@@ -22,14 +30,15 @@ class DeviceController extends Controller
 
         $device = Device::create([
             'user_id' => $user->id,
+            'patient_id' => $patient->id,
             'device_token' => $token,
             'name' => 'New RespiroSync ESP32',
             'status' => 'pending',
         ]);
 
-        // Retained, so the ESP32 gets its owner's thresholds on its very first connect.
+        // Retained, so the ESP32 gets its room's thresholds on its very first connect.
         try {
-            $mqtt->publishConfig($device, HardwareConfig::forUser($user));
+            $mqtt->publishConfig($device, HardwareConfig::forDevice($device));
         } catch (\Throwable $e) {
             Log::error('Failed to publish initial config', ['device_id' => $device->id, 'error' => $e->getMessage()]);
         }
@@ -41,16 +50,50 @@ class DeviceController extends Controller
         ]);
     }
 
+    /**
+     * Every device this user can see, most recently seen first, with its child and whether this
+     * user may change it.
+     */
     public function getDevices(Request $request)
     {
-        $devices = $request->user()->devices()->orderBy('created_at', 'desc')->get();
+        $user = $request->user();
+        $devices = $user->accessibleDevices()
+            ->with('patient:id,name')
+            ->orderByRaw('last_seen_at IS NULL')->orderByDesc('last_seen_at')->orderByDesc('created_at')
+            ->get()
+            ->map(fn (Device $d) => $d->toArray() + ['can_configure' => $user->can('configure', $d)]);
 
         return response()->json(['devices' => $devices]);
     }
 
+    /** Rename a device (its room) or move it to another child / a shared room (patient_id null). */
+    public function updateDevice(Request $request, $id)
+    {
+        $request->merge(['device_id' => $id]);
+        $device = $this->device($request, 'configure');
+
+        $validated = $request->validate([
+            'name' => 'sometimes|required|string|max:40',
+            'patient_id' => 'sometimes|nullable|integer',
+        ]);
+
+        if (array_key_exists('patient_id', $validated) && $validated['patient_id'] !== null) {
+            // Only into a child this user owns.
+            $patient = Patient::find($validated['patient_id']);
+            if (!$patient || $request->user()->cannot('manage', $patient)) {
+                abort(404);
+            }
+        }
+
+        $device->update($validated);
+
+        return response()->json($device->fresh()->load('patient:id,name'));
+    }
+
     public function deleteDevice(Request $request, Mqtt $mqtt, $id)
     {
-        $device = $request->user()->devices()->findOrFail($id);
+        $request->merge(['device_id' => $id]);
+        $device = $this->device($request, 'configure');
 
         try {
             $mqtt->sendCommand($device, 'factory_reset');

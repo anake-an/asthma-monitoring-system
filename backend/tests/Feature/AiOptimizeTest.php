@@ -18,10 +18,10 @@ class AiOptimizeTest extends TestCase
     {
         $alice = User::factory()->create();
         $bob = User::factory()->create();
-        Device::create(['user_id' => $alice->id, 'device_token' => 'ALICE1']);
-        Device::create(['user_id' => $bob->id, 'device_token' => 'BOB222']);
-        HardwareConfig::forUser($alice); // AI optimization on by default
-        HardwareConfig::forUser($bob)->update(['ai_optimization_enabled' => false, 'pm25_threshold' => 50]);
+        $aliceDevice = Device::create(['user_id' => $alice->id, 'device_token' => 'ALICE1']);
+        $bobDevice = Device::create(['user_id' => $bob->id, 'device_token' => 'BOB222']);
+        HardwareConfig::forDevice($aliceDevice); // AI optimization on by default
+        HardwareConfig::forDevice($bobDevice)->update(['ai_optimization_enabled' => false, 'pm25_threshold' => 50]);
 
         Http::fake(['*/predict*' => Http::response([
             'probability_of_attack' => 0.6,
@@ -38,8 +38,8 @@ class AiOptimizeTest extends TestCase
         Http::assertSent(fn (Request $r) => $r['user_id'] == $alice->id);
 
         // Suggested 25, but within one day the AI may only move 10 %: 35 -> 31.5.
-        $this->assertSame(31.5, HardwareConfig::forUser($alice)->pm25_threshold);
-        $this->assertSame(50.0, HardwareConfig::forUser($bob)->pm25_threshold);
+        $this->assertSame(31.5, HardwareConfig::forDevice($aliceDevice)->pm25_threshold);
+        $this->assertSame(50.0, HardwareConfig::forDevice($bobDevice)->pm25_threshold);
 
         $this->assertCount(1, $this->published);
         $this->assertSame('respirosync/devices/ALICE1/config', $this->published[0][0]);

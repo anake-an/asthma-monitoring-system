@@ -39,8 +39,8 @@ class DataScopingTest extends TestCase
             ->assertOk()
             ->assertJson(['pm25_threshold' => 20, 'devices_synced' => 1]);
 
-        $this->assertSame(20.0, HardwareConfig::forUser($this->alice)->pm25_threshold);
-        $this->assertSame(35.0, HardwareConfig::forUser($this->bob)->pm25_threshold);
+        $this->assertSame(20.0, HardwareConfig::forDevice($this->aliceDevice)->pm25_threshold);
+        $this->assertSame(35.0, HardwareConfig::forDevice($this->bobDevice)->pm25_threshold);
 
         $this->assertCount(1, $this->published);
         [$topic, $payload, $retain] = $this->published[0];

@@ -50,9 +50,8 @@ class DeviceMessageHandler
             return;
         }
 
-        if ($device->status !== 'online') {
-            $device->update(['status' => 'online']);
-        }
+        // Online/offline is computed from last_seen_at (Device::OFFLINE_AFTER_SECONDS).
+        $device->forceFill(['last_seen_at' => now(), 'status' => 'online'])->save();
 
         match ($channel) {
             'telemetry' => $this->storeTelemetry($device, $data),

@@ -18,8 +18,8 @@ class ConfigSyncTest extends TestCase
         $alice = User::factory()->create();
         $bob = User::factory()->create();
         Device::create(['user_id' => $alice->id, 'device_token' => 'ALICE1']);
-        Device::create(['user_id' => $bob->id, 'device_token' => 'BOB222']);
-        HardwareConfig::forUser($bob)->update(['mq135_threshold' => 1500]);
+        $bobDevice = Device::create(['user_id' => $bob->id, 'device_token' => 'BOB222']);
+        HardwareConfig::forDevice($bobDevice)->update(['mq135_threshold' => 1500]);
 
         $this->assertSame(2, app(Mqtt::class)->syncAllConfigs());
 
