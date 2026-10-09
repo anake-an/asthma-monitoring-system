@@ -104,7 +104,8 @@ class MissedDoseRuleTest extends TestCase
         $this->assertSame(17.0, $c->pm25_threshold, '20 - 15 %');
         $this->assertSame(20.0, $c->pm25_cap);
         $this->assertSame(29.8, $c->temperature_threshold, 'untouched limits are not lowered twice');
-        $this->assertSame(['pm25' => 20.0, 'temperature' => 35.0, 'humidity' => 75.0, 'mq135' => 1000.0], $c->missed_dose_base);
+        // JSON gives whole numbers back as ints (20, not 20.0); withoutMissedDoseRule() casts them.
+        $this->assertEquals(['pm25' => 20, 'temperature' => 35, 'humidity' => 75, 'mq135' => 1000], $c->missed_dose_base);
 
         $this->controllerDose('1 minute');
         $this->artisan('ai:optimize')->assertSuccessful();
