@@ -88,14 +88,18 @@ class LimitCapsTest extends TestCase
         HardwareConfig::forUser($this->user); // humidity 75
         $unusual = ['pm25_threshold' => 35.0, 'temperature_threshold' => 35.0, 'humidity_threshold' => 65.0, 'mq135_threshold' => 1000.0];
         $normal = ['humidity_threshold' => 75.0] + $unusual;
+        $answer = fn (array $limits) => ['probability_of_attack' => 0.5, 'ready_to_adjust' => true, 'suggested_thresholds' => $limits];
+        // One answer per run (a second Http::fake would not replace the first).
+        Http::fake(['*/predict*' => Http::sequence()
+            ->push($answer($unusual))
+            ->push($answer($normal))->push($answer($unusual))->push($answer($normal))
+            ->push($answer($normal))]);
 
-        $this->aiSuggests($unusual);
         $this->artisan('ai:optimize')->assertSuccessful();
         $this->assertSame(67.5, HardwareConfig::forUser($this->user)->fresh()->humidity_threshold);
 
-        foreach ([$normal, $unusual, $normal] as $suggestion) { // Stage 1 flips every hour
+        for ($i = 0; $i < 3; $i++) { // Stage 1 flips every hour
             $this->travel(1)->hours();
-            $this->aiSuggests($suggestion);
             $this->artisan('ai:optimize')->assertSuccessful();
             $this->assertSame(67.5, HardwareConfig::forUser($this->user)->fresh()->humidity_threshold, 'held until the next day');
         }
