@@ -34,3 +34,6 @@ Schedule::call(function () {
         // Log silently
     }
 })->everyFourHours();
+
+// Fetch AI optimized thresholds and push to ESP32 every 5 minutes
+Schedule::command('ai:optimize')->everyFiveMinutes();
