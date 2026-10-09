@@ -30,7 +30,9 @@ type LimitChange = {
   created_at: string;
 };
 
-const LIMIT_LABELS: Record<LimitChange["limit_name"], { name: string; unit: string }> = {
+const timesText = (n: number) => (n === 0 ? "0 times" : n === 1 ? "once" : `${n} times`);
+
+const LIMIT_LABELS:Record<LimitChange["limit_name"], { name: string; unit: string }> = {
   pm25: { name: "PM2.5 dust", unit: " µg/m³" },
   temperature: { name: "Temperature", unit: "°C" },
   humidity: { name: "Humidity", unit: "%" },
@@ -196,10 +198,10 @@ export default function ReportPage() {
             </div>
             
             <div className="bg-red-500/5 print:bg-red-50 border border-red-500/20 print:border-red-200 rounded-2xl p-6 relative overflow-hidden">
-              <p className="text-xs font-semibold text-red-400 print:text-red-600 uppercase tracking-widest mb-2">High Severity Flags</p>
+              <p className="text-xs font-semibold text-red-400 print:text-red-600 uppercase tracking-widest mb-2">Cough Alerts</p>
               <div className="flex items-end gap-3">
                 <p className="text-5xl font-semibold text-red-400 print:text-red-700 tracking-tighter">{data.high_severity_events}</p>
-                <p className="text-sm text-red-500/60 mb-1">critical events</p>
+                <p className="text-sm text-red-500/60 mb-1">met the alert rule</p>
               </div>
             </div>
 
@@ -366,9 +368,10 @@ export default function ReportPage() {
                   During this reporting period, the device recorded {data.total_events} cough-like sounds (a loudness detector, not a diagnosis), of which {data.high_severity_events} met the alert rule (3 within 10 minutes, or 2 with a strong detection).
                 </p>
                 <p>
-                  <strong className="text-zinc-900 dark:text-white print:text-black font-semibold block mb-1">Medication Analysis:</strong> 
-                  The emergency blue inhaler was administered {data.rescue_doses} times, and the daily brown inhaler {data.controller_doses} times. 
-                  {data.rescue_doses > 3 ? " The high frequency of emergency doses indicates potential asthma instability and suggests a review of the daily controller medication plan." : " This usage pattern falls within an acceptable range for maintenance."}
+                  <strong className="text-zinc-900 dark:text-white print:text-black font-semibold block mb-1">Medication Log:</strong>
+                  {/* Facts only: the app does not judge asthma control or suggest treatment changes. */}
+                  The emergency (blue) inhaler was logged {timesText(data.rescue_doses)} and the daily (brown) inhaler {timesText(data.controller_doses)} in these 7 days.
+                  {" "}This log records usage only and is not a medical assessment; show it to your doctor, especially if usage has changed.
                 </p>
               </div>
             </div>
