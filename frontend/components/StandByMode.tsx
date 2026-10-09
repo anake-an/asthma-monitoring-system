@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { dustLevel } from "@/lib/dustBands";
+import { readingLevel } from "@/lib/readingStatus";
 
 type Telemetry = {
   pm25_level: number;
@@ -12,7 +12,7 @@ type Telemetry = {
 export default function StandByMode({ onWake }: { onWake: () => void }) {
   const [time, setTime] = useState<Date | null>(null);
   const [data, setData] = useState<Telemetry | null>(null);
-  const [config, setConfig] = useState({ temperature_threshold: 35, pm25_threshold: 35, humidity_threshold: 60 });
+  const [config, setConfig] = useState({ temperature_threshold: 35, pm25_threshold: 35, humidity_threshold: 75 });
   const [coughDetected, setCoughDetected] = useState(false);
   const [isPortrait, setIsPortrait] = useState(false);
   const [dims, setDims] = useState({ w: 0, h: 0 });
@@ -78,7 +78,7 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
           setConfig({ 
             temperature_threshold: Math.round(confData.temperature_threshold || 35),
             pm25_threshold: Math.round(confData.pm25_threshold || 35),
-            humidity_threshold: Math.round(confData.humidity_threshold || 60)
+            humidity_threshold: Math.round(confData.humidity_threshold || 75)
           });
         }
 
@@ -112,20 +112,18 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
     return date.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
   };
 
-  // Same fixed bands as the dashboard (lib/dustBands.ts), independent of the alert limit.
-  const getAqiInfo = (pm25: number) => {
-    const level = dustLevel(pm25);
-    if (level === "low") return { color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", glow: "shadow-emerald-500/10" };
-    if (level === "moderate") return { color: "text-yellow-400", bg: "bg-yellow-500/10", border: "border-yellow-500/20", glow: "shadow-yellow-500/10" };
-    return { color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/20", glow: "shadow-red-500/20" };
+  // Same rule as the dashboard bars and headlines (lib/readingStatus.ts): green, amber near the limit, red above it.
+  const STANDBY_STYLE = {
+    ok: { color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", glow: "shadow-emerald-500/10" },
+    near: { color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20", glow: "shadow-amber-500/10" },
+    over: { color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/20", glow: "shadow-red-500/20" },
   };
+
+  const getAqiInfo = (pm25: number) => STANDBY_STYLE[readingLevel("pm25", pm25, config.pm25_threshold)];
 
   const getTempInfo = (temp: number | null) => {
     if (temp === null) return { color: "text-zinc-500", bg: "bg-zinc-500/10", border: "border-zinc-500/20", glow: "shadow-zinc-500/10" };
-    if (temp > config.temperature_threshold) return { color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/20", glow: "shadow-red-500/10" };
-    if (temp > config.temperature_threshold - 2) return { color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/20", glow: "shadow-orange-500/10" };
-    if (temp < 18) return { color: "text-cyan-400", bg: "bg-cyan-500/10", border: "border-cyan-500/20", glow: "shadow-cyan-500/10" };
-    return { color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20", glow: "shadow-emerald-500/10" };
+    return STANDBY_STYLE[readingLevel("temperature", temp, config.temperature_threshold)];
   };
 
   return (
