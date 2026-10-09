@@ -61,7 +61,7 @@ class DashboardController extends Controller
         if ($request->boolean('inhaler_used')) {
             InhalerLog::firstOrCreate(
                 ['cough_event_id' => $event->id],
-                ['is_manual' => false, 'user_id' => $request->user()->id, 'device_id' => $event->device_id]
+                ['is_manual' => false, 'user_id' => $request->user()->id, 'device_id' => $event->device_id, 'administered_at' => now()]
             );
         } else {
             InhalerLog::where('cough_event_id', $event->id)->delete();
@@ -119,6 +119,7 @@ class DashboardController extends Controller
             'user_id' => $request->user()->id,
             'is_manual' => true,
             'type' => $request->type,
+            'administered_at' => now(), // app clock, matching the "last 4 hours" query above
         ])->refresh();
 
         return response()->json([
