@@ -21,14 +21,18 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from sklearn.ensemble import RandomForestClassifier
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 
 app = FastAPI(title="RespiroSync AI Engine")
 
-DB_URL = os.getenv("DB_URL") or "mysql+mysqlconnector://{u}:{p}@{h}/{d}".format(
-    u=os.getenv("DB_USERNAME", ""),
-    p=os.getenv("DB_PASSWORD", ""),
-    h=os.getenv("DB_HOST", "db"),
-    d=os.getenv("DB_DATABASE", "asthma_db"),
+# Built from parts, not pasted into a string: a password containing '@', ':' or '/' would
+# otherwise be split in the wrong place (it was: "Unknown MySQL server host '...@db'").
+DB_URL = os.getenv("DB_URL") or URL.create(
+    "mysql+mysqlconnector",
+    username=os.getenv("DB_USERNAME", ""),
+    password=os.getenv("DB_PASSWORD", ""),
+    host=os.getenv("DB_HOST", "db"),
+    database=os.getenv("DB_DATABASE", "asthma_db"),
 )
 engine = create_engine(DB_URL, pool_pre_ping=True)
 

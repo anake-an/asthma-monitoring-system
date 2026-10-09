@@ -39,6 +39,13 @@ class MqttSubscribe extends Command
             $client->subscribe(Mqtt::PREFIX . '/+/events', $callback, 1);
             $this->info('Subscribed to ' . Mqtt::PREFIX . '/+/{telemetry,events}');
 
+            // Devices keep the last retained config; push the current limits after every restart/deploy.
+            try {
+                $this->info('Re-published limits to ' . $mqtt->syncAllConfigs() . ' device(s)');
+            } catch (\Throwable $e) {
+                $this->error('Config sync failed: ' . $e->getMessage());
+            }
+
             $client->loop(true);
             $client->disconnect();
         } catch (\Throwable $e) {
