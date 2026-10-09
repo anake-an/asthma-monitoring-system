@@ -14,11 +14,17 @@ export function urlBase64ToUint8Array(base64String: string) {
 }
 
 export default function CommandCenter() {
-  const [config, setConfig] = useState({ 
-    pm25_threshold: 35, 
-    temperature_threshold: 35, 
-    humidity_threshold: 60, 
+  // In Smart Alerts each *_threshold is the user's own value (the cap): the AI may lower the effective
+  // limit below it when the room is unusual, never raise it above. *_locked: the AI never changes it.
+  const [config, setConfig] = useState({
+    pm25_threshold: 35,
+    temperature_threshold: 35,
+    humidity_threshold: 75,
     mq135_threshold: GAS_DEFAULT_LIMIT_PPM,
+    pm25_locked: false,
+    temperature_locked: false,
+    humidity_locked: false,
+    mq135_locked: false,
     is_buzzer_muted: false,
     ai_optimization_enabled: true
   });
@@ -47,6 +53,26 @@ export default function CommandCenter() {
   const [generatingToken, setGeneratingToken] = useState(false);
   const [devices, setDevices] = useState<{id: number, name: string, status: string, device_token: string}[]>([]);
 
+  // Lock switch under each limit, with a line saying what the AI may do with it.
+  const lockRow = (name: "pm25" | "temperature" | "humidity" | "mq135") => {
+    const key = `${name}_locked` as const;
+    return (
+      <label className="flex items-center justify-between gap-3 mt-3 text-[11px] text-zinc-600 dark:text-zinc-400 cursor-pointer">
+        <span className="font-light">
+          {config[key]
+            ? "Locked: the AI never changes this limit."
+            : config.ai_optimization_enabled
+              ? "The AI may lower this when the room is unusual, never above your value."
+              : "AI optimization is off: this limit is used as set."}
+        </span>
+        <span className="flex items-center gap-1.5 shrink-0 font-medium">
+          <input type="checkbox" checked={config[key]} onChange={(e) => setConfig({ ...config, [key]: e.target.checked })} className="accent-zinc-500" />
+          Lock
+        </span>
+      </label>
+    );
+  };
+
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3500);
@@ -65,10 +91,15 @@ export default function CommandCenter() {
         return res.json();
       })
       .then(data => setConfig({
-        pm25_threshold: Math.round(data.pm25_threshold || 35),
-        temperature_threshold: Math.round(data.temperature_threshold || 35),
-        humidity_threshold: Math.round(data.humidity_threshold || 60),
-        mq135_threshold: Math.round(data.mq135_threshold || GAS_DEFAULT_LIMIT_PPM),
+        // Show the user's own values (caps), not the AI-lowered effective limits.
+        pm25_threshold: Math.round(data.pm25_cap ?? data.pm25_threshold ?? 35),
+        temperature_threshold: Math.round(data.temperature_cap ?? data.temperature_threshold ?? 35),
+        humidity_threshold: Math.round(data.humidity_cap ?? data.humidity_threshold ?? 75),
+        mq135_threshold: Math.round(data.mq135_cap ?? data.mq135_threshold ?? GAS_DEFAULT_LIMIT_PPM),
+        pm25_locked: !!data.pm25_locked,
+        temperature_locked: !!data.temperature_locked,
+        humidity_locked: !!data.humidity_locked,
+        mq135_locked: !!data.mq135_locked,
         is_buzzer_muted: data.is_buzzer_muted || false,
         ai_optimization_enabled: data.ai_optimization_enabled !== undefined ? data.ai_optimization_enabled : true
       }))
@@ -371,7 +402,7 @@ export default function CommandCenter() {
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400"><path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"></path></svg>
                     AI Smart Optimization
                   </span>
-                  <span className="text-[11px] text-blue-700 dark:text-blue-200/60 font-light mt-1 block">Let RespiroSync AI automatically adjust your safe limits</span>
+                  <span className="text-[11px] text-blue-700 dark:text-blue-200/60 font-light mt-1 block">The AI may lower a limit when your room is unusual, but never raise it above your value</span>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input type="checkbox" className="sr-only peer" checked={config.ai_optimization_enabled} onChange={(e) => setConfig({...config, ai_optimization_enabled: e.target.checked})} />
@@ -380,7 +411,7 @@ export default function CommandCenter() {
               </div>
 
               {/* PM2.5 Threshold */}
-              <div className={`bg-zinc-100 dark:bg-white/5 border border-zinc-200 dark:border-white/5 rounded-2xl p-5 transition-opacity ${config.ai_optimization_enabled ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
+              <div className={`bg-zinc-100 dark:bg-white/5 border border-zinc-200 dark:border-white/5 rounded-2xl p-5`}>
                 <div className="flex justify-between items-center mb-1">
                   <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Dust & Particles Limit (PM2.5)</label>
                   <span className={`text-lg font-semibold transition-colors ${getPm25Color(config.pm25_threshold)}`}>
@@ -390,7 +421,6 @@ export default function CommandCenter() {
                 <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-4 font-light">Triggers room alarm if air becomes hazardous</p>
                 <input
                   type="range" min="10" max="150"
-                  disabled={config.ai_optimization_enabled}
                   value={config.pm25_threshold}
                   onChange={(e) => setConfig({...config, pm25_threshold: Number(e.target.value)})}
                   className="w-full accent-yellow-500"
@@ -398,10 +428,11 @@ export default function CommandCenter() {
                 <div className="flex justify-between text-[10px] text-zinc-600 dark:text-zinc-400 mt-2 font-medium">
                   <span>10 (Clean)</span><span>80 (Fair)</span><span>150 (Poor)</span>
                 </div>
+                {lockRow("pm25")}
               </div>
 
               {/* Gas Threshold */}
-              <div className={`bg-zinc-100 dark:bg-white/5 border border-zinc-200 dark:border-white/5 rounded-2xl p-5 transition-opacity ${config.ai_optimization_enabled ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
+              <div className={`bg-zinc-100 dark:bg-white/5 border border-zinc-200 dark:border-white/5 rounded-2xl p-5`}>
                 <div className="flex justify-between items-center mb-1">
                   <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Air Gas Limit (VOCs)</label>
                   <span className="text-lg font-semibold text-indigo-400">
@@ -411,7 +442,6 @@ export default function CommandCenter() {
                 <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-4 font-light">Estimated CO2-equivalent; also reacts to smoke and household chemicals</p>
                 <input
                   type="range" min="450" max="3000" step="50"
-                  disabled={config.ai_optimization_enabled}
                   value={config.mq135_threshold}
                   onChange={(e) => setConfig({...config, mq135_threshold: Number(e.target.value)})}
                   className="w-full accent-indigo-500"
@@ -419,10 +449,11 @@ export default function CommandCenter() {
                 <div className="flex justify-between text-[10px] text-zinc-600 dark:text-zinc-400 mt-2 font-medium">
                   <span>450 (Fresh air)</span><span>1000 (Ventilate)</span><span>3000 (Poor)</span>
                 </div>
+                {lockRow("mq135")}
               </div>
 
               {/* Temperature Threshold */}
-              <div className={`bg-zinc-100 dark:bg-white/5 border border-zinc-200 dark:border-white/5 rounded-2xl p-5 transition-opacity ${config.ai_optimization_enabled ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
+              <div className={`bg-zinc-100 dark:bg-white/5 border border-zinc-200 dark:border-white/5 rounded-2xl p-5`}>
                 <div className="flex justify-between items-center mb-1">
                   <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Maximum Temperature</label>
                   <span className={`text-lg font-semibold transition-colors ${getTempColor(config.temperature_threshold)}`}>
@@ -432,7 +463,6 @@ export default function CommandCenter() {
                 <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-4 font-light">Warns if the room becomes too hot</p>
                 <input
                   type="range" min="20" max="50"
-                  disabled={config.ai_optimization_enabled}
                   value={config.temperature_threshold}
                   onChange={(e) => setConfig({...config, temperature_threshold: Number(e.target.value)})}
                   className="w-full accent-orange-500"
@@ -440,10 +470,11 @@ export default function CommandCenter() {
                 <div className="flex justify-between text-[10px] text-zinc-600 dark:text-zinc-400 mt-2 font-medium">
                   <span>20°C (Cold)</span><span>35°C (Warm)</span><span>50°C (Hot)</span>
                 </div>
+                {lockRow("temperature")}
               </div>
 
               {/* Humidity Threshold */}
-              <div className={`bg-zinc-100 dark:bg-white/5 border border-zinc-200 dark:border-white/5 rounded-2xl p-5 transition-opacity ${config.ai_optimization_enabled ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
+              <div className={`bg-zinc-100 dark:bg-white/5 border border-zinc-200 dark:border-white/5 rounded-2xl p-5`}>
                 <div className="flex justify-between items-center mb-1">
                   <label className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Maximum Humidity</label>
                   <span className="text-lg font-semibold text-blue-400">
@@ -453,7 +484,6 @@ export default function CommandCenter() {
                 <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-4 font-light">Warns if the room becomes too damp (mold risk)</p>
                 <input
                   type="range" min="30" max="90"
-                  disabled={config.ai_optimization_enabled}
                   value={config.humidity_threshold}
                   onChange={(e) => setConfig({...config, humidity_threshold: Number(e.target.value)})}
                   className="w-full accent-blue-500"
@@ -461,6 +491,7 @@ export default function CommandCenter() {
                 <div className="flex justify-between text-[10px] text-zinc-600 dark:text-zinc-400 mt-2 font-medium">
                   <span>30% (Dry)</span><span>60% (Comfortable)</span><span>90% (Damp)</span>
                 </div>
+                {lockRow("humidity")}
               </div>
 
               {/* Toggles Group */}

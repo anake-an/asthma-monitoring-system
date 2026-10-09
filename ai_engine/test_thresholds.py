@@ -30,4 +30,8 @@ assert main.respect_room_normal({"pm25_threshold": 5.0, "temperature_threshold":
     "pm25_threshold": 15.0, "temperature_threshold": 26.0, "humidity_threshold": 55.0, "mq135_threshold": 700.0,
 }
 
+# The room's normal-range tops reported to the dashboard (used to warn about a user limit below them).
+assert main.room_normal_limits(ROOM) == {"pm25_threshold": 9.6, "temperature_threshold": 31.4, "humidity_threshold": 73.6}
+assert main.room_normal_limits(None) is None
+
 print("respect_room_normal: all checks passed")
