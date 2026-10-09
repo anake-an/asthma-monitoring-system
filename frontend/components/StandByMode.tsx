@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { readingLevel } from "@/lib/readingStatus";
+import { useRooms, withDevice } from "@/lib/rooms";
 
 type Telemetry = {
   pm25_level: number;
@@ -10,6 +11,7 @@ type Telemetry = {
 };
 
 export default function StandByMode({ onWake }: { onWake: () => void }) {
+  const { deviceId } = useRooms(); // same room as the dashboard
   const [time, setTime] = useState<Date | null>(null);
   const [data, setData] = useState<Telemetry | null>(null);
   const [config, setConfig] = useState({ temperature_threshold: 35, pm25_threshold: 35, humidity_threshold: 75 });
@@ -47,13 +49,15 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
   useEffect(() => {
     // Clock initialization and interval
     setTime(new Date());
+    setData(null); // another room: nothing of the previous one
+    setCoughDetected(false);
     const clockInterval = setInterval(() => setTime(new Date()), 1000);
 
     // Data fetching logic
     const fetchData = async () => {
       try {
         const token = localStorage.getItem("auth_token");
-        const res = await fetch("/api/telemetry?limit=1", {
+        const res = await fetch(withDevice("/api/telemetry?limit=1", deviceId), {
           headers: { 
             "Authorization": `Bearer ${token}`,
             "Accept": "application/json"
@@ -70,7 +74,7 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
           if (logs.length > 0) setData(logs[0]);
         }
 
-        const confRes = await fetch("/api/config", {
+        const confRes = await fetch(withDevice("/api/config", deviceId), {
           headers: { "Authorization": `Bearer ${token}`, "Accept": "application/json" }
         });
         if (confRes.ok) {
@@ -82,7 +86,7 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
           });
         }
 
-        const coughRes = await fetch("/api/cough-events?per_page=1", {
+        const coughRes = await fetch(withDevice("/api/cough-events?per_page=1", deviceId), {
           headers: { "Authorization": `Bearer ${token}`, "Accept": "application/json" }
         });
         if (coughRes.ok) {
@@ -102,7 +106,7 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
       clearInterval(clockInterval);
       clearInterval(dataInterval);
     };
-  }, []);
+  }, [deviceId]);
 
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });

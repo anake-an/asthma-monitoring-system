@@ -7,6 +7,8 @@ import LogoutButton from "@/components/LogoutButton";
 import ThemeToggle from "@/components/ThemeToggle";
 import StandByMode from "@/components/StandByMode";
 import AiRiskAssessment from "@/components/AiRiskAssessment";
+import RoomPicker from "@/components/RoomPicker";
+import { RoomsProvider } from "@/lib/rooms";
 
 export default function Home() {
   const [sleepMode, setSleepMode] = useState(false);
@@ -30,10 +32,11 @@ export default function Home() {
   }
 
   if (sleepMode) {
-    return <StandByMode onWake={() => handleSleepToggle(false)} />;
+    return <RoomsProvider><StandByMode onWake={() => handleSleepToggle(false)} /></RoomsProvider>;
   }
 
   return (
+    <RoomsProvider>
     <main className="min-h-screen p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto transition-all duration-500">
 
       {/* Header */}
@@ -51,7 +54,8 @@ export default function Home() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-end">
+          <RoomPicker />
           <button 
             onClick={() => handleSleepToggle(true)}
             className="flex items-center gap-2 bg-indigo-500/10 hover:bg-indigo-500/20 transition-colors border border-indigo-500/20 rounded-full px-4 py-2 text-indigo-400 text-xs font-medium"
@@ -100,5 +104,6 @@ export default function Home() {
         </p>
       </footer>
     </main>
+    </RoomsProvider>
   );
 }

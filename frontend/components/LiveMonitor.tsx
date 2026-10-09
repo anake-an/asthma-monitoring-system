@@ -4,6 +4,7 @@ import InhalerTracker from "./InhalerTracker";
 import { dustLevel, DUST_BANDS_NOTE } from "@/lib/dustBands";
 import { barPercent, readingLevel, LEVEL_STYLE, type Level } from "@/lib/readingStatus";
 import { GAS_NOTE } from "@/lib/gas";
+import { useRooms, withDevice } from "@/lib/rooms";
 
 type Telemetry = {
   pm25_level: number;
@@ -18,6 +19,7 @@ const LIMIT_NAMES: LimitName[] = ["pm25", "temperature", "humidity", "mq135"];
 const round1 = (v: number) => Math.round(v * 10) / 10;
 
 export default function LiveMonitor() {
+  const { deviceId } = useRooms(); // the room on screen (header picker)
   const [data, setData] = useState<Telemetry | null>(null);
   const [coughDetected, setCoughDetected] = useState(false);
   const [isOffline, setIsOffline] = useState(true);
@@ -58,16 +60,22 @@ export default function LiveMonitor() {
   useEffect(() => {
     let inFlight = false;
     let tick = 0;
+    let active = true; // false once another room is picked: late answers are ignored
+    // Another room was picked: show nothing of the previous one while its data loads.
+    setData(null);
+    setIsOffline(true);
+    setCoughDetected(false);
 
     const fetchTelemetry = async (headers: HeadersInit) => {
       // Only the newest reading is needed here.
-      const res = await fetch("/api/telemetry?limit=1", { headers });
+      const res = await fetch(withDevice("/api/telemetry?limit=1", deviceId), { headers });
       if (res.status === 401) {
         window.location.href = "/login";
         return;
       }
       if (!res.ok) return;
       const logs = await res.json();
+      if (!active) return;
       if (logs.length === 0) {
         setData(null);
         setIsOffline(true);
@@ -104,9 +112,10 @@ export default function LiveMonitor() {
 
     const fetchSlow = async (headers: HeadersInit) => {
         // Fetch Cough Events to set AI Status
-        const coughRes = await fetch("/api/cough-events?per_page=1", { headers });
+        const coughRes = await fetch(withDevice("/api/cough-events?per_page=1", deviceId), { headers });
         if (coughRes.ok) {
           const coughData = await coughRes.json();
+          if (!active) return;
           if (coughData.data && coughData.data.length > 0) {
             const latestEvent = coughData.data[0];
             const diffHours = (new Date().getTime() - new Date(latestEvent.recorded_at).getTime()) / (1000 * 60 * 60);
@@ -115,9 +124,10 @@ export default function LiveMonitor() {
         }
 
         // Fetch thresholds from config API
-        const confRes = await fetch("/api/config", { headers });
+        const confRes = await fetch(withDevice("/api/config", deviceId), { headers });
         if (confRes.ok) {
           const confData = await confRes.json();
+          if (!active) return;
           const caps: Partial<Record<LimitName, number>> = {};
           const locked: Partial<Record<LimitName, boolean>> = {};
           for (const name of LIMIT_NAMES) {
@@ -139,8 +149,11 @@ export default function LiveMonitor() {
 
     fetchData();
     const interval = setInterval(fetchData, 2000);
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [deviceId]);
 
   // Headlines follow the same rule as the bars (lib/readingStatus.ts): green / amber "near" / red "over".
   type CardInfo = { text: string } & (typeof LEVEL_STYLE)[Level];

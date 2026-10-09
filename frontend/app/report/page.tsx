@@ -9,6 +9,7 @@ type DailyData = {
 };
 
 type ReportData = {
+  patient?: { id: number; name: string }; // the child this report is about
   start_date: string;
   end_date: string;
   total_events: number;
@@ -28,7 +29,11 @@ type LimitChange = {
   source: "ai" | "user" | "rule"; // rule: missed daily dose (15 % lower until a dose is logged)
   reason: string | null;
   created_at: string;
+  device_id?: number | null;
+  device_name?: string | null; // the room
 };
+
+type PatientOption = { id: number; name: string; role: string };
 
 const timesText = (n: number) => (n === 0 ? "0 times" : n === 1 ? "once" : `${n} times`);
 
@@ -42,12 +47,22 @@ const LIMIT_LABELS:Record<LimitChange["limit_name"], { name: string; unit: strin
 export default function ReportPage() {
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
+  // One report per child; the picker is hidden when printing.
+  const [patients, setPatients] = useState<PatientOption[]>([]);
+  const [patientId, setPatientId] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch("/api/patients", { headers: { "Authorization": `Bearer ${localStorage.getItem("auth_token")}`, "Accept": "application/json" } })
+      .then(res => (res.ok ? res.json() : { patients: [] }))
+      .then(d => setPatients(d.patients ?? []))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const fetchReport = async () => {
       try {
         const token = localStorage.getItem("auth_token");
-        const res = await fetch("/api/report", {
+        const res = await fetch(patientId ? `/api/report?patient_id=${patientId}` : "/api/report", {
           headers: { 
             "Authorization": `Bearer ${token}`,
             "Accept": "application/json"
@@ -69,7 +84,7 @@ export default function ReportPage() {
     };
     
     fetchReport();
-  }, []);
+  }, [patientId]);
 
   if (loading) {
     return (
@@ -114,15 +129,16 @@ export default function ReportPage() {
 
   const maxCount = Math.max(...last7Days.flatMap(d => [d.cough_count, d.inhaler_total]), 10); // at least 10 for scale
 
-  // One line per update: the rows of one AI run or one Smart Alerts save share time, source and reason.
+  // One line per update: the rows of one AI run or one Smart Alerts save share room, time, source and reason.
   const limitOrder = Object.keys(LIMIT_LABELS);
-  const limitUpdates: { created_at: string; source: LimitChange["source"]; reason: string | null; changes: LimitChange[] }[] = [];
+  const limitUpdates: { created_at: string; device_name: string | null; source: LimitChange["source"]; reason: string | null; changes: LimitChange[] }[] = [];
+  const severalRooms = new Set((data.limit_changes ?? []).map(c => c.device_id)).size > 1;
   for (const c of data.limit_changes ?? []) {
     const last = limitUpdates[limitUpdates.length - 1];
-    if (last && last.created_at === c.created_at && last.source === c.source && last.reason === c.reason) {
+    if (last && last.created_at === c.created_at && last.device_name === (c.device_name ?? null) && last.source === c.source && last.reason === c.reason) {
       last.changes.push(c);
     } else {
-      limitUpdates.push({ created_at: c.created_at, source: c.source, reason: c.reason, changes: [c] });
+      limitUpdates.push({ created_at: c.created_at, device_name: c.device_name ?? null, source: c.source, reason: c.reason, changes: [c] });
     }
   }
   limitUpdates.forEach(u => u.changes.sort((a, b) => limitOrder.indexOf(a.limit_name) - limitOrder.indexOf(b.limit_name)));
@@ -178,8 +194,18 @@ export default function ReportPage() {
               <p className="text-sm text-zinc-600 dark:text-zinc-400 print:text-zinc-600 font-light">Environment & Cough Monitoring</p>
             </div>
             <div className="mt-6 md:mt-0 text-left md:text-right bg-zinc-100 dark:bg-white/5 print:bg-transparent px-5 py-4 rounded-2xl border border-zinc-200 dark:border-white/5 print:border-none print:p-0">
-              <p className="text-sm text-zinc-600 dark:text-zinc-400 print:text-zinc-600 dark:text-zinc-400 uppercase tracking-widest mb-1 font-medium text-[10px]">Account Profile</p>
-              <p className="text-lg font-medium text-zinc-900 dark:text-zinc-100 print:text-black">Primary User</p>
+              <p className="text-sm text-zinc-600 dark:text-zinc-400 print:text-zinc-600 dark:text-zinc-400 uppercase tracking-widest mb-1 font-medium text-[10px]">Child</p>
+              <p className="text-lg font-medium text-zinc-900 dark:text-zinc-100 print:text-black">{data.patient?.name ?? "My child"}</p>
+              {patients.length > 1 && (
+                <select
+                  value={data.patient?.id ?? ""}
+                  onChange={e => setPatientId(Number(e.target.value))}
+                  className="print:hidden mt-2 bg-white dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-lg px-2 py-1 text-xs text-zinc-900 dark:text-white"
+                  aria-label="Child"
+                >
+                  {patients.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              )}
               <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1 font-mono">{data.start_date} — {data.end_date}</p>
             </div>
           </div>
@@ -321,6 +347,7 @@ export default function ReportPage() {
                           {new Date(u.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                         </td>
                         <td className="py-2.5 pr-4">
+                          {severalRooms && u.device_name && <div className="text-[10px] uppercase tracking-wider text-zinc-500 dark:text-zinc-400 print:text-gray-500">{u.device_name}</div>}
                           {u.changes.map(c => {
                             const label = LIMIT_LABELS[c.limit_name] ?? { name: c.limit_name, unit: "" };
                             return (

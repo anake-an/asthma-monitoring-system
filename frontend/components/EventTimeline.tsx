@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
+import { useRooms, withDevice } from "@/lib/rooms";
 
 type CoughEvent = {
   id: number;
@@ -17,6 +18,7 @@ type PaginationData = {
 };
 
 export default function EventTimeline() {
+  const { device, deviceId } = useRooms(); // the room on screen
   const [events, setEvents] = useState<CoughEvent[]>([]);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState<PaginationData | null>(null);
@@ -24,7 +26,7 @@ export default function EventTimeline() {
   const fetchEvents = useCallback(async () => {
     try {
       const token = localStorage.getItem("auth_token");
-      const res = await fetch(`/api/cough-events?page=${page}&per_page=10`, {
+      const res = await fetch(withDevice(`/api/cough-events?page=${page}&per_page=10`, deviceId), {
         headers: { 
           "Authorization": `Bearer ${token}`,
           "Accept": "application/json"
@@ -52,7 +54,10 @@ export default function EventTimeline() {
         }
       }
     } catch (err) {}
-  }, [page]);
+  }, [page, deviceId]);
+
+  // Another room: back to its first page.
+  useEffect(() => setPage(1), [deviceId]);
 
   const handleVerify = async (id: number, isVerified: boolean, inhalerUsed: boolean) => {
     try {
@@ -102,7 +107,7 @@ export default function EventTimeline() {
       <div className="flex items-center justify-between mb-5">
         <div>
           <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Cough History</h2>
-          <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">Recent cough activity detected in the room</p>
+          <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">Recent cough activity detected in {device ? device.name : "the room"}</p>
         </div>
         <span className="text-xs text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-[#1a1a2e] px-2.5 py-1 rounded border border-zinc-300 dark:border-[#2a2a40]">
           {pagination ? `${pagination.total} total events` : `${events.length} events`}

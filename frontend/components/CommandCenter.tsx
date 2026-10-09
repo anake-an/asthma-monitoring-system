@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { GAS_NOTE, GAS_DEFAULT_LIMIT_PPM } from "@/lib/gas";
+import { authHeaders, roomLabel, useRooms, withDevice } from "@/lib/rooms";
+import ChildrenAndRooms from "@/components/ChildrenAndRooms";
 
 export function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -49,9 +51,9 @@ export default function CommandCenter() {
     isDanger: boolean,
     onConfirm: () => void
   }>({ isOpen: false, title: "", message: "", isDanger: false, onConfirm: () => {} });
-  const [pairingToken, setPairingToken] = useState<string | null>(null);
-  const [generatingToken, setGeneratingToken] = useState(false);
-  const [devices, setDevices] = useState<{id: number, name: string, status: string, device_token: string}[]>([]);
+  // Smart Alerts are per room: the one chosen in the header.
+  const { device, deviceId } = useRooms();
+  const canConfigure = !!device?.can_configure;
 
   // Lock switch under each limit, with a line saying what the AI may do with it.
   const lockRow = (name: "pm25" | "temperature" | "humidity" | "mq135") => {
@@ -78,14 +80,9 @@ export default function CommandCenter() {
     setTimeout(() => setToast(null), 3500);
   };
 
+  // The chosen room's limits (again whenever another room is picked).
   useEffect(() => {
-    const token = localStorage.getItem("auth_token");
-    fetch("/api/config", {
-      headers: { 
-        "Authorization": `Bearer ${token}`,
-        "Accept": "application/json"
-      }
-    })
+    fetch(withDevice("/api/config", deviceId), { headers: authHeaders() })
       .then(res => {
         if (res.status === 401) window.location.href = "/login";
         return res.json();
@@ -104,37 +101,15 @@ export default function CommandCenter() {
         ai_optimization_enabled: data.ai_optimization_enabled !== undefined ? data.ai_optimization_enabled : true
       }))
       .catch(err => console.error(err));
-      
-    // Fetch user
-    fetch("/api/user", {
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Accept": "application/json"
-      }
-    })
+  }, [deviceId]);
+
+  useEffect(() => {
+    fetch("/api/user", { headers: authHeaders() })
     .then(res => res.json())
     .then(data => {
       if(data.id) setUser(data);
     })
     .catch(err => console.error(err));
-
-    const fetchDevices = () => {
-      fetch("/api/devices", {
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Accept": "application/json"
-        }
-      })
-      .then(res => res.json())
-      .then(data => {
-        if(data.devices) setDevices(data.devices);
-      })
-      .catch(err => console.error(err));
-    };
-
-    fetchDevices();
-    const interval = setInterval(fetchDevices, 5000);
-    return () => clearInterval(interval);
   }, []);
 
   const handleLogout = () => {
@@ -194,57 +169,6 @@ export default function CommandCenter() {
     });
   };
 
-  const handlePairDevice = async () => {
-    setGeneratingToken(true);
-    try {
-      const res = await fetch("/api/devices/generate-token", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${localStorage.getItem("auth_token")}`,
-          "Accept": "application/json"
-        }
-      });
-      const data = await res.json();
-      if(res.ok) {
-        setPairingToken(data.token);
-      } else {
-        showToast("Failed to generate setup token", "error");
-      }
-    } catch(e) {
-      showToast("Error connecting to server", "error");
-    } finally {
-      setGeneratingToken(false);
-    }
-  };
-
-  const handleDeleteDevice = async (id: number, name: string) => {
-    setConfirmAction({
-      isOpen: true,
-      title: "Remove Device",
-      message: `Are you sure you want to disconnect and remove "${name}"? You will need to pair it again to use it.`,
-      isDanger: true,
-      onConfirm: async () => {
-        try {
-          const res = await fetch(`/api/devices/${id}`, {
-            method: "DELETE",
-            headers: {
-              "Authorization": `Bearer ${localStorage.getItem("auth_token")}`,
-              "Accept": "application/json"
-            }
-          });
-          if(res.ok) {
-            setDevices(devices.filter(d => d.id !== id));
-            showToast("Device removed successfully", "success");
-          } else {
-            showToast("Failed to remove device", "error");
-          }
-        } catch(e) {
-          showToast("Error connecting to server", "error");
-        }
-      }
-    });
-  };
-
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if(newPassword !== newPasswordConfirm) {
@@ -292,11 +216,12 @@ export default function CommandCenter() {
           "Authorization": `Bearer ${localStorage.getItem("auth_token")}`,
           "Accept": "application/json"
         },
-        body: JSON.stringify(config),
+        body: JSON.stringify({ ...config, device_id: deviceId }),
       });
       setSaving(false);
       if (!res.ok) {
-        showToast("Failed to save thresholds", "error");
+        const data = await res.json().catch(() => ({}));
+        showToast(data.message || "Failed to save thresholds", "error");
         return;
       }
       setSaved(true);
@@ -386,7 +311,11 @@ export default function CommandCenter() {
             <div className="px-6 py-5 border-b border-zinc-200 dark:border-white/5 flex items-center justify-between bg-zinc-100 dark:bg-white/5">
               <div>
                 <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Smart Alerts Configuration</h3>
-                <p className="text-xs text-zinc-600 dark:text-zinc-400 font-light mt-0.5">Customize room thresholds and notifications</p>
+                <p className="text-xs text-zinc-600 dark:text-zinc-400 font-light mt-0.5">
+                  {device
+                    ? <>Limits for <span className="font-medium text-zinc-800 dark:text-zinc-200">{roomLabel(device)}</span>. Each room has its own; pick another in the header.</>
+                    : "Pair a device first: limits are set per room."}
+                </p>
               </div>
               <button onClick={() => setShowModal(false)} className="p-2 bg-zinc-100 dark:bg-white/5 hover:bg-zinc-200 dark:bg-white/10 rounded-full text-zinc-600 dark:text-zinc-400 transition-colors">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -516,7 +445,7 @@ export default function CommandCenter() {
             <div className="p-5 border-t border-zinc-200 dark:border-white/5 bg-zinc-100 dark:bg-black/20">
               <button
                 onClick={handleSave}
-                disabled={saving}
+                disabled={saving || !canConfigure}
                 className={`w-full py-3 rounded-xl text-sm font-medium transition-all shadow-lg ${
                   saved
                     ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
@@ -610,87 +539,11 @@ export default function CommandCenter() {
                 </div>
               </div>
 
-              {/* Hardware Devices */}
-              <div>
-                <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-3 uppercase tracking-wider">Hardware Devices</h4>
-                <div className="bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/5 rounded-xl p-4">
-                  {pairingToken ? (
-                    <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-                      <div className="bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 rounded-xl p-4 mb-4">
-                        <h5 className="font-semibold text-blue-800 dark:text-blue-300 mb-2">Connect Your Device</h5>
-                        <ol className="list-decimal pl-4 text-xs text-blue-700 dark:text-blue-400 space-y-2 mb-4">
-                          <li>Turn on your RespiroSync physical device.</li>
-                          <li>On your phone, connect to the WiFi network called <strong className="font-semibold">RespiroSync-Setup</strong>.</li>
-                          <li>When the setup page appears, enter your home WiFi password and the secret token below.</li>
-                        </ol>
-                        <div className="bg-white dark:bg-black/40 border border-blue-200 dark:border-blue-500/20 rounded-lg p-3 text-center shadow-inner">
-                          <span className="text-3xl font-bold tracking-[0.2em] text-zinc-900 dark:text-white">{pairingToken}</span>
-                        </div>
-                      </div>
-                      <button 
-                        onClick={() => {
-                          setPairingToken(null);
-                          // Manually fetch devices one extra time when clicking Done
-                          fetch("/api/devices", {
-                            headers: {
-                              "Authorization": `Bearer ${localStorage.getItem("auth_token")}`,
-                              "Accept": "application/json"
-                            }
-                          })
-                          .then(res => res.json())
-                          .then(data => { if(data.devices) setDevices(data.devices); });
-                        }} 
-                        className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
-                      >
-                        Done
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      {devices.length === 0 ? (
-                        <div className="text-center py-4 mb-4">
-                          <p className="text-sm text-zinc-500 dark:text-zinc-400">No devices connected yet.</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-3 mb-4">
-                          {devices.map(device => (
-                            <div key={device.id} className="flex justify-between items-center p-3 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/10 rounded-lg">
-                              <div>
-                                <h5 className="font-medium text-zinc-800 dark:text-zinc-200">{device.name}</h5>
-                                <p className="text-xs text-zinc-500 dark:text-zinc-400">Token: {device.device_token}</p>
-                              </div>
-                              <div className="flex flex-col items-end">
-                                {device.status === 'online' ? (
-                                  <span className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium bg-emerald-50 dark:bg-emerald-500/10 px-2 py-1 rounded-full">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Online
-                                  </span>
-                                ) : (
-                                  <span className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 font-medium bg-amber-50 dark:bg-amber-500/10 px-2 py-1 rounded-full">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span> {device.status === 'pending' ? 'Pending Setup' : 'Offline'}
-                                  </span>
-                                )}
-                                <button 
-                                  onClick={() => handleDeleteDevice(device.id, device.name)}
-                                  className="mt-2 text-[10px] text-zinc-400 hover:text-red-500 transition-colors uppercase tracking-wider font-semibold"
-                                >
-                                  Remove Device
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <button 
-                        onClick={handlePairDevice} 
-                        disabled={generatingToken}
-                        className="w-full py-2.5 border-2 border-dashed border-zinc-300 dark:border-zinc-700 hover:border-blue-500 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 text-zinc-600 dark:text-zinc-400 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-                      >
-                        {generatingToken ? "Generating Secure Token..." : "+ Pair New ESP32 Device"}
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
+              {/* Children & rooms */}
+              <ChildrenAndRooms
+                onToast={showToast}
+                onConfirm={c => setConfirmAction({ isOpen: true, ...c })}
+              />
 
               {/* Danger Zone */}
               <div>
