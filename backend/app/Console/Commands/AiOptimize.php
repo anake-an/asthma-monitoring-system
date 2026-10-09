@@ -39,27 +39,35 @@ class AiOptimize extends Command
                 continue;
             }
 
+            // 400/404: no model or no recent data yet (e.g. right after an AI reset) - a normal state.
+            $learning = in_array($response->status(), [400, 404], true);
             $thresholds = $response->successful() ? $response->json('suggested_thresholds') : null;
-            if (!$thresholds) {
+            if (!$thresholds && !$learning) {
                 $this->warn("User {$userId}: no suggestion ({$response->status()}).");
-                continue;
+                continue; // engine error: leave the limits as they are
             }
 
-            // Not before the room baseline covers 24 h of readings.
-            if (!$response->json('ready_to_adjust')) {
-                $this->line("User {$userId}: not enough data to adjust limits yet ({$response->json('training_windows')} windows).");
-                continue;
+            // Not before the room baseline covers 24 h of readings: until then the user's own values apply
+            // (this also undoes changes made before the AI had enough data, e.g. after a reset).
+            $ready = !$learning && (bool) $response->json('ready_to_adjust');
+            if ($ready) {
+                // Never above the user's own value, exactly that value when locked, at most 10 % per day.
+                $config->startAiDayIfDue(now());
+                $config->fill($config->limitsFromSuggestion($thresholds));
+            } else {
+                foreach (HardwareConfig::LIMITS as $name) {
+                    $config->{"{$name}_threshold"} = $config->capFor($name);
+                }
             }
-
-            // Never above the user's own value, exactly that value when locked, at most 10 % per day.
-            $config->startAiDayIfDue(now());
-            $config->fill($config->limitsFromSuggestion($thresholds));
-            $limitsChanged = $config->isDirty(array_map(fn ($n) => "{$n}_threshold", HardwareConfig::LIMITS));
+            $limitChanges = $config->pendingLimitChanges();
             $config->save();
-            if (!$limitsChanged) {
+            if (!$limitChanges) {
                 $this->line("User {$userId}: limits unchanged.");
                 continue;
             }
+            $config->recordLimitChanges($limitChanges, 'ai', $ready
+                ? self::reason($response->json('model_stage'), $response->json('probability_of_attack'))
+                : ($learning ? 'Back to your limit: the AI is still learning' : 'Back to your limit: less than 24 h of readings'));
 
             foreach ($config->user->devices as $device) {
                 try {
@@ -73,5 +81,16 @@ class AiOptimize extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /** Plain-language reason for the Activity Log, e.g. "Room unusual (Stage 1)". */
+    public static function reason(?string $stage, $probability): string
+    {
+        $p = (float) $probability;
+        if (str_starts_with((string) $stage, 'Stage 2')) {
+            return 'Flare-up risk ' . round($p * 100) . '% (Stage 2 model)';
+        }
+
+        return 'Room ' . ($p > 0.7 ? 'very unusual' : ($p > 0.4 ? 'unusual' : 'normal')) . ' (Stage 1)';
     }
 }

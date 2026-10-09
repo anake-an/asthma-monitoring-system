@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\CoughEvent;
 use App\Models\InhalerLog;
+use App\Models\LimitChange;
 use App\Models\TelemetryLog;
 use Illuminate\Http\Request;
 
@@ -165,6 +166,13 @@ class DashboardController extends Controller
                 ->groupBy('date', 'type')
                 ->orderBy('date')
                 ->get(),
+            // Every change of an alert limit in the period, by the AI or by the user, newest first.
+            'limit_changes' => LimitChange::where('user_id', $userId)
+                ->where('created_at', '>=', $startDate)
+                ->orderByDesc('created_at')
+                ->orderByDesc('id')
+                ->limit(50)
+                ->get(['limit_name', 'old_value', 'new_value', 'source', 'reason', 'created_at']),
         ]);
     }
 

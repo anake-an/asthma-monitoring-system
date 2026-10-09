@@ -18,6 +18,23 @@ type ReportData = {
   controller_doses: number;
   daily_breakdown: DailyData[];
   daily_inhalers: { date: string; type: string; count: number }[];
+  limit_changes?: LimitChange[];
+};
+
+type LimitChange = {
+  limit_name: "pm25" | "temperature" | "humidity" | "mq135";
+  old_value: number | null;
+  new_value: number;
+  source: "ai" | "user";
+  reason: string | null;
+  created_at: string;
+};
+
+const LIMIT_LABELS: Record<LimitChange["limit_name"], { name: string; unit: string }> = {
+  pm25: { name: "PM2.5 dust", unit: " µg/m³" },
+  temperature: { name: "Temperature", unit: "°C" },
+  humidity: { name: "Humidity", unit: "%" },
+  mq135: { name: "Gas", unit: " ppm" },
 };
 
 export default function ReportPage() {
@@ -263,6 +280,55 @@ export default function ReportPage() {
                 );
               })}
             </div>
+          </div>
+
+          {/* Alert limit changes: every change by the AI or by the user, with the reason */}
+          <div className="mb-12 bg-zinc-100 dark:bg-white/5 print:bg-transparent border border-zinc-300 dark:border-white/10 print:border-none rounded-2xl p-8 print:p-0 relative z-10 print:break-inside-avoid">
+            <h2 className="text-lg font-semibold text-zinc-900 dark:text-white print:text-black mb-1">Alert Limit Changes</h2>
+            <p className="text-xs text-zinc-600 dark:text-zinc-400 print:text-gray-600 mb-6">
+              The AI may lower a limit below your own value (at most 10 % a day), never raise it above.
+            </p>
+            {data.limit_changes && data.limit_changes.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-[10px] uppercase tracking-widest text-zinc-600 dark:text-zinc-400 print:text-gray-600">
+                      <th className="pb-3 pr-4 font-semibold">When</th>
+                      <th className="pb-3 pr-4 font-semibold">Limit</th>
+                      <th className="pb-3 pr-4 font-semibold">Change</th>
+                      <th className="pb-3 pr-4 font-semibold">By</th>
+                      <th className="pb-3 font-semibold">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.limit_changes.map((c, i) => {
+                      const label = LIMIT_LABELS[c.limit_name] ?? { name: c.limit_name, unit: "" };
+                      return (
+                        <tr key={i} className="border-t border-zinc-300 dark:border-white/10 print:border-gray-200 text-zinc-700 dark:text-zinc-300 print:text-gray-700">
+                          <td className="py-2.5 pr-4 font-mono text-xs whitespace-nowrap">
+                            {new Date(c.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          </td>
+                          <td className="py-2.5 pr-4 whitespace-nowrap">{label.name}</td>
+                          <td className="py-2.5 pr-4 whitespace-nowrap font-medium text-zinc-900 dark:text-white print:text-black">
+                            {c.old_value === null ? "" : `${c.old_value}${label.unit} → `}{c.new_value}{label.unit}
+                          </td>
+                          <td className="py-2.5 pr-4 whitespace-nowrap">
+                            {c.source === "ai" ? (
+                              <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-500 dark:text-blue-400 text-[10px] font-bold uppercase tracking-wider">AI</span>
+                            ) : (
+                              <span className="text-xs">You</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 text-xs">{c.reason}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-sm text-zinc-600 dark:text-zinc-400 print:text-gray-600">No limit changes this week.</p>
+            )}
           </div>
 
           {/* AI Analysis / Doctor Notes */}
