@@ -73,11 +73,22 @@ asthma-monitoring-system/
 ├── backend/                # Laravel 12 API, MQTT worker, scheduler (port 8000 → 127.0.0.1:8005)
 │   └── tests/              # PHPUnit tests (in-memory SQLite)
 ├── ai_engine/              # Python FastAPI + scikit-learn service (127.0.0.1:8010)
-├── hardware/               # ESP32 and Pico firmware (Arduino)
+├── hardware/               # ESP32 and Pico firmware (Arduino), wiring guide
 ├── mosquitto/config/       # mosquitto.conf + acl (passwd is created on the server, never committed)
+├── docs/                   # project explanation and operations guide
+├── .github/workflows/      # CI: backend tests, frontend build, AI engine check
 ├── .env.example            # docker-compose variables
 └── docker-compose.yaml
 ```
+
+**Documentation**
+
+| Document | What it covers |
+|---|---|
+| [`docs/PROJECT_EXPLANATION.md`](docs/PROJECT_EXPLANATION.md) | How each component works, the alert rule and the AI, with their limits |
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Health checks, backups, resets, device factory reset, running the tests |
+| [`hardware/README.md`](hardware/README.md) | Firmware setup and the edge cough-classifier roadmap |
+| [`hardware/WIRING_GUIDE.md`](hardware/WIRING_GUIDE.md) | Pin-by-pin wiring, including the voltage dividers |
 
 ---
 
