@@ -34,4 +34,25 @@ assert main.respect_room_normal({"pm25_threshold": 5.0, "temperature_threshold":
 assert main.room_normal_limits(ROOM) == {"pm25_threshold": 9.6, "temperature_threshold": 31.4, "humidity_threshold": 73.6}
 assert main.room_normal_limits(None) is None
 
-print("respect_room_normal: all checks passed")
+# Learned limits (C6): mean + 3 std per room reading, within the safety range; gas keeps its default.
+# This room: dust 2.6 + 3 x 3.5 = 13.0 -> raised to the 15 floor; temperature 31.9; humidity 75.6.
+assert main.room_limits(ROOM) == {
+    "pm25_threshold": 15.0, "temperature_threshold": 31.9, "humidity_threshold": 75.6, "mq135_threshold": 1000.0,
+}, main.room_limits(ROOM)
+assert main.room_limits(None) == main.DEFAULT_THRESHOLDS
+assert main.room_limits(humid_room)["humidity_threshold"] == 90.0
+
+# Stage 1 tightens from the learned limits as the room gets more unusual, never below mean + 2 std.
+level, limits = main.stage1(ROOM, pm25=3.0, temp=30.5, hum=70.0)  # an ordinary reading
+assert level == 0.1 and limits == main.room_limits(ROOM), (level, limits)
+level, limits = main.stage1(ROOM, pm25=3.0, temp=30.5, hum=73.0)  # humidity 1.7 std above usual
+assert level == 0.5 and limits == {
+    "pm25_threshold": 15.0, "temperature_threshold": 31.7, "humidity_threshold": 74.6, "mq135_threshold": 900.0,
+}, (level, limits)
+level, limits = main.stage1(ROOM, pm25=3.0, temp=30.5, hum=75.0)  # 2.7 std above usual
+assert level == 0.8 and limits == {
+    "pm25_threshold": 15.0, "temperature_threshold": 31.4, "humidity_threshold": 73.6, "mq135_threshold": 800.0,
+}, (level, limits)
+assert limits == main.respect_room_normal(limits, ROOM), "very unusual = the top of the normal range, not below"
+
+print("respect_room_normal, room_limits, stage1: all checks passed")

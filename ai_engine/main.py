@@ -91,6 +91,42 @@ def respect_room_normal(thresholds: dict, baseline: dict | None) -> dict:
     return out
 
 
+# Learned limits (DESIGN_MULTI_PATIENT.md 5.4): each room reading's limit sits LEARNED_STD spreads above
+# the room's own mean. Usual readings stay below it (about 1 window in 700 for a normal spread), so the
+# alarm means "clearly unusual for this room" rather than "above a fixed national number".
+# Gas is not learned: the MQ-135 estimate drifts with temperature and humidity, so it keeps its default.
+LEARNED_STD = 3.0
+
+# Stage 1 levels: how far above the room mean each limit sits, and the gas limit, per room level.
+#   normal        -> the learned limits (mean + 3 std)
+#   unusual       -> mean + 2.5 std
+#   very unusual  -> mean + 2 std, the top of the room's normal range (never lower: respect_room_normal)
+STAGE1_LEVELS = {0.1: (LEARNED_STD, 1000.0), 0.5: (2.5, 900.0), 0.8: (2.0, 800.0)}
+
+
+def room_limits(baseline: dict | None, stds: float = LEARNED_STD,
+                gas: float = DEFAULT_THRESHOLDS["mq135_threshold"]) -> dict:
+    """Limits learned from the room: mean + `stds` spreads per room reading, within LIMIT_RANGE.
+    Without a baseline, the defaults. Example: a room at 2.6 +/- 3.5 ug/m3 dust gets a PM2.5 limit of
+    13.0, raised to the 15 floor; one at 69.6 +/- 2 % humidity gets 75.6."""
+    limits = dict(DEFAULT_THRESHOLDS, mq135_threshold=gas)
+    if baseline:
+        for key, feature in ROOM_FEATURE.items():
+            limits[key] = baseline[f"{feature}_mean"] + stds * baseline[f"{feature}_std"]
+    return respect_room_normal(limits, baseline)
+
+
+def stage1(baseline: dict, pm25: float, temp: float, hum: float) -> tuple[float, dict]:
+    """Stage 1 (no personal model yet): how unusual the current window is for this room, as one of
+    three fixed levels (0.1 normal, 0.5 unusual, 0.8 very unusual, not a calculated probability),
+    and the limits for that level, tightened from the room's learned limits."""
+    z = max((pm25 - baseline["pm25_level_mean"]) / baseline["pm25_level_std"],
+            (temp - baseline["temperature_mean"]) / baseline["temperature_std"],
+            (hum - baseline["humidity_mean"]) / baseline["humidity_std"])
+    level = 0.8 if z > 2.5 else 0.5 if z > 1.5 else 0.1
+    return level, room_limits(baseline, *STAGE1_LEVELS[level])
+
+
 # The AI only adjusts limits once the room baseline covers a full day (24 h of 10-minute windows):
 # a few hours miss the day/night cycle (DESIGN_MULTI_PATIENT.md 5.6, "no change until minimum data").
 MIN_ADJUST_WINDOWS = 144
@@ -338,12 +374,14 @@ def predict_attack(user_id: int = Query(..., ge=1)):
         has_stage2 = False
         if not has_stage1:
             raise HTTPException(status_code=400, detail="Model is outdated; it will be retrained on the next run.")
-    thresholds = dict(DEFAULT_THRESHOLDS)
+    room = joblib.load(baseline_path(user_id)) if has_stage1 else None
 
     if has_stage2:
         model = joblib.load(model_path(user_id))
         probability = float(model.predict_proba(X_new)[0][list(model.classes_).index(1)])
-        # Lower a threshold by up to 50% in proportion to that feature's importance and the current risk.
+        # Start from the room's learned limits, then lower each by up to 50% in proportion to that
+        # feature's importance and the current risk (the risk model only tightens, DESIGN 5.4).
+        thresholds = room_limits(room)
         imp = feature_weights(model)
         for key, feat in (("pm25_threshold", "pm25_level"), ("temperature_threshold", "temperature"),
                           ("humidity_threshold", "humidity")):
@@ -351,19 +389,10 @@ def predict_attack(user_id: int = Query(..., ge=1)):
         thresholds["mq135_threshold"] -= thresholds["mq135_threshold"] * probability * 0.3
         stage = "Stage 2 (Personalised)"
     else:
-        b = joblib.load(baseline_path(user_id))
-        z = max((pm25 - b["pm25_level_mean"]) / b["pm25_level_std"],
-                (temp - b["temperature_mean"]) / b["temperature_std"],
-                (hum - b["humidity_mean"]) / b["humidity_std"])
-        probability = 0.8 if z > 2.5 else 0.5 if z > 1.5 else 0.1
-        if probability > 0.7:
-            thresholds = {"pm25_threshold": 20.0, "temperature_threshold": 30.0, "humidity_threshold": 60.0, "mq135_threshold": 800.0}
-        elif probability > 0.4:
-            thresholds = {"pm25_threshold": 25.0, "temperature_threshold": 32.0, "humidity_threshold": 65.0, "mq135_threshold": 900.0}
+        probability, thresholds = stage1(room, pm25, temp, hum)
         stage = "Stage 1 (Anomaly Detection)"
 
     # Never inside the room's normal range, always within the safety range (both stages).
-    room = joblib.load(baseline_path(user_id)) if has_stage1 else None
     thresholds = respect_room_normal(thresholds, room)
 
     return {
