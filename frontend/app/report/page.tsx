@@ -25,7 +25,7 @@ type LimitChange = {
   limit_name: "pm25" | "temperature" | "humidity" | "mq135";
   old_value: number | null;
   new_value: number;
-  source: "ai" | "user";
+  source: "ai" | "user" | "rule"; // rule: missed daily dose (15 % lower until a dose is logged)
   reason: string | null;
   created_at: string;
 };
@@ -299,7 +299,7 @@ export default function ReportPage() {
           <div className="mb-12 bg-zinc-100 dark:bg-white/5 print:bg-transparent border border-zinc-300 dark:border-white/10 print:border-none rounded-2xl p-8 print:p-0 relative z-10">
             <h2 className="text-lg font-semibold text-zinc-900 dark:text-white print:text-black mb-1">Alert Limit Changes</h2>
             <p className="text-xs text-zinc-600 dark:text-zinc-400 print:text-gray-600 mb-6">
-              The AI may lower a limit below your own value, never raise it above, and changes each limit at most once a day (by up to 10 %).
+              The AI may lower a limit below your own value, never raise it above, and changes each limit at most once a day (by up to 10 %). Rule: when a daily dose is missed, limits are 15 % lower until one is logged.
             </p>
             {limitUpdates.length > 0 ? (
               <div className="overflow-x-auto">
@@ -334,6 +334,8 @@ export default function ReportPage() {
                         <td className="py-2.5 pr-4 whitespace-nowrap">
                           {u.source === "ai" ? (
                             <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-500 dark:text-blue-400 text-[10px] font-bold uppercase tracking-wider">AI</span>
+                          ) : u.source === "rule" ? (
+                            <span className="px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-500 dark:text-orange-400 text-[10px] font-bold uppercase tracking-wider">Rule</span>
                           ) : (
                             <span className="text-xs">You</span>
                           )}

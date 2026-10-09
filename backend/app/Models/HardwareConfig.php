@@ -39,6 +39,7 @@ class HardwareConfig extends Model
         'humidity_threshold', 'humidity_cap', 'humidity_locked',
         'mq135_threshold', 'mq135_cap', 'mq135_locked',
         'pm25_day_start', 'temperature_day_start', 'humidity_day_start', 'mq135_day_start', 'ai_day_started_at',
+        'missed_dose_base',
         'is_buzzer_muted',
         'ai_optimization_enabled',
     ];
@@ -50,6 +51,7 @@ class HardwareConfig extends Model
         'mq135_threshold' => 'float', 'mq135_cap' => 'float', 'mq135_locked' => 'boolean',
         'pm25_day_start' => 'float', 'temperature_day_start' => 'float', 'humidity_day_start' => 'float', 'mq135_day_start' => 'float',
         'ai_day_started_at' => 'datetime',
+        'missed_dose_base' => 'array',
         'is_buzzer_muted' => 'boolean',
         'ai_optimization_enabled' => 'boolean',
     ];
@@ -83,10 +85,84 @@ class HardwareConfig extends Model
                 $changes[$key] = (bool) $input[$key];
             }
         }
+        // While the missed-dose rule is on, work on the limits without it; a new value then becomes
+        // part of that base and the device gets it 15 % lower (unless locked) until a dose is logged.
+        $ruleOn = $this->missed_dose_base !== null;
+        $aiWasOn = (bool) $this->ai_optimization_enabled;
+        $this->withoutMissedDoseRule();
         $this->fill($changes);
+
+        $reason = 'Changed in Smart Alerts';
+        if (!$this->ai_optimization_enabled) {
+            // Automatic limits off: every limit is the user's own value again, and the rule stops
+            // (ai:optimize no longer runs for this account, so nothing else would undo either).
+            foreach (self::LIMITS as $name) {
+                $this->{"{$name}_threshold"} = $this->capFor($name);
+            }
+            $this->applyMissedDoseRule(false);
+            if ($aiWasOn) {
+                $reason = 'AI optimization turned off: back to your limits';
+            }
+        } elseif ($ruleOn) {
+            $this->applyMissedDoseRule(true);
+            $reason = 'Changed in Smart Alerts (15 % lower while a daily dose is missed)';
+        }
+
         $limitChanges = $this->pendingLimitChanges();
         $this->save();
-        $this->recordLimitChanges($limitChanges, 'user', 'Changed in Smart Alerts');
+        $this->recordLimitChanges($limitChanges, 'user', $reason);
+    }
+
+    /** Missed daily dose rule (DESIGN_MULTI_PATIENT.md 5.5): a documented rule, not AI. */
+    public const MISSED_DOSE_FACTOR = 0.85;
+
+    public const MISSED_DOSE_ON = 'Daily inhaler dose missed: limits 15 % lower until one is logged';
+
+    public const MISSED_DOSE_OFF = 'Daily inhaler dose logged: limits back up';
+
+    /**
+     * True when this account uses a daily (controller) inhaler, i.e. logged one in the last 7 days,
+     * but has not logged one in the last 26 h (a day plus 2 h of grace). Accounts that never log
+     * daily doses are never affected. Per patient once patients exist.
+     */
+    public static function missedDailyDose(int $userId, \DateTimeInterface $now): bool
+    {
+        $now = \Carbon\Carbon::instance($now);
+        $controller = fn () => InhalerLog::where('user_id', $userId)->where('type', 'controller');
+
+        return $controller()->where('administered_at', '>=', $now->copy()->subDays(7))->exists()
+            && !$controller()->where('administered_at', '>=', $now->copy()->subHours(26))->exists();
+    }
+
+    /** In memory: put back the limits without the missed-dose rule, so the AI works on those. */
+    public function withoutMissedDoseRule(): void
+    {
+        foreach ((array) $this->missed_dose_base as $name => $value) {
+            if (in_array($name, self::LIMITS, true)) {
+                $this->{"{$name}_threshold"} = (float) $value;
+            }
+        }
+    }
+
+    /**
+     * In memory: switch the rule on (remember the current limits as the base, lower each unlocked
+     * one by 15 %) or off (the current limits are the base already). The caller saves.
+     */
+    public function applyMissedDoseRule(bool $on): void
+    {
+        if (!$on) {
+            $this->missed_dose_base = null;
+
+            return;
+        }
+        $base = [];
+        foreach (self::LIMITS as $name) {
+            $base[$name] = (float) $this->{"{$name}_threshold"};
+            if (!$this->{"{$name}_locked"}) {
+                $this->{"{$name}_threshold"} = round($base[$name] * self::MISSED_DOSE_FACTOR, 1);
+            }
+        }
+        $this->missed_dose_base = $base;
     }
 
     /**

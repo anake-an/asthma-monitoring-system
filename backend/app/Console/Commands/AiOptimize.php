@@ -12,8 +12,9 @@ use Illuminate\Support\Facades\Http;
  * "AI optimization" enabled, then pushes them to that account's devices.
  *
  * Scheduled every 5 minutes in routes/console.php. The AI may only tighten a limit below the
- * user's own value (cap), never above it, and leaves locked limits at the cap. Devices are
- * only re-published when a limit actually changes.
+ * user's own value (cap), never above it, and leaves locked limits at the cap. On top of the AI,
+ * the missed daily dose rule (HardwareConfig::missedDailyDose) lowers unlocked limits by 15 %
+ * until a dose is logged. Devices are only re-published when a limit actually changes.
  */
 class AiOptimize extends Command
 {
@@ -32,43 +33,24 @@ class AiOptimize extends Command
         foreach ($configs as $config) {
             $userId = $config->user_id;
 
-            try {
-                $response = Http::timeout(10)->get(config('services.ai_engine.url') . '/predict', ['user_id' => $userId]);
-            } catch (\Throwable $e) {
-                $this->error("User {$userId}: AI engine unreachable: " . $e->getMessage());
-                continue;
-            }
+            // The AI works on the limits without the rule; the rule is applied on top afterwards.
+            $ruleWasOn = $config->missed_dose_base !== null;
+            $config->withoutMissedDoseRule();
+            $aiReason = $this->applySuggestion($config, $userId);
+            $ruleOn = HardwareConfig::missedDailyDose($userId, now());
+            $config->applyMissedDoseRule($ruleOn);
 
-            // 400/404: no model or no recent data yet (e.g. right after an AI reset) - a normal state.
-            $learning = in_array($response->status(), [400, 404], true);
-            $thresholds = $response->successful() ? $response->json('suggested_thresholds') : null;
-            if (!$thresholds && !$learning) {
-                $this->warn("User {$userId}: no suggestion ({$response->status()}).");
-                continue; // engine error: leave the limits as they are
-            }
-
-            // Not before the room baseline covers 24 h of readings: until then the user's own values apply
-            // (this also undoes changes made before the AI had enough data, e.g. after a reset).
-            $ready = !$learning && (bool) $response->json('ready_to_adjust');
-            if ($ready) {
-                // Never above the user's own value, exactly that value when locked, at most 10 % per day.
-                $config->startAiDayIfDue(now());
-                $config->fill($config->limitsFromSuggestion($thresholds));
-            } else {
-                foreach (HardwareConfig::LIMITS as $name) {
-                    $config->{"{$name}_threshold"} = $config->capFor($name);
-                    $config->{"{$name}_day_start"} = $config->capFor($name); // a restore is not an AI change
-                }
-            }
             $limitChanges = $config->pendingLimitChanges();
             $config->save();
             if (!$limitChanges) {
                 $this->line("User {$userId}: limits unchanged.");
                 continue;
             }
-            $config->recordLimitChanges($limitChanges, 'ai', $ready
-                ? self::reason($response->json('model_stage'), $response->json('probability_of_attack'))
-                : ($learning ? 'Back to your limit: the AI is still learning' : 'Back to your limit: less than 24 h of readings'));
+            if ($ruleOn !== $ruleWasOn) {
+                $config->recordLimitChanges($limitChanges, 'rule', $ruleOn ? HardwareConfig::MISSED_DOSE_ON : HardwareConfig::MISSED_DOSE_OFF);
+            } else {
+                $config->recordLimitChanges($limitChanges, 'ai', $aiReason);
+            }
 
             foreach ($config->user->devices as $device) {
                 try {
@@ -78,10 +60,50 @@ class AiOptimize extends Command
                 }
             }
 
-            $this->info("User {$userId}: thresholds updated (risk " . $response->json('probability_of_attack') . ').');
+            $this->info("User {$userId}: thresholds updated.");
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Ask the AI engine and set the limits it allows, in memory. Returns the reason for the log,
+     * or null when the engine failed (the limits are then left as they are).
+     */
+    private function applySuggestion(HardwareConfig $config, int $userId): ?string
+    {
+        try {
+            $response = Http::timeout(10)->get(config('services.ai_engine.url') . '/predict', ['user_id' => $userId]);
+        } catch (\Throwable $e) {
+            $this->error("User {$userId}: AI engine unreachable: " . $e->getMessage());
+
+            return null;
+        }
+
+        // 400/404: no model or no recent data yet (e.g. right after an AI reset) - a normal state.
+        $learning = in_array($response->status(), [400, 404], true);
+        $thresholds = $response->successful() ? $response->json('suggested_thresholds') : null;
+        if (!$thresholds && !$learning) {
+            $this->warn("User {$userId}: no suggestion ({$response->status()}).");
+
+            return null; // engine error: leave the limits as they are
+        }
+
+        // Not before the room baseline covers 24 h of readings: until then the user's own values apply
+        // (this also undoes changes made before the AI had enough data, e.g. after a reset).
+        if (!$learning && $response->json('ready_to_adjust')) {
+            // Never above the user's own value, exactly that value when locked, once a day, at most 10 %.
+            $config->startAiDayIfDue(now());
+            $config->fill($config->limitsFromSuggestion($thresholds));
+
+            return self::reason($response->json('model_stage'), $response->json('probability_of_attack'));
+        }
+        foreach (HardwareConfig::LIMITS as $name) {
+            $config->{"{$name}_threshold"} = $config->capFor($name);
+            $config->{"{$name}_day_start"} = $config->capFor($name); // a restore is not an AI change
+        }
+
+        return $learning ? 'Back to your limit: the AI is still learning' : 'Back to your limit: less than 24 h of readings';
     }
 
     /** Plain-language reason for the Activity Log, e.g. "Room unusual (Stage 1)". A normal room moves limits toward its learned limits. */
