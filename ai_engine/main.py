@@ -20,6 +20,10 @@ import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import precision_score, recall_score
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
 
@@ -95,6 +99,11 @@ def model_path(user_id: int) -> str:
 
 def baseline_path(user_id: int) -> str:
     return os.path.join(MODEL_DIR, f"user_{user_id}_baseline.pkl")
+
+
+def meta_path(user_id: int) -> str:
+    """Model type and evaluation of the Stage 2 model, returned by /predict."""
+    return os.path.join(MODEL_DIR, f"user_{user_id}_meta.pkl")
 
 
 def safe_val(val, default=0.0):
@@ -184,9 +193,53 @@ def build_dataset(telemetry, coughs, rescue, controller) -> pd.DataFrame:
     return df[df["_has_future"]].drop(columns="_has_future")
 
 
-@app.get("/train")
-def train_model(user_id: int = Query(..., ge=1)):
-    telemetry, coughs, rescue, controller = fetch_user_data(user_id)
+# A risk model needs enough "episode soon" windows (each episode labels the 6 windows before it).
+# Below MIN_POSITIVES the account stays on Stage 1. Logistic regression is stable on little data;
+# a Random Forest needs more examples before it stops memorising (DESIGN_MULTI_PATIENT.md 5.3).
+MIN_POSITIVES = 12        # ~2 episodes
+RF_MIN_POSITIVES = 20     # ~4 episodes
+MIN_EVAL_POSITIVES = 2    # held-out episode windows needed before any metric is reported
+
+
+def make_model(positives: int):
+    if positives >= RF_MIN_POSITIVES:
+        return "random_forest", RandomForestClassifier(n_estimators=100, random_state=42, class_weight="balanced")
+    return "logistic_regression", make_pipeline(StandardScaler(), LogisticRegression(class_weight="balanced", max_iter=1000))
+
+
+def feature_weights(model) -> dict:
+    """Relative influence of each input (sums to 1): forest importances, or |coefficient| of the
+    logistic regression (its inputs are standardised, so coefficients are comparable)."""
+    if hasattr(model, "feature_importances_"):
+        w = np.asarray(model.feature_importances_, dtype=float)
+    else:
+        w = np.abs(model[-1].coef_[0])
+    total = w.sum()
+    return dict(zip(FEATURES, w / total if total > 0 else np.zeros(len(FEATURES))))
+
+
+def evaluate(df: pd.DataFrame) -> dict:
+    """Time-ordered hold-out: fit on the earliest 75% of windows, score the latest 25%.
+    Reports recall (share of later episode windows the model flagged) and precision (share of its
+    warnings that were real), never plain accuracy: ~95% of windows are 'safe', so a model that
+    always says 'safe' would score ~95%."""
+    split = int(len(df) * 0.75)
+    train, test = df.iloc[:split], df.iloc[split:]
+    test_pos = int(test["target_attack_soon"].sum())
+    result = {"test_windows": len(test), "test_episode_windows": test_pos, "recall": None, "precision": None}
+    if test_pos < MIN_EVAL_POSITIVES or train["target_attack_soon"].nunique() < 2:
+        result["note"] = "Too few later episodes to evaluate; no score is claimed."
+        return result
+    _, probe = make_model(int(train["target_attack_soon"].sum()))
+    probe.fit(train[FEATURES], train["target_attack_soon"])
+    predicted = probe.predict(test[FEATURES])
+    result["recall"] = round(float(recall_score(test["target_attack_soon"], predicted, zero_division=0)), 2)
+    result["precision"] = round(float(precision_score(test["target_attack_soon"], predicted, zero_division=0)), 2)
+    result["note"] = "Measured on the most recent 25% of windows, which the model did not train on."
+    return result
+
+
+def train_from_frames(user_id: int, telemetry, coughs, rescue, controller) -> dict:
     if telemetry.empty:
         raise HTTPException(status_code=400, detail="Not enough data to train.")
 
@@ -195,38 +248,34 @@ def train_model(user_id: int = Query(..., ge=1)):
         raise HTTPException(status_code=400, detail="Not enough valid data after preprocessing. Please wait for more telemetry.")
 
     X, y = df[FEATURES], df["target_attack_soon"]
+    positives = int(y.sum())
 
     # The room's normal range is kept at both stages: predict() never sets a limit inside it.
     baseline = room_baseline(df)
     joblib.dump(baseline, baseline_path(user_id))
 
-    if y.sum() == 0:
-        if os.path.exists(model_path(user_id)):
-            os.remove(model_path(user_id))
-        return {"message": "No asthma events recorded yet. Stage 1 baseline (anomaly detection) created.",
-                "windows_used": len(df), "baseline": baseline}
+    if positives < MIN_POSITIVES:
+        for path in (model_path(user_id), meta_path(user_id)):
+            if os.path.exists(path):
+                os.remove(path)
+        message = ("No asthma events recorded yet." if positives == 0
+                   else f"{positives} episode windows so far; a risk model needs {MIN_POSITIVES}.")
+        return {"message": f"{message} Stage 1 baseline (anomaly detection) created.",
+                "windows_used": len(df), "episode_windows": positives, "baseline": baseline}
 
-    # Time-ordered hold-out: train on the earliest 75%, validate on the latest 25%.
-    split = int(len(df) * 0.75)
-    validation_accuracy = None
-    note = "Not enough data for a held-out validation; accuracy not reported."
-    if split >= 20 and len(df) - split >= 5 and y.iloc[:split].nunique() == 2:
-        probe = RandomForestClassifier(n_estimators=100, random_state=42, class_weight="balanced")
-        probe.fit(X.iloc[:split], y.iloc[:split])
-        validation_accuracy = round(float(probe.score(X.iloc[split:], y.iloc[split:])), 3)
-        note = "Accuracy on the most recent 25% of windows, which the model did not train on."
-
-    model = RandomForestClassifier(n_estimators=100, random_state=42, class_weight="balanced")
+    evaluation = evaluate(df)
+    model_type, model = make_model(positives)
     model.fit(X, y)
     joblib.dump(model, model_path(user_id))
+    meta = {"model_type": model_type, "windows_used": len(df), "episode_windows": positives, "evaluation": evaluation}
+    joblib.dump(meta, meta_path(user_id))
 
-    return {
-        "message": "Stage 2 personalised model trained.",
-        "windows_used": len(df),
-        "positive_windows": int(y.sum()),
-        "validation_accuracy": validation_accuracy,
-        "note": note,
-    }
+    return {"message": "Stage 2 personalised model trained.", **meta}
+
+
+@app.get("/train")
+def train_model(user_id: int = Query(..., ge=1)):
+    return train_from_frames(user_id, *fetch_user_data(user_id))
 
 
 @app.get("/predict")
@@ -283,7 +332,7 @@ def predict_attack(user_id: int = Query(..., ge=1)):
         model = joblib.load(model_path(user_id))
         probability = float(model.predict_proba(X_new)[0][list(model.classes_).index(1)])
         # Lower a threshold by up to 50% in proportion to that feature's importance and the current risk.
-        imp = dict(zip(FEATURES, model.feature_importances_))
+        imp = feature_weights(model)
         for key, feat in (("pm25_threshold", "pm25_level"), ("temperature_threshold", "temperature"),
                           ("humidity_threshold", "humidity")):
             thresholds[key] -= thresholds[key] * imp[feat] * probability * 0.5
@@ -307,6 +356,7 @@ def predict_attack(user_id: int = Query(..., ge=1)):
 
     return {
         "model_stage": stage,
+        "model": (joblib.load(meta_path(user_id)) if has_stage2 and os.path.exists(meta_path(user_id)) else None),
         "probability_of_attack": round(probability, 2),
         "suggested_thresholds": thresholds,
         "current_inputs": {

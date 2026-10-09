@@ -192,6 +192,11 @@ jobs:
           MODEL_DIR: /tmp/models
         run: python test_dataset.py
 
+      - name: Model choice and honest evaluation (recall / precision, no accuracy)
+        env:
+          MODEL_DIR: /tmp/models
+        run: python test_training.py
+
       # Regression test: a password with '@' once made the engine connect to host '...@db'.
       - name: Database URL keeps special characters in the password
         env:
