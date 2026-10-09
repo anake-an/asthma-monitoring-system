@@ -28,7 +28,7 @@ The cloud platform features a responsive, dark-mode native dashboard designed fo
 | Feature | Technology Used | Description |
 |---|---|---|
 | **Acoustic cough detection** | `Raspberry Pi Pico` | INMP441 I2S microphone. A sound-level heuristic flags short loud bursts and reports a 0–1 *detection strength*. It cannot yet tell a cough from other loud sounds (see `hardware/README.md`, Phase 2). |
-| **Environmental Telemetry** | `ESP32` | DHT22 (temp/humidity), MQ-135 (gas, raw ADC), Sharp GP2Y1014AU0F (dust). Local buzzer/LED alarm when a reading crosses its threshold, even offline. |
+| **Environmental Telemetry** | `ESP32` | DHT22 (temp/humidity), MQ-135 (gas, raw ADC), Sharp GP2Y1010AU0F (dust). Local passive-buzzer/LED alarm when a reading crosses its threshold, even offline. |
 | **Secure IoT Transport** | `Mosquitto + Cloudflare Tunnel` | MQTT over WSS. No anonymous access; each device can only publish/subscribe under its own token (broker ACL). |
 | **Predictive AI Engine** | `Python / scikit-learn` | One model per account. Stage 1: anomaly check against the room's own baseline. Stage 2: Random Forest predicting an asthma-like event in the next hour, with held-out validation. Caregiver "false alarm" labels are excluded from training. |
 | **REST API & Workers** | `Laravel 12 / PHP 8.2` | API, MQTT worker, scheduler. All data is scoped to the signed-in account. |

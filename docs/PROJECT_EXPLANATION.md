@@ -15,7 +15,7 @@ How the hardware, AI, backend and frontend fit together, what each part really d
 *   **Output:** `COUGH:<level 1-4>,<strength 0.00-1.00>` over UART to the ESP32.
 
 ### 📡 ESP32: gateway and environment monitor
-*   **Hardware:** ESP32 + DHT22 + MQ-135 + Sharp GP2Y1014AU0F, active buzzer, red/green LEDs, 16x2 I2C LCD.
+*   **Hardware:** ESP32 + DHT22 + MQ-135 + Sharp GP2Y1010AU0F (or the pin-compatible GP2Y1014AU0F), passive buzzer, red/green LEDs, 16x2 I2C LCD behind a BSS138 level shifter, MB-102 5 V supply for the sensors.
 *   **How it works:**
     *   Reads the sensors every 5 s and publishes them to `respirosync/devices/<token>/telemetry`. A failed DHT22 read is sent as `null`, never as 0.
     *   Forwards each Pico detection to `respirosync/devices/<token>/events`.
