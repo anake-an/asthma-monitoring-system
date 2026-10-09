@@ -80,8 +80,10 @@ jobs:
           php artisan key:generate --ansi
 
       # Column changes (->change(), charset) behave differently on MySQL than on SQLite.
-      - name: Migrate, roll back the last two, migrate again
+      - name: Migrate, then roll back and re-apply the last two twice
         run: |
+          php artisan migrate --force
+          php artisan migrate:rollback --step=2 --force
           php artisan migrate --force
           php artisan migrate:rollback --step=2 --force
           php artisan migrate --force
