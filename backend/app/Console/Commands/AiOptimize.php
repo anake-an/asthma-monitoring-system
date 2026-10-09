@@ -84,7 +84,7 @@ class AiOptimize extends Command
         return self::SUCCESS;
     }
 
-    /** Plain-language reason for the Activity Log, e.g. "Room unusual (Stage 1)". */
+    /** Plain-language reason for the Activity Log, e.g. "Room unusual (Stage 1)". A normal room moves limits toward its learned limits. */
     public static function reason(?string $stage, $probability): string
     {
         $p = (float) $probability;
@@ -92,6 +92,10 @@ class AiOptimize extends Command
             return 'Flare-up risk ' . round($p * 100) . '% (Stage 2 model)';
         }
 
-        return 'Room ' . ($p > 0.7 ? 'very unusual' : ($p > 0.4 ? 'unusual' : 'normal')) . ' (Stage 1)';
+        if ($p > 0.4) {
+            return 'Room ' . ($p > 0.7 ? 'very unusual' : 'unusual') . ' (Stage 1)';
+        }
+
+        return "Learned from your room's usual readings (Stage 1)";
     }
 }

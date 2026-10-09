@@ -132,4 +132,13 @@ class LimitChangeLogTest extends TestCase
         $this->assertSame('ai', $changes[0]['source']);
         $this->assertSame('Room unusual (Stage 1)', $changes[0]['reason']);
     }
+
+    public function test_reasons_are_plain_language(): void
+    {
+        $stage1 = 'Stage 1 (Anomaly Detection)';
+        $this->assertSame("Learned from your room's usual readings (Stage 1)", \App\Console\Commands\AiOptimize::reason($stage1, 0.1));
+        $this->assertSame('Room unusual (Stage 1)', \App\Console\Commands\AiOptimize::reason($stage1, 0.5));
+        $this->assertSame('Room very unusual (Stage 1)', \App\Console\Commands\AiOptimize::reason($stage1, 0.8));
+        $this->assertSame('Flare-up risk 62% (Stage 2 model)', \App\Console\Commands\AiOptimize::reason('Stage 2 (Personalised)', 0.62));
+    }
 }

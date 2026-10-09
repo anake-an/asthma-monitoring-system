@@ -15,7 +15,7 @@ export function urlBase64ToUint8Array(base64String: string) {
 
 export default function CommandCenter() {
   // In Smart Alerts each *_threshold is the user's own value (the cap): the AI may lower the effective
-  // limit below it when the room is unusual, never raise it above. *_locked: the AI never changes it.
+  // limit below it (toward what is usual for the room), never raise it above. *_locked: the AI never changes it.
   const [config, setConfig] = useState({
     pm25_threshold: 35,
     temperature_threshold: 35,
@@ -62,7 +62,7 @@ export default function CommandCenter() {
           {config[key]
             ? "Locked: the AI never changes this limit."
             : config.ai_optimization_enabled
-              ? "The AI may lower this when the room is unusual (once a day at most, by up to 10 %, after a full day of readings), never above your value."
+              ? "The AI may lower this to just above what is usual for your room, and further when the room is unusual (once a day at most, by up to 10 %, after a full day of readings), never above your value."
               : "AI optimization is off: this limit is used as set."}
         </span>
         <span className="flex items-center gap-1.5 shrink-0 font-medium">
@@ -402,7 +402,7 @@ export default function CommandCenter() {
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400"><path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"></path></svg>
                     AI Smart Optimization
                   </span>
-                  <span className="text-[11px] text-blue-700 dark:text-blue-200/60 font-light mt-1 block">The AI may lower a limit when your room is unusual, but never raise it above your value</span>
+                  <span className="text-[11px] text-blue-700 dark:text-blue-200/60 font-light mt-1 block">The AI learns what is usual for your room and may lower a limit toward it, but never raises it above your value</span>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input type="checkbox" className="sr-only peer" checked={config.ai_optimization_enabled} onChange={(e) => setConfig({...config, ai_optimization_enabled: e.target.checked})} />
