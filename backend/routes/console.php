@@ -1,19 +1,9 @@
 <?php
 
 use App\Models\User;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
-
-Artisan::command('clear:data', function () {
-    \App\Models\TelemetryLog::query()->delete();
-    \App\Models\CoughEvent::query()->delete();
-    \App\Models\InhalerLog::query()->delete();
-    \App\Models\Device::query()->delete();
-    \App\Models\HardwareConfig::query()->delete();
-    $this->info('All medical and device data cleared! User accounts have been kept.');
-})->describe('Clear all data except users');
 
 // Every 4 hours, retrain each account's model on that account's own data.
 Schedule::call(function () {

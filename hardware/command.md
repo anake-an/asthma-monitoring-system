@@ -28,9 +28,9 @@ Use this if you want to completely destroy **all** data in the database (includi
 
 ```bash
 cd backend
-php artisan migrate:fresh --seed
+php artisan migrate:fresh
 ```
-*(Note: If you have seeders set up, this will re-populate default demo data. If you don't have seeders, the database will be 100% empty).*
+*(Never add `--seed` on the server. The seeder refuses to run in production; on a local machine it creates `dev@respirosync.test` with a random password printed once. After a reset, register a new account in the dashboard.)*
 
 ---
 
@@ -64,7 +64,7 @@ If you are running the system via Docker and want to nuke the database and model
 docker compose down -v
 docker compose up -d
 # The backend runs `php artisan migrate --force` on start, so the tables are recreated automatically.
-# (Do not use --seed in production: the seeder creates admin@asthma.local / password123.)
+# (Never use --seed on the server: the seeder refuses in production. Register an account in the dashboard.)
 ```
 
 ## 6. Send Factory Reset to ESP32 Manually
