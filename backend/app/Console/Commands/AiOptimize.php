@@ -46,7 +46,7 @@ class AiOptimize extends Command
             $ruleWasOn = $config->missed_dose_base !== null;
             $config->withoutMissedDoseRule();
             if (!array_key_exists($userId, $responses)) {
-                $responses[$userId] = $this->ask($userId);
+                $responses[$userId] = $this->predictionFor($userId);
             }
             $aiReason = $this->applySuggestion($config, $responses[$userId], $userId);
             $ruleOn = HardwareConfig::missedDailyDose($device->patient_id, now());
@@ -77,7 +77,7 @@ class AiOptimize extends Command
     }
 
     /** The AI engine's answer for an account, or null when it could not be reached. */
-    private function ask(int $userId): ?Response
+    private function predictionFor(int $userId): ?Response
     {
         try {
             return Http::timeout(10)->get(config('services.ai_engine.url') . '/predict', ['user_id' => $userId]);
