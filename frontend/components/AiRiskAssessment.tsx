@@ -121,25 +121,33 @@ export default function AiRiskAssessment() {
                 {isLearning ? "--" : isStage1 ? anomalyText : `${riskPercent}%`}
               </span>
             </div>
+            {/* Parent-facing wording: a "flare-up" is a logged rescue inhaler dose or 2+ coughs within an hour. */}
             <div className="text-sm text-zinc-600 dark:text-zinc-400 font-medium mt-1">
               {isLearning
                 ? "Collecting data, no prediction yet"
                 : isStage1
-                  ? "Room anomaly level (no episodes logged yet)"
-                  : "Episode risk in the next hour (model estimate)"}
+                  ? "Room compared with its usual readings"
+                  : "Risk of an asthma flare-up in the next hour (model estimate)"}
             </div>
+            {isStage1 && (
+              <div className="text-[11px] text-zinc-500 dark:text-zinc-500 mt-1 font-light">
+                Personal risk prediction starts after about 2 asthma flare-ups are recorded (rescue inhaler dose or 2+ coughs in an hour).
+              </div>
+            )}
             {!isLearning && !isStage1 && activePrediction.model && (
               <div className="text-[11px] text-zinc-500 dark:text-zinc-500 mt-1 font-light">
-                {MODEL_NAME[activePrediction.model.model_type]} · {activePrediction.model.episode_windows} episode windows ·{" "}
+                {MODEL_NAME[activePrediction.model.model_type]} · learned from about {Math.max(1, Math.round(activePrediction.model.episode_windows / 6))} flare-ups ·{" "}
                 {activePrediction.model.evaluation.recall !== null && activePrediction.model.evaluation.precision !== null
-                  ? `caught ${Math.round(activePrediction.model.evaluation.recall * 100)}% of later episodes, ${Math.round(activePrediction.model.evaluation.precision * 100)}% of warnings real`
-                  : "not yet evaluated (too few later episodes)"}
+                  ? `caught ${Math.round(activePrediction.model.evaluation.recall * 100)}% of recent flare-ups, ${Math.round(activePrediction.model.evaluation.precision * 100)}% of its warnings were real`
+                  : "not yet evaluated (too few recent flare-ups)"}
               </div>
             )}
           </div>
-          <div className={`px-3 py-1 rounded-full text-xs font-semibold ${riskBg} ${riskColor}`}>
-            {riskText}
-          </div>
+          {!isStage1 && (
+            <div className={`px-3 py-1 rounded-full text-xs font-semibold ${riskBg} ${riskColor}`}>
+              {riskText}
+            </div>
+          )}
         </div>
 
         {/* Separator */}
