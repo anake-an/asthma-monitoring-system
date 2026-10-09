@@ -14,7 +14,7 @@ Wiring for the dual-processor build: an **ESP32** (sensors, display, alarm, Wi-F
 | Raspberry Pi Pico | arduino-pico core |
 | ESP32 dev board (ESP32-WROOM) | arduino-esp32 core 2.0.x or 3.x |
 | INMP441 I2S microphone | 3.3 V only |
-| DHT22, bare 4-pin sensor | + 10 kΩ pull-up |
+| DHT22, 3-pin module (or bare 4-pin sensor) | module has its pull-up; bare sensor needs 10 kΩ |
 | MQ-135 gas sensor module | 5 V heater |
 | Sharp GP2Y1010AU0F dust sensor, bare, 6-wire cable | + 150 Ω (220 Ω ∥ 470 Ω) and 220 µF |
 | 16×2 LCD with PCF8574T I2C backpack | 5 V |
@@ -22,7 +22,7 @@ Wiring for the dual-processor build: an **ESP32** (sensors, display, alarm, Wi-F
 | Passive buzzer (2 terminals, `+` / `−`) | + 220 Ω series resistor |
 | Red and green LED | + 220 Ω each |
 | MB-102 breadboard power module + 9 V DC adapter | 5 V rail for the sensors and LCD |
-| Resistors: 10 kΩ ×3, 20 kΩ ×2, 220 Ω ×4, 470 Ω ×1 | |
+| Resistors: 10 kΩ ×2-3, 20 kΩ ×2, 220 Ω ×4, 470 Ω ×1 | third 10 kΩ only for a bare DHT22 |
 | Capacitors: 1000 µF ×1, 220 µF ×1 (electrolytic) | long leg = `+`, striped side = `−` |
 
 ---
@@ -73,7 +73,17 @@ Rules:
 
 ## 3. ESP32 (sensors, display, alarm)
 
-### DHT22, bare 4-pin (pins numbered left to right, grille facing you)
+### DHT22
+**3-pin module (sensor on a small board).** Pin order differs between makers, so follow the labels printed on the board. These modules usually include the 10 kΩ pull-up (a small resistor marked `103`); if yours has none, add one from DATA to 3V3.
+
+| Module label | Connect to |
+|---|---|
+| `+` / `VCC` | ESP32 **3V3** |
+| `out` / `DAT` / `S` | ESP32 **GPIO 4** |
+| `−` / `GND` | GND |
+
+**Bare 4-pin sensor** (pins numbered left to right, grille facing you):
+
 | DHT22 pin | Connect to |
 |---|---|
 | 1 VCC | ESP32 **3V3** |
