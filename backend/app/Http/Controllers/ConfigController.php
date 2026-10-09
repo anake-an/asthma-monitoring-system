@@ -45,6 +45,6 @@ class ConfigController extends Controller
             }
         }
 
-        return response()->json($config->toArray() + ['devices_synced' => $synced]);
+        return response()->json($config->fresh()->toArray() + ['devices_synced' => $synced]);
     }
 }
