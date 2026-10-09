@@ -45,13 +45,21 @@ class AiOptimize extends Command
                 continue;
             }
 
-            // Never above the user's own value, exactly that value when locked.
+            // Not before the room baseline covers 24 h of readings.
+            if (!$response->json('ready_to_adjust')) {
+                $this->line("User {$userId}: not enough data to adjust limits yet ({$response->json('training_windows')} windows).");
+                continue;
+            }
+
+            // Never above the user's own value, exactly that value when locked, at most 10 % per day.
+            $config->startAiDayIfDue(now());
             $config->fill($config->limitsFromSuggestion($thresholds));
-            if (!$config->isDirty()) {
+            $limitsChanged = $config->isDirty(array_map(fn ($n) => "{$n}_threshold", HardwareConfig::LIMITS));
+            $config->save();
+            if (!$limitsChanged) {
                 $this->line("User {$userId}: limits unchanged.");
                 continue;
             }
-            $config->save();
 
             foreach ($config->user->devices as $device) {
                 try {
