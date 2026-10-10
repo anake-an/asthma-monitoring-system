@@ -4,6 +4,9 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Added
+- **Alerts for readings over a limit:** when dust, gas, temperature or humidity stays above its room's limit for **5 minutes** (every reading in that time over it; a dip or a failed sensor starts the wait again), everyone with alerts on gets an **email and a push** naming the reading, the room and child, the value and the limit; tapping it opens that room. At most one per room and reading per hour while it stays high. Same smoothed values and limits as the device's buzzer, same recipients as cough alerts (the "Send me alerts" switch per child now covers both). Before, only the buzzer and the dashboard showed it.
+
 ### Fixed
 - **Wording no longer presents RespiroSync as a medical product** (in Malaysia that is decided by intended use, Medical Device Act 2012): "medical network" and "Medical Dashboard" are gone, the rescue-dose notice states a fact and suggests the doctor instead of interpreting "asthma control", and "medical data" is "health data" (the PDPA's term). The cough-alert email names the room and child, like the push.
 - **Room picker is a themed list** instead of the browser's own dropdown (white with a grey highlight on Windows, regardless of dark mode): rooms grouped by child, each with its status dot and "Online", "Offline" or "Waiting for setup" (was "(pending)"), a tick on the room on screen; arrow keys, Enter and Escape work, a tap outside closes it. The header now sits above the cards so the list is never covered.

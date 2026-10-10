@@ -4,8 +4,11 @@ namespace App\Services;
 
 use App\Models\CoughEvent;
 use App\Models\Device;
+use App\Models\HardwareConfig;
+use App\Models\LimitAlert;
 use App\Models\TelemetryLog;
 use App\Notifications\CoughAlertNotification;
+use App\Notifications\LimitAlertNotification;
 use App\Support\Mqtt;
 use Illuminate\Support\Facades\Log;
 
@@ -69,7 +72,7 @@ class DeviceMessageHandler
             return;
         }
 
-        TelemetryLog::create([
+        $log = TelemetryLog::create([
             'device_id' => $device->id,
             'pm25_level' => $pm25,
             'temperature' => self::number($data['temperature'] ?? null, -40, 85),
@@ -79,6 +82,51 @@ class DeviceMessageHandler
             // app timezone, and the DB clock may run in another one (SQLite's is always UTC).
             'recorded_at' => now(),
         ]);
+
+        $this->checkLimits($device, $log);
+    }
+
+    /**
+     * Alert (email + push, same recipients as cough alerts) when a reading has stayed above the
+     * room's limit for LimitAlert::SUSTAIN_MINUTES: every reading in that window is over it (a dip,
+     * or a failed sensor, starts the wait again) and the window is covered from its start. The same
+     * smoothed values and limits as the device's own alarm. A reminder at most every REPEAT_MINUTES.
+     */
+    private function checkLimits(Device $device, TelemetryLog $log): void
+    {
+        $config = HardwareConfig::forDevice($device);
+        $now = now();
+        $since = $now->copy()->subMinutes(LimitAlert::SUSTAIN_MINUTES);
+
+        foreach (LimitAlert::READINGS as $name => [$column]) {
+            $limit = (float) $config->{"{$name}_threshold"};
+            if ($log->{$column} === null || $log->{$column} <= $limit) {
+                continue; // cheap check first: only a reading over the limit can start an alert
+            }
+            $window = fn () => TelemetryLog::where('device_id', $device->id)->whereNull('samples')->where('recorded_at', '>=', $since);
+            if ($window()->where(fn ($q) => $q->whereNull($column)->orWhere($column, '<=', $limit))->exists()) {
+                continue; // not over the limit the whole time
+            }
+            $first = $window()->min('recorded_at');
+            if (!$first || \Carbon\Carbon::parse($first)->gt($since->copy()->addSeconds(10))) {
+                continue; // watched for less than the full window (just came online, or just started); a reading comes every 3 s
+            }
+            $recent = LimitAlert::where('device_id', $device->id)->where('reading', $name)
+                ->where('created_at', '>=', $now->copy()->subMinutes(LimitAlert::REPEAT_MINUTES))->exists();
+            if ($recent) {
+                continue;
+            }
+
+            $alert = LimitAlert::create(['device_id' => $device->id, 'reading' => $name, 'value' => (float) $log->{$column},
+                'limit_value' => $limit, 'created_at' => $now]);
+            foreach (self::alertRecipients($device) as $user) {
+                try {
+                    $user->notify(new LimitAlertNotification($alert));
+                } catch (\Throwable $e) {
+                    Log::error('Failed to send limit alert', ['device_id' => $device->id, 'user_id' => $user->id, 'error' => $e->getMessage()]);
+                }
+            }
+        }
     }
 
     private function handleEvent(Device $device, array $data): void

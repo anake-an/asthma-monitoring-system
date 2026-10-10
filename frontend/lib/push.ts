@@ -1,4 +1,4 @@
-// Web Push for cough alerts on this browser/phone. The service worker (public/sw.js) shows them;
+// Web Push for alerts (coughs, readings over a limit) on this browser/phone. The service worker (public/sw.js) shows them;
 // the backend sends them with its VAPID key to every subscription of every member who gets alerts.
 // iPhone/iPad: only works after "Add to Home Screen" and opening RespiroSync from there (iOS 16.4+).
 
