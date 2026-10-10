@@ -113,7 +113,8 @@ export default function AiRiskAssessment() {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col justify-end relative z-10 gap-4">
+      {/* Content from the top; the cough count sits at the bottom (the card is as tall as its neighbours) */}
+      <div className="flex-1 flex flex-col relative z-10 gap-4">
         
         {/* Risk Score */}
         <div className="flex items-end justify-between">
@@ -131,6 +132,13 @@ export default function AiRiskAssessment() {
                   ? "Room compared with its usual readings"
                   : "Risk of an asthma flare-up in the next hour (model estimate)"}
             </div>
+            {(isLearning || isStage1) && (
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-500 mt-2 font-light leading-relaxed">
+                {isLearning
+                  ? "The AI first learns what is usual for this room (it trains every 4 hours)."
+                  : "Stage 2, a risk model for this child, starts after about 2 flare-ups (an emergency dose, or 2+ coughs within an hour) with readings before them."}
+              </p>
+            )}
             {!isLearning && !isStage1 && activePrediction.model && (
               <div className="text-[11px] text-zinc-500 dark:text-zinc-500 mt-1 font-light">
                 {MODEL_NAME[activePrediction.model.model_type]} · learned from about {Math.max(1, Math.round(activePrediction.model.episode_windows / 6))} flare-ups ·{" "}
@@ -146,6 +154,8 @@ export default function AiRiskAssessment() {
             </div>
           )}
         </div>
+
+        <div className="flex-1" aria-hidden="true" />
 
         {/* Separator */}
         <div className="w-full h-px bg-zinc-100 dark:bg-zinc-800/50"></div>
