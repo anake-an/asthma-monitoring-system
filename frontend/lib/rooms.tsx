@@ -58,6 +58,14 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
+      // A tapped cough-alert push opens /?device=<id>: show that room (and remember it).
+      const params = new URLSearchParams(window.location.search);
+      const fromLink = Number(params.get("device"));
+      if (fromLink) {
+        localStorage.setItem(STORAGE_KEY, String(fromLink));
+        params.delete("device");
+        window.history.replaceState(null, "", window.location.pathname + (params.toString() ? `?${params}` : ""));
+      }
       const saved = Number(localStorage.getItem(STORAGE_KEY));
       if (saved) setChosen(saved);
     } catch {}

@@ -52,6 +52,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/report', [DashboardController::class, 'getWeeklyReport']);
 
     Route::post('/push-subscribe', [DashboardController::class, 'savePushSubscription']);
+    Route::delete('/push-subscribe', [DashboardController::class, 'deletePushSubscription']);
     Route::get('/ai/train', [\App\Http\Controllers\AiController::class, 'trainModel']);
     Route::get('/ai/predict', [\App\Http\Controllers\AiController::class, 'getPrediction']);
     Route::get('/vapid-public-key', function () {
