@@ -3,7 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\FirmwareRelease;
-use App\Support\FirmwareImage;
+use App\Support\FirmwarePublisher;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
 
@@ -57,36 +57,22 @@ class FirmwarePublish extends Command
         }
 
         try {
-            $image = FirmwareImage::inspect(file_get_contents($path));
+            ['release' => $release, 'created' => $created] = FirmwarePublisher::publish(file_get_contents($path), $this->option('notes'));
         } catch (\InvalidArgumentException $e) {
             $this->error($e->getMessage());
 
             return self::FAILURE;
         }
-        if (FirmwareRelease::where('version', $image['version'])->exists()) {
-            $this->error("Version {$image['version']} is already published. Raise FIRMWARE_VERSION in the firmware, or --remove={$image['version']} first.");
+        if (!$created) {
+            $this->error("Version {$release->version} is already published. Raise FIRMWARE_VERSION in the firmware, or --remove={$release->version} first.");
 
             return self::FAILURE;
         }
-
-        File::ensureDirectoryExists(FirmwareRelease::directory());
-        $filename = "esp32-{$image['version']}.bin";
-        $target = FirmwareRelease::directory() . DIRECTORY_SEPARATOR . $filename;
-        if (realpath($path) !== realpath($target)) {
-            File::copy($path, $target);
-            if (str_starts_with(realpath($path), realpath(FirmwareRelease::directory()))) {
-                File::delete($path); // it was dropped into the firmware folder: keep only the published copy
-            }
+        if (realpath($path) !== realpath($release->path())
+            && str_starts_with((string) realpath($path), (string) realpath(FirmwareRelease::directory()))) {
+            File::delete($path); // it was dropped into the firmware folder: keep only the published copy
         }
-
-        FirmwareRelease::create([
-            'version' => $image['version'],
-            'filename' => $filename,
-            'size' => $image['size'],
-            'image_sha256' => $image['image_sha256'],
-            'notes' => $this->option('notes'),
-        ]);
-        $this->info("Published firmware {$image['version']} ({$image['size']} bytes). Owners can now update their rooms in Account Settings > Rooms.");
+        $this->info("Published firmware {$release->version} ({$release->size} bytes). Owners can now update their rooms in Account Settings > Rooms.");
 
         return self::SUCCESS;
     }

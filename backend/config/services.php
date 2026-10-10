@@ -50,4 +50,10 @@ return [
         'url' => env('FRONTEND_URL', 'http://localhost:3005'),
     ],
 
+    // Cloud firmware updates: CI uploads each new ESP32 build with this key (POST /api/firmware/upload).
+    // Empty = uploads off. Use a long random value, the same as the FIRMWARE_UPLOAD_TOKEN GitHub secret.
+    'firmware' => [
+        'upload_token' => env('FIRMWARE_UPLOAD_TOKEN', ''),
+    ],
+
 ];

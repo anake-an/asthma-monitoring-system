@@ -100,6 +100,38 @@ class FirmwareOtaTest extends TestCase
         $this->artisan('firmware:publish', ['file' => FirmwareRelease::directory() . '/again.bin'])->assertFailed();
     }
 
+    private function upload(string $bytes, string $token)
+    {
+        return $this->call('POST', '/api/firmware/upload', [], [], [], [
+            'HTTP_AUTHORIZATION' => "Bearer {$token}",
+            'CONTENT_TYPE' => 'application/octet-stream',
+            'HTTP_X_FIRMWARE_NOTES' => 'Slower start-up screens',
+        ], $bytes);
+    }
+
+    public function test_ci_uploads_a_build_with_the_key_and_repeats_are_harmless(): void
+    {
+        config(['services.firmware.upload_token' => 'ci-key']);
+
+        $this->upload($this->image('6.4.0'), 'ci-key')->assertCreated()->assertJson(['version' => '6.4.0', 'created' => true]);
+        $release = FirmwareRelease::sole();
+        $this->assertSame('Slower start-up screens', $release->notes);
+        $this->assertFileExists($release->path());
+
+        $this->upload($this->image('6.4.0'), 'ci-key')->assertOk()->assertJson(['created' => false]);
+        $this->assertSame(1, FirmwareRelease::count());
+    }
+
+    public function test_uploads_need_the_key_and_a_real_image(): void
+    {
+        $this->upload($this->image('6.4.0'), 'anything')->assertNotFound(); // no key configured: off
+
+        config(['services.firmware.upload_token' => 'ci-key']);
+        $this->upload($this->image('6.4.0'), 'wrong')->assertStatus(401);
+        $this->upload('not a firmware image', 'ci-key')->assertStatus(422);
+        $this->assertSame(0, FirmwareRelease::count());
+    }
+
     public function test_the_owner_starts_an_update_and_the_device_gets_a_one_time_link(): void
     {
         $release = $this->publish('6.3.0');
