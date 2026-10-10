@@ -73,39 +73,24 @@ Rules:
 
 TX goes to RX, and RX goes to TX. Swapping them is the most common reason no cough arrives.
 
-### Test button (optional; also works before the microphone is fitted)
-| Button leg | Pico |
-|---|---|
-| one leg | **GP2** (pin 4) |
-| other leg | **GND** (pin 3, right next to it) |
-
-No resistor is needed: the firmware uses the Pico's internal pull-up. On a 4-leg tactile button, use two legs on **opposite sides** (diagonal is always safe); the two legs on the same side are already connected to each other.
-
-- **Short press:** a weak test cough. **3 within 10 minutes** raise a cough alert.
-- **Long press (about 1 s):** a strong test cough. **2 within 10 minutes** raise an alert.
-- **Without a button:** in the Arduino IDE's Serial Monitor (115200 baud), type `c` (weak) or `s` (strong) and press Enter.
-
-The Pico's LED blinks once for each test cough sent. The ESP32's LCD then shows "Cough heard" and chirps, and the cough appears in the dashboard. **Test coughs are stored like real ones:** they appear in the Activity Log and go into the AI's training, and alerts are emailed and pushed. Mark them as **false alarm** in the dashboard to label them. To remove them after a demo, clear the event history (`docs/OPERATIONS.md` section 3).
-
-### Layout: Pico without the microphone (test mode)
+### Layout: Pico pins and the connections to the ESP32
 The Pico's pin numbers count down its left side from the USB end (pin 1 = GP0), then up its right side (pin 21 = GP16 at the bottom, pin 40 = VBUS at the top).
 ```
-                 USB (to the PC, or a 5 V phone charger)
+                 USB (only to flash it, or to power it on its own)
               ┌────┴────┐
    GP0  pin 1 │●       ●│ pin 40 VBUS
-   GP1  pin 2 │●       ●│ pin 39 VSYS
+   GP1  pin 2 │●       ●│ pin 39 VSYS  ◄── ESP32 5V/VIN (optional, see below)
    GND  pin 3 │●       ●│ pin 38 GND
-   GP2  pin 4 │●       ●│ pin 37 3V3_EN
-              │   ...   │
+              │   ...   │ pin 36 3V3 (OUT) ──► INMP441 VDD
+              │         │
+   GP13 pin 17│●        │  ◄── INMP441 SD
+   GP14 pin 19│●        │  ──► INMP441 SCK
+   GP15 pin 20│●        │  ──► INMP441 WS
               └─────────┘
 
    Pico pin 1 (GP0) ───────────────► ESP32 GPIO 16 (RX2)
    Pico pin 2 (GP1) ◄─────────────── ESP32 GPIO 17 (TX2)
-   Pico pin 3 (GND) ──────┬────────► ESP32 GND   (shared ground: required)
-                          │
-                       [button]
-                          │
-   Pico pin 4 (GP2) ──────┘
+   Pico pin 3 (GND) ───────────────► ESP32 GND   (shared ground: required)
 ```
 Power the Pico from its own USB, or from the ESP32 as below. Never connect it to the MB-102's 5 V.
 
@@ -120,7 +105,7 @@ The Pico needs about 25 mA (about 27 mA with the microphone), which the ESP32's 
 - **Never both supplies at once.** Pull the VSYS wire off before plugging the Pico's own USB into the PC (to flash it or open its Serial Monitor), so two 5 V supplies never meet. Optional: a 1N5817/1N5819 Schottky diode in the VSYS wire (stripe towards the Pico) makes it safe to keep both connected.
 - **A good supply for the ESP32:** a PC port, or a 5 V 1-2 A charger. A weak one makes the ESP32 restart when Wi-Fi peaks.
 
-When the INMP441 arrives, add it as in the table above (GP13, GP14, GP15, 3V3 (OUT) on pin 36, GND). The test button keeps working.
+When the INMP441 arrives, add it as in the table above (GP13, GP14, GP15, 3V3 (OUT) on pin 36, GND). No change to the firmware is needed.
 
 ---
 
@@ -214,7 +199,7 @@ Green = connected and normal. Red = alarm, or not connected to the broker.
 |---|---|---|---|---|
 | GPIO 4 | DHT22 DATA | | GP0 | UART TX → ESP32 GPIO 16 |
 | GPIO 5 | Sharp LED pulse | | GP1 | UART RX ← ESP32 GPIO 17 |
-| GPIO 0 | BOOT button: wake the LCD, next page | | GP2 | Test button → GND (optional) |
+| GPIO 0 | BOOT button: wake the LCD, next page | | | |
 | GPIO 16 | UART RX ← Pico GP0 | | GP13 | INMP441 SD |
 | GPIO 17 | UART TX → Pico GP1 | | GP14 | INMP441 SCK |
 | GPIO 18 | Buzzer (via 220 Ω) | | GP15 | INMP441 WS |
@@ -234,4 +219,4 @@ Test each part on its own before adding the next; it makes faults easy to find.
 2. **ESP32 alone** on USB. Fill `secrets.h`, flash with *Erase All Flash Before Sketch Upload* enabled, pair it from the dashboard, and check that it appears online.
 3. Add the **DHT22**, **LEDs**, **buzzer** and **LCD** (with the level shifter and the MB-102 5 V rail). Temperature and humidity should appear on the LCD and the dashboard.
 4. Add the **MQ-135** and the **Sharp sensor**. Readings should appear within a few seconds; expect the MQ-135 to drift during its first day.
-5. Connect the **Pico ↔ ESP32 UART** and the common GND. Press the test button (or type `c` in the Pico's Serial Monitor): the LCD should show "Cough heard", chirp, and the cough should appear in the dashboard's event timeline. Then try a real cough near the microphone.
+5. Connect the **Pico ↔ ESP32 UART** and the common GND. Cough (or clap) near the microphone: the Pico's LED blinks, the LCD shows "Cough heard" and chirps, and the cough appears in the dashboard's cough history.

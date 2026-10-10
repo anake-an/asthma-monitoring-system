@@ -45,10 +45,10 @@ NAS commands run from the project folder (`/volume2/docker/iot-project`) and nee
 
 ## 4. A cough (2 min)
 
-1. On the **Pico test button** (GP2), press **short three times** within a minute. Without a button, type `c` three times in the Pico's Serial Monitor.
-2. Each press: the Pico's LED blinks, the LCD shows "Cough heard" with a pulse, and the ESP32 chirps.
-3. The dashboard's cough history shows three events. The third meets the rule (**3 coughs in 10 minutes**), so it is an **Alert**: email and push.
-4. Mention that a long press (a strong cough) alerts after 2.
+1. Cough (or clap) clearly near the microphone, **three times** within a minute.
+2. Each time: the Pico's LED blinks, the LCD shows "Cough heard" with a pulse, and the ESP32 chirps.
+3. The dashboard's cough history shows three events. The third meets the rule (**3 coughs in 10 minutes**), so it is an **Alert**: email and push. Two strong ones (a very loud sound) are enough.
+4. Review them: **Inhaler**, **Real cough** or **False alarm**. False alarms are left out of the report and the AI's training.
 5. Explain that the microphone today detects loud bursts, not coughs specifically (Phase 2: a trained model).
 
 ## 5. Device offline (1 min)
@@ -99,7 +99,7 @@ It appears when a child who uses a daily inhaler has none logged for 26 hours. T
 ## After the demo
 
 - **Limits:** put the PM2.5 limit back; turn off "Silence Physical Alarm" if you turned it on.
-- **Test coughs and the pretend dose:** they are stored like real ones. Mark the coughs as **false alarm** in the dashboard. To remove the pretend dose:
+- **Demo coughs and the pretend dose:** they are stored like real ones. Mark the coughs as **false alarm** in the dashboard. To remove the pretend dose:
   ```bash
   sudo docker compose exec backend php artisan tinker --execute='App\Models\InhalerLog::where("type","controller")->where("administered_at","<",now()->subDay())->where("is_manual",true)->latest("id")->first()?->delete();'
   ```

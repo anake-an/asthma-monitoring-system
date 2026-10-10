@@ -8,14 +8,7 @@
  *   3 s after power-on) and reports a
  *   "detection strength" between 0 and 1. It does NOT tell a cough apart from a
  *   clap, a door slam or a shout. See README "Phase 2" for a trained classifier.
- *
- * TEST MODE (works with or without the microphone):
- *   A push button between GP2 and GND sends a test cough to the ESP32:
- *     short press -> weak cough   (3 within 10 minutes raise a cough alert)
- *     long press  -> strong cough (2 within 10 minutes raise a cough alert)
- *   Or type in the Serial Monitor (115200 baud): c = weak cough, s = strong cough.
- *   The Pico's LED blinks once for every message sent. The server cannot tell a
- *   test cough from a real one: mark test events "false alarm", or clear them after a demo.
+ *   The Pico's LED blinks once for every detection sent to the ESP32.
  *
  * Wiring (INMP441 -> Pico). arduino-pico requires LRCLK = BCLK + 1:
  *   VDD -> 3V3(OUT)      GND -> GND      L/R -> GND (left channel)
@@ -28,8 +21,6 @@
  *   GP1 (UART0 RX) -> ESP32 GPIO17 (TX2)
  *   GND            -> ESP32 GND (shared ground is required)
  *
- * Test button: GP2 -> button -> GND (no resistor: the internal pull-up is used)
- *
  * UART message (9600 baud, one line per detection):
  *   COUGH:<level 1-4>,<strength 0.00-1.00>
  */
@@ -39,7 +30,6 @@
 
 #define I2S_BCLK 14  // LRCLK/WS is automatically BCLK + 1 = GP15
 #define I2S_DATA 13
-#define TEST_BUTTON_PIN 2
 
 const int SAMPLE_RATE = 16000;
 const int FRAMES_PER_BLOCK = 256;  // 16 ms per analysis block
@@ -49,25 +39,22 @@ const int FRAMES_PER_BLOCK = 256;  // 16 ms per analysis block
 // Calibrate in your room with DEBUG_LEVELS 1 (Serial Plotter) and adjust.
 const float RMS_THRESHOLD = 50000.0f;
 const unsigned long DEBOUNCE_MS = 1500;    // one cough = one event
-const unsigned long LONG_PRESS_MS = 800;   // test button: held this long = strong cough
 const unsigned long SETTLE_MS = 3000;      // ignore sound for this long after power-on
 const int MIN_LOUD_BLOCKS = 2;             // a burst must last 2 blocks (32 ms); a cough lasts 200-500 ms
 #define DEBUG_LEVELS 0
 
 I2S i2s(INPUT);
-bool micReady = false;
 unsigned long lastCoughTime = 0;
 int loudBlocks = 0;  // consecutive blocks above the threshold
 
 /** Send one detection to the ESP32 and blink the LED. */
-void sendCough(int level, float strength, const char *source) {
+void sendCough(int level, float strength) {
   Serial1.print("COUGH:");
   Serial1.print(level);
   Serial1.print(",");
   Serial1.println(strength, 2);
 
-  Serial.print(source);
-  Serial.print(": level ");
+  Serial.print("Burst detected: level ");
   Serial.print(level);
   Serial.print(", strength ");
   Serial.println(strength, 2);
@@ -77,55 +64,27 @@ void sendCough(int level, float strength, const char *source) {
   digitalWrite(LED_BUILTIN, LOW);
 }
 
-/** Test button (GP2) and Serial Monitor commands. */
-void handleTestInputs() {
-  static bool wasDown = false;
-  static unsigned long downAt = 0;
-  bool down = digitalRead(TEST_BUTTON_PIN) == LOW;
-  if (down && !wasDown) downAt = millis();
-  if (!down && wasDown && millis() - downAt >= 30) {  // released (30 ms debounce)
-    if (millis() - downAt >= LONG_PRESS_MS) sendCough(4, 0.95f, "Test button (long): strong cough");
-    else sendCough(1, 0.20f, "Test button: weak cough");
-  }
-  wasDown = down;
-
-  while (Serial.available()) {
-    char c = Serial.read();
-    if (c == 'c' || c == 'C') sendCough(1, 0.20f, "Test command: weak cough");
-    else if (c == 's' || c == 'S') sendCough(4, 0.95f, "Test command: strong cough");
-    else if (c == '?') Serial.println("Test mode: c = weak cough, s = strong cough (or the button on GP2: short / long press)");
-  }
-}
-
 void setup() {
-  Serial.begin(115200);  // USB debug and test commands
+  Serial.begin(115200);  // USB debug
   Serial1.begin(9600);   // UART0 on GP0/GP1 -> ESP32
   pinMode(LED_BUILTIN, OUTPUT);
-  pinMode(TEST_BUTTON_PIN, INPUT_PULLUP);
 
   i2s.setBCLK(I2S_BCLK);
   i2s.setDATA(I2S_DATA);
   i2s.setBitsPerSample(32);  // INMP441 sends 24-bit samples in 32-bit slots
   i2s.setFrequency(SAMPLE_RATE);
 
-  micReady = i2s.begin();
-  // Pull the data line down: without a microphone (or while it starts) it would float and
-  // pick up noise that looks like a loud burst. The INMP441 datasheet asks for a pull-down too.
-  gpio_pull_down(I2S_DATA);
-  if (micReady) {
-    Serial.println("I2S microphone ready. Listening... (test: c / s, or the GP2 button)");
-  } else {
-    Serial.println("I2S did not start: test mode only (c / s, or the GP2 button). Check INMP441 wiring (SCK=GP14, WS=GP15, SD=GP13).");
+  if (!i2s.begin()) {
+    Serial.println("Failed to initialise I2S. Check INMP441 wiring (SCK=GP14, WS=GP15, SD=GP13).");
+    while (true) delay(1000);
   }
+  // Pull the data line down: while the microphone starts (or if it is missing) the line would
+  // float and pick up noise that looks like a loud burst. The INMP441 datasheet asks for this too.
+  gpio_pull_down(I2S_DATA);
+  Serial.println("I2S microphone ready. Listening...");
 }
 
 void loop() {
-  handleTestInputs();
-  if (!micReady) {
-    delay(10);
-    return;
-  }
-
   int64_t sum = 0;
   int64_t sumSq = 0;
 
@@ -168,5 +127,5 @@ void loop() {
   if (ratio >= 4) level = 3;
   if (ratio >= 6) level = 4;
 
-  sendCough(level, strength, "Burst detected");
+  sendCough(level, strength);
 }
