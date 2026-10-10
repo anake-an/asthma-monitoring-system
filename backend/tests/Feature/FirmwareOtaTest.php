@@ -61,7 +61,7 @@ class FirmwareOtaTest extends TestCase
         File::put(FirmwareRelease::directory() . '/esp32_firmware.ino.bin', $this->image($version));
         $this->artisan('firmware:publish', ['file' => FirmwareRelease::directory() . '/esp32_firmware.ino.bin'])->assertSuccessful();
 
-        return FirmwareRelease::where('version', $version)->firstOrFail();
+        return FirmwareRelease::orderByDesc('id')->firstOrFail(); // the one just published ("6.2.x" is stored as 3.0.x)
     }
 
     private function hello(array $data): void
