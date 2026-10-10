@@ -4,6 +4,21 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+## [6.2.0] - 2026-10-10
+
+Device firmware updates from the dashboard (built and published by GitHub Actions), a "device offline" alert, honest cough reviews, and a quieter Pico. Device firmware now has its own versions (3.1.0 Build 261010.7, see `hardware/FIRMWARE_HISTORY.md`).
+
+### Upgrading from 6.1.0
+- **Database:** migrations run by themselves on start (offline alerts, firmware releases and builds).
+- **ESP32:** flash once over USB with **Tools → Partition Scheme → "Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)"**. After that, updates come from the dashboard.
+- **Automatic firmware publishing** (optional):
+    - set `FIRMWARE_UPLOAD_TOKEN` in `backend/.env`;
+    - add the GitHub secrets `MQTT_URI`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `FIRMWARE_UPLOAD_URL` and `FIRMWARE_UPLOAD_TOKEN`;
+    - in Cloudflare, turn **Bot Fight Mode** off and add a custom rule that **skips** security for `/api/firmware/upload`, placed first (before any geo-blocking).
+
+  See `hardware/README.md`, "Updating the ESP32 from the cloud".
+- **Pico:** re-flash `pico_cough_ai.ino` over USB for the noise fix.
+
 ### Added
 - **Cloud firmware updates (OTA) for the ESP32.** The developer publishes a build on the server (`php artisan firmware:publish <file>.ino.bin`). The server checks it is an ESP32 app image that fits, and reads the version from the file. Owners then see a blue dot on Account Settings, and **Update to x.y.z** for each room under Rooms. The device:
     - downloads the firmware from the server over HTTPS, through a one-time link (10 minutes, that device only), with progress on the LCD;
@@ -196,7 +211,8 @@ Initial public release.
 
 > **Superseded.** 4.3.0 runs an open MQTT broker and has the cross-account data access fixed in 5.0.0. Do not deploy it.
 
-[Unreleased]: https://github.com/anake-an/asthma-monitoring-system/compare/v6.1.0...HEAD
+[Unreleased]: https://github.com/anake-an/asthma-monitoring-system/compare/v6.2.0...HEAD
+[6.2.0]: https://github.com/anake-an/asthma-monitoring-system/compare/v6.1.0...v6.2.0
 [6.1.0]: https://github.com/anake-an/asthma-monitoring-system/compare/v6.0.0...v6.1.0
 [6.0.0]: https://github.com/anake-an/asthma-monitoring-system/compare/v5.0.0...v6.0.0
 [5.0.0]: https://github.com/anake-an/asthma-monitoring-system/compare/v4.3.0...v5.0.0
