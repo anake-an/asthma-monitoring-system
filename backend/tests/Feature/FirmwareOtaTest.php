@@ -170,7 +170,7 @@ class FirmwareOtaTest extends TestCase
         $this->hello(['firmware' => '6.2.0', 'boot' => true]); // rolled back
         $this->assertSame('failed', $this->bedroom->fresh()->ota_status);
 
-        $this->bedroom->forceFill(['ota_status' => 'updating', 'ota_error' => null])->save();
+        $this->bedroom->fresh()->forceFill(['ota_status' => 'updating', 'ota_error' => null])->save();
         app(DeviceMessageHandler::class)->handle('respirosync/devices/BED001/events', json_encode(['event' => 'ota', 'status' => 'failed', 'error' => 'Checksum does not match']));
         $this->assertSame('Checksum does not match', $this->bedroom->fresh()->ota_error);
     }
