@@ -19,6 +19,13 @@ class FirmwareRelease extends Model
     /** Marker the firmware embeds ("RespiroSync-firmware:3.1.0 build 261010"), read at publish time. */
     public const VERSION_TAG = 'RespiroSync-firmware:';
 
+    /** The Edge AI module (Raspberry Pi Pico): its marker ("RespiroSync-edge-ai:2.0.0 build 261011") and room. */
+    public const EDGE_AI_TAG = 'RespiroSync-edge-ai:';
+    public const EDGE_AI_MAX_SIZE = 1040384; // the sketch half of "2MB (Sketch: 1MB, FS: 1MB)", less a margin
+
+    /** What a release is for: the device firmware (ESP32) or the Edge AI module (Pico). */
+    public const TARGETS = ['esp32' => 'Firmware', 'pico' => 'Edge AI'];
+
     /** Product shown to owners. */
     public const PRODUCT = 'RespiroSync Room Monitor';
     public const MODEL = 'RS-100';
@@ -27,7 +34,7 @@ class FirmwareRelease extends Model
     /** The first cloud-update builds used the website's numbers; their place in the firmware history. */
     public const LEGACY = ['6.2.0' => ['3.0.0', '261010.5'], '6.2.1' => ['3.0.1', '261010.6']];
 
-    protected $fillable = ['version', 'build', 'filename', 'size', 'image_sha256', 'notes'];
+    protected $fillable = ['target', 'version', 'build', 'filename', 'size', 'image_sha256', 'notes'];
 
     protected $casts = ['size' => 'integer'];
 
@@ -77,10 +84,11 @@ class FirmwareRelease extends Model
         return self::compare($this->version, $this->build, $version, $build) > 0;
     }
 
-    /** The newest release, or null. */
-    public static function latest(): ?self
+    /** The newest release for a target (esp32 or pico), or null. */
+    public static function latest(string $target = 'esp32'): ?self
     {
-        return self::all()->sort(fn (self $a, self $b) => self::compare($b->version, $b->build, $a->version, $a->build))->first();
+        return self::where('target', $target)->get()
+            ->sort(fn (self $a, self $b) => self::compare($b->version, $b->build, $a->version, $a->build))->first();
     }
 
     /** "3.1.0 Build 261010" (or just the version for a build without a stamp). */

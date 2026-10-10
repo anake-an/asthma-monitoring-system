@@ -60,3 +60,6 @@ frontend/next-env.d.ts
 
 # Written by CI with the firmware's build stamp
 hardware/esp32_firmware/build_info.h
+
+# Written by CI with the Edge AI build stamp
+hardware/pico_cough_ai/build_info.h

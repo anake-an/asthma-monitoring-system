@@ -1,0 +1,5 @@
+# What owners see under "What's new" when this Edge AI build is offered as an update.
+# One short point per line, in plain words. Lines starting with # are ignored.
+# Update it together with EDGE_AI_VERSION in pico_cough_ai.ino.
+Edge AI can now be updated from the dashboard
+Faster connection to the main unit

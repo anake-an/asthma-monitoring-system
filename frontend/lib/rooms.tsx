@@ -18,7 +18,11 @@ export type Device = {
   firmware_build: string | null; // build stamp, e.g. "261011.2"
   firmware_label: string | null; // "3.1.0 Build 261011"
   update_available: boolean; // a newer firmware is published on the server
-  ota: { status: "updating" | "updated" | "failed" | null; target: string | null; error: string | null };
+  edge_ai_version: string | null; // the Edge AI module (Pico), as the device reports it
+  edge_ai_build: string | null;
+  edge_ai_label: string | null;
+  edge_ai_update_available: boolean;
+  ota: { status: "updating" | "updated" | "failed" | null; target: string | null; part: FirmwarePart; error: string | null };
 };
 
 export type Patient = {
@@ -33,11 +37,14 @@ export type Patient = {
 };
 
 export type FirmwareInfo = { version: string; build: string | null; label: string; notes: string | null };
+/** Which part of the device an update is for: its firmware (ESP32) or the Edge AI module (Pico). */
+export type FirmwarePart = "esp32" | "pico";
 
 type Rooms = {
   loaded: boolean;
   devices: Device[];
   latestFirmware: FirmwareInfo | null; // newest firmware published on the server
+  latestEdgeAi: FirmwareInfo | null; // newest Edge AI build
   patients: Patient[];
   device: Device | null; // the room on screen
   deviceId: number | null;
@@ -63,6 +70,7 @@ export function withDevice(url: string, deviceId: number | null): string {
 export function RoomsProvider({ children }: { children: ReactNode }) {
   const [devices, setDevices] = useState<Device[]>([]);
   const [latestFirmware, setLatestFirmware] = useState<FirmwareInfo | null>(null);
+  const [latestEdgeAi, setLatestEdgeAi] = useState<FirmwareInfo | null>(null);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [chosen, setChosen] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -94,6 +102,7 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
         const data = await d.json();
         setDevices(data.devices ?? []);
         setLatestFirmware(data.latest_firmware ?? null);
+        setLatestEdgeAi(data.latest_edge_ai ?? null);
       }
       if (p.ok) setPatients((await p.json()).patients ?? []);
     } catch {
@@ -123,7 +132,7 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <RoomsContext.Provider value={{ loaded, devices, latestFirmware, patients, device, deviceId: device?.id ?? null, patientId, canLogDose, canMarkCoughs, selectDevice, refresh }}>
+    <RoomsContext.Provider value={{ loaded, devices, latestFirmware, latestEdgeAi, patients, device, deviceId: device?.id ?? null, patientId, canLogDose, canMarkCoughs, selectDevice, refresh }}>
       {children}
     </RoomsContext.Provider>
   );
@@ -141,10 +150,12 @@ export function roomLabel(device: Device): string {
 }
 
 /**
- * The firmware an owner can install on this room's device ("3.1.0"), or null: none newer, not an
- * owner, or an update is already running. The server decides what is newer (version, then build).
+ * The version an owner can install on this room's device, for its firmware ("esp32") or its
+ * Edge AI module ("pico"), or null: none newer, not an owner, or an update is already running.
+ * The server decides what is newer (version, then build).
  */
-export function firmwareUpdateFor(device: Device, latest: FirmwareInfo | null): string | null {
-  if (!latest || !device.can_configure || !device.update_available || device.ota?.status === "updating") return null;
-  return latest.version;
+export function firmwareUpdateFor(device: Device, latest: FirmwareInfo | null, part: FirmwarePart = "esp32"): string | null {
+  if (!latest || !device.can_configure || device.ota?.status === "updating") return null;
+  const available = part === "pico" ? device.edge_ai_update_available : device.update_available;
+  return available ? latest.version : null;
 }

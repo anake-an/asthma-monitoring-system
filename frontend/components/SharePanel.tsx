@@ -43,7 +43,7 @@ function describe(e: Entry): string {
     case "device.renamed": return `renamed room ${d.from} to ${d.to}`;
     case "device.moved": return `moved ${d.room} from ${d.from} to ${d.to}`;
     case "device.removed": return `removed room ${d.room}`;
-    case "device.firmware": return `updated the firmware of ${d.room} from ${d.from} to ${d.to}`;
+    case "device.firmware": return `updated ${d.part === "Edge AI" ? "the Edge AI" : "the firmware"} of ${d.room} from ${d.from} to ${d.to}`;
     case "settings.saved": return "saved Smart Alerts";
     case "dose.logged": return `logged a ${d.type === "controller" ? "daily" : "rescue"} dose`;
     case "cough.marked": return d.verified === null || d.verified === undefined ? "undid a cough review" : d.verified ? (d.inhaler_used ? "confirmed a cough (inhaler used)" : "confirmed a cough") : "marked a cough as false alarm";

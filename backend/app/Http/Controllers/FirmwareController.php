@@ -20,15 +20,24 @@ class FirmwareController extends Controller
 {
     public const OTA_LINK_MINUTES = 10;
 
-    /** POST /api/devices/{id}/firmware-update (owners: DevicePolicy "configure"). */
+    /**
+     * POST /api/devices/{id}/firmware-update (owners: DevicePolicy "configure"), with
+     * target "esp32" (the device firmware, default) or "pico" (the Edge AI module).
+     */
     public function update(Request $request, $id)
     {
         $request->merge(['device_id' => $id]);
         $device = $this->device($request, 'configure');
+        $target = $request->validate(['target' => 'sometimes|in:esp32,pico'])['target'] ?? 'esp32';
+        $edgeAi = $target === 'pico';
 
-        $release = FirmwareRelease::latest();
-        if (!$release || !$release->isNewerThan($device->firmware_version, $device->firmware_build)) {
-            return response()->json(['message' => 'This device is already up to date.'], 422);
+        if ($edgeAi && !$device->edge_ai_version) {
+            return response()->json(['message' => 'The Edge AI module is not connected, or the device firmware is too old to update it (3.3.0 or newer).'], 422);
+        }
+        $release = FirmwareRelease::latest($target);
+        $current = $edgeAi ? [$device->edge_ai_version, $device->edge_ai_build] : [$device->firmware_version, $device->firmware_build];
+        if (!$release || !$release->isNewerThan(...$current)) {
+            return response()->json(['message' => 'This is already up to date.'], 422);
         }
         if ($device->status !== 'online') {
             return response()->json(['message' => 'The device is offline. Turn it on and try again.'], 422);
@@ -39,24 +48,25 @@ class FirmwareController extends Controller
 
         $link = URL::temporarySignedRoute('firmware.download', now()->addMinutes(self::OTA_LINK_MINUTES),
             ['release' => $release->id, 'device' => $device->id], absolute: false);
-        $from = $device->firmware_version;
         $device->forceFill([
             'ota_status' => 'updating',
+            'ota_target' => $target,
             'ota_target_version' => $release->version,
             'ota_error' => null,
             'ota_started_at' => now(),
         ])->save();
 
         app(Mqtt::class)->sendCommand($device, 'ota', [
+            'target' => $target,
             'url' => rtrim(config('services.frontend.url'), '/') . $link,
             'version' => $release->version,
             'size' => $release->size,
             'sha256' => $release->image_sha256,
         ]);
         AuditLog::record($request->user(), 'device.firmware', $device->patient_id, $device->id,
-            ['room' => $device->name, 'from' => $from ?? 'unknown', 'to' => $release->version]);
+            ['room' => $device->name, 'part' => FirmwareRelease::TARGETS[$target], 'from' => $current[0] ?? 'unknown', 'to' => $release->version]);
 
-        return response()->json(['message' => "Updating {$device->name} to {$release->version}", 'device' => $device->fresh()]);
+        return response()->json(['message' => "Updating {$device->name}", 'device' => $device->fresh()]);
     }
 
     /**
@@ -96,7 +106,8 @@ class FirmwareController extends Controller
     public function download(Request $request, FirmwareRelease $release)
     {
         $device = Device::find($request->query('device'));
-        if (!$device || $device->ota_target_version !== $release->version || !is_file($release->path())) {
+        if (!$device || $device->ota_target_version !== $release->version || ($device->ota_target ?? 'esp32') !== $release->target
+            || !is_file($release->path())) {
             abort(404);
         }
 
