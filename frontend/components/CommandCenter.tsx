@@ -3,17 +3,8 @@ import { useEffect, useState } from "react";
 import { GAS_NOTE, GAS_DEFAULT_LIMIT_PPM } from "@/lib/gas";
 import { authHeaders, roomLabel, useRooms, withDevice } from "@/lib/rooms";
 import ChildrenAndRooms from "@/components/ChildrenAndRooms";
-
-export function urlBase64ToUint8Array(base64String: string) {
-  const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-}
+import PushSettings from "@/components/PushSettings";
+import { disablePush } from "@/lib/push";
 
 export default function CommandCenter() {
   // In Smart Alerts each *_threshold is the user's own value (the cap): the AI may lower the effective
@@ -120,6 +111,7 @@ export default function CommandCenter() {
       isDanger: false,
       onConfirm: async () => {
         try {
+          await disablePush().catch(() => {}); // no more pushes to this browser for this account
           await fetch("/api/logout", {
             method: "POST",
             headers: {
@@ -551,6 +543,9 @@ export default function CommandCenter() {
                   )}
                 </div>
               </div>
+
+              {/* Push notifications on this browser/phone */}
+              <PushSettings onToast={showToast} />
 
               {/* Children & rooms */}
               <ChildrenAndRooms
