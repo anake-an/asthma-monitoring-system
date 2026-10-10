@@ -29,6 +29,7 @@ class HardwareConfig extends Model
         'mq135_threshold' => 1000.0, 'mq135_cap' => 1000.0,
         'pm25_locked' => false, 'temperature_locked' => false, 'humidity_locked' => false, 'mq135_locked' => false,
         'is_buzzer_muted' => false,
+        'night_mode' => true, // LCD backlight off 21:00-07:00
         'ai_optimization_enabled' => true,
     ];
 
@@ -42,6 +43,7 @@ class HardwareConfig extends Model
         'pm25_day_start', 'temperature_day_start', 'humidity_day_start', 'mq135_day_start', 'ai_day_started_at',
         'missed_dose_base',
         'is_buzzer_muted',
+        'night_mode',
         'ai_optimization_enabled',
     ];
 
@@ -54,6 +56,7 @@ class HardwareConfig extends Model
         'ai_day_started_at' => 'datetime',
         'missed_dose_base' => 'array',
         'is_buzzer_muted' => 'boolean',
+        'night_mode' => 'boolean',
         'ai_optimization_enabled' => 'boolean',
     ];
 
@@ -81,7 +84,7 @@ class HardwareConfig extends Model
                 $changes["{$name}_locked"] = (bool) $input["{$name}_locked"];
             }
         }
-        foreach (['is_buzzer_muted', 'ai_optimization_enabled'] as $key) {
+        foreach (['is_buzzer_muted', 'night_mode', 'ai_optimization_enabled'] as $key) {
             if (array_key_exists($key, $input)) {
                 $changes[$key] = (bool) $input[$key];
             }
@@ -284,7 +287,7 @@ class HardwareConfig extends Model
         if (!$sibling) {
             return self::DEFAULTS;
         }
-        $seed = ['is_buzzer_muted' => $sibling->is_buzzer_muted, 'ai_optimization_enabled' => $sibling->ai_optimization_enabled];
+        $seed = ['is_buzzer_muted' => $sibling->is_buzzer_muted, 'night_mode' => $sibling->night_mode ?? true, 'ai_optimization_enabled' => $sibling->ai_optimization_enabled];
         foreach (self::LIMITS as $name) {
             $seed["{$name}_cap"] = $seed["{$name}_threshold"] = $sibling->capFor($name);
             $seed["{$name}_locked"] = (bool) $sibling->{"{$name}_locked"};
@@ -304,6 +307,7 @@ class HardwareConfig extends Model
             'humidity_threshold' => $this->humidity_threshold,
             'mq135_threshold' => $this->mq135_threshold,
             'is_buzzer_muted' => $this->is_buzzer_muted,
+            'night_mode' => $this->night_mode ?? true,
             // The room's child usually takes a daily dose and none is logged for 26 h: the LCD shows
             // a reminder (devices:dose-reminders re-sends this when it changes).
             'dose_due' => self::missedDailyDose($this->device?->patient_id, now()),

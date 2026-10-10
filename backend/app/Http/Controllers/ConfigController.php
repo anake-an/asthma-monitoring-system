@@ -34,6 +34,7 @@ class ConfigController extends Controller
             'humidity_threshold' => 'numeric|min:0|max:100',
             'mq135_threshold' => 'numeric|min:0|max:10000', // estimated ppm
             'is_buzzer_muted' => 'boolean',
+            'night_mode' => 'boolean',
             'ai_optimization_enabled' => 'boolean',
             'pm25_locked' => 'boolean',
             'temperature_locked' => 'boolean',

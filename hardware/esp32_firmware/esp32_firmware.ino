@@ -41,7 +41,7 @@
 // Firmware "3.1.0 Build 261011": the version is set here (major.feature.fix, history in
 // hardware/FIRMWARE_HISTORY.md); the build stamp (build date YYMMDD, ".2" for a second build that
 // day) is written by CI into build_info.h. A build made in the Arduino IDE says "dev".
-#define FIRMWARE_VERSION "3.1.0"
+#define FIRMWARE_VERSION "3.2.0"
 #if __has_include("build_info.h")
 #include "build_info.h"
 #endif
@@ -112,6 +112,7 @@ struct Thresholds {
   float mq135 = 1000.0f;  // estimated ppm (CO2-equivalent)
   bool muted = false;
   bool doseDue = false;   // the child's daily dose is overdue: the LCD shows a reminder
+  bool nightMode = true;  // LCD backlight off 21:00-07:00 (switch in Smart Alerts)
 };
 Thresholds thresholds;
 portMUX_TYPE thresholdsMux = portMUX_INITIALIZER_UNLOCKED;
@@ -182,6 +183,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         t.mq135 = doc["mq135_threshold"] | t.mq135;
         t.muted = doc["is_buzzer_muted"] | t.muted;
         t.doseDue = doc["dose_due"] | false;
+        t.nightMode = doc["night_mode"] | true;
         portENTER_CRITICAL(&thresholdsMux);
         thresholds = t;
         portEXIT_CRITICAL(&thresholdsMux);
@@ -603,7 +605,7 @@ void updateDisplay() {
 
   // Backlight: blinking for a new alarm, else off at night unless woken.
   if (now < alarmFlashUntil) setBacklight(((alarmFlashUntil - now) / 200) % 2 == 0);
-  else setBacklight(!isNight() || now < wakeUntil);
+  else setBacklight(!(screenLimits.nightMode && isNight()) || now < wakeUntil);
 
   if (coughing) { drawCough(now - coughShownAt); return; }
   if (alarmMask) { drawAlarms(alarmMask); return; }

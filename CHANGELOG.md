@@ -4,6 +4,9 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Added
+- **Night mode switch:** Smart Alerts has **Night Mode** per room (on by default). Off keeps the device's screen lit at night. It needs firmware 3.2.0, which owners get as an update.
+
 ## [6.2.0] - 2026-10-10
 
 Device firmware updates from the dashboard (built and published by GitHub Actions), a "device offline" alert, honest cough reviews, and a quieter Pico. Device firmware now has its own versions (3.1.0 Build 261010.7, see `hardware/FIRMWARE_HISTORY.md`).
