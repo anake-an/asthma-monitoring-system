@@ -9,6 +9,9 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 - **"Device offline" alert:** when a room's device has sent nothing for **30 minutes** (power cut, Wi-Fi down, unplugged), everyone who gets that child's alerts gets an email and a push. It is sent once per outage, and a "back online" push follows when the device reports again. Devices that never connected are ignored. `php artisan devices:offline-alerts` runs every 5 minutes. The "Send me alerts" switch now covers coughs, readings over a limit and offline devices.
 - **Pico test mode (no microphone needed):** a push button between GP2 and GND sends a test cough to the ESP32. A short press sends a weak cough (3 within 10 minutes raise an alert); a long press sends a strong one (2 raise an alert). Typing `c` or `s` in the Pico's Serial Monitor does the same. This tests the whole path (Pico, ESP32, LCD, server, alerts) before the INMP441 is fitted. If the microphone is missing, the Pico now stays in test mode instead of stopping. The wiring guide has a layout for it.
 
+### Fixed
+- **Pico: no more coughs from nothing.** Without a microphone (and briefly at power-on), the microphone's data pin picked up electrical noise that was reported as a weak cough. The firmware now pulls that line down (the INMP441 datasheet asks for this too), ignores the first 3 seconds after power-on, and needs a burst to last at least 2 blocks (32 ms; a cough lasts 200-500 ms).
+
 ## [6.1.0] - 2026-10-10
 
 Alerts when a reading stays over its limit, account photos and child badges, a PDF report that works in the iPhone app, and a redesigned device screen.
