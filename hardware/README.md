@@ -9,6 +9,17 @@ The ESP32 is the central brain of the hardware system.
 *   **Comms:** Listens to UART2 (Serial2) for acoustic triggers from the Raspberry Pi Pico.
 *   **Broker:** connects as the `respirosync_device` account with client id = its pairing token, and only uses `respirosync/devices/<token>/...` topics.
 *   **Local alarm:** applies the thresholds it receives from the dashboard (retained `config` topic) and beeps/turns the red LED on when a reading crosses one, even when offline.
+*   **LCD (16×2):** only changed characters are rewritten, so it never flickers.
+    *   **Pages, every 4 s:**
+        1. **Air:** PM2.5 with OK/HI!, temperature, humidity.
+        2. **PM2.5 bar:** 16 blocks, full at the room's limit.
+        3. **Gas:** gas in ppm, plus one line about the air ("Air is good", "Dust rising...", "Open a window?").
+        4. **Clock:** time and date from the internet clock (Malaysia time), and whether the device is online.
+        5. **Dose reminder (only while due):** "Daily dose?" while the child's daily dose is overdue. The server sends `dose_due` in the config: a daily inhaler is used, but none was logged for 26 h.
+    *   **Over a limit:** the backlight blinks 3 times and the screen stays on e.g. `!! DUST HIGH !!` / `38 > 35` until the reading is back under the limit.
+    *   **Cough:** a 2-second animation.
+    *   **Start-up:** "RespiroSync" slides in, then "Connecting", then "Ready".
+    *   **Night mode (21:00-07:00):** the backlight is off unless there is an alarm or a cough. It also lights up for 30 s after the board's **BOOT** button is pressed. Outside night mode, the BOOT button shows the next page.
 
 ## 2. Raspberry Pi Pico (Acoustic AI Coprocessor)
 The Raspberry Pi Pico is dedicated entirely to high-speed audio sampling.

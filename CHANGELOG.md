@@ -19,6 +19,15 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 - **Amber "near the limit" bars were invisible** (and the icon lost its round background) since the bar colours moved to `lib/readingStatus.ts` in 6.0.0: Tailwind did not scan `lib/`, so the amber classes were never generated (green and red happened to be used elsewhere). `lib/` is scanned now, and CI checks that the built CSS has all three status colours.
 
 ### Changed
+- **ESP32 LCD redesigned** (re-flash the ESP32 to get it):
+    - **Icons:** online/offline, thermometer, drop, dust, bell, heart.
+    - **Pages every 4 s:** air; a PM2.5 bar filling up to the limit; gas with a plain-words line about the air; clock and connection.
+    - **Over a limit:** a full alert screen (`!! DUST HIGH !!` / `38 > 35`) that blinks the backlight 3 times.
+    - **Cough:** an animation.
+    - **Start-up:** a boot animation.
+    - **Night mode:** the backlight is off 21:00-07:00 unless there is an alert, or the BOOT button is pressed.
+    - **No flicker:** only changed characters are redrawn; it used to clear the screen every 3 s.
+- **"Daily dose?" reminder on the LCD:** while a child who takes a daily inhaler has none logged for 26 h. The server sends it in the device's config (`dose_due`): it checks every 5 minutes and only sends changes (`devices:dose-reminders`). Logging a daily dose clears it at once.
 - **ESP32 firmware: built-in humidity limit 75 % (was 60 %),** the same as the server's default. It only applies until the device receives its limits from the server, i.e. after booting without internet, where 60 % alarmed all the time in indoor air of 65-70 %. Takes effect at the next flash; no need to re-flash just for this.
 
 ## [6.0.0] - 2026-10-10

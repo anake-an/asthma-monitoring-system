@@ -4,10 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
 use App\Models\CoughEvent;
+use App\Models\HardwareConfig;
 use App\Models\InhalerLog;
 use App\Models\LimitChange;
 use App\Models\TelemetryLog;
+use App\Support\Mqtt;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Dashboard data, per device (room) or per patient (child). Access goes through
@@ -162,6 +165,17 @@ class DashboardController extends Controller
             'administered_at' => now(), // app clock, matching the "last 4 hours" query above
         ])->refresh();
         AuditLog::record($request->user(), 'dose.logged', $patient->id, null, ['type' => $request->type]);
+
+        // A daily dose clears the "daily dose?" reminder on the child's devices straight away.
+        if ($request->type === 'controller') {
+            foreach ($patient->devices()->whereNotNull('user_id')->get() as $device) {
+                try {
+                    app(Mqtt::class)->publishConfig($device, HardwareConfig::forDevice($device));
+                } catch (\Throwable $e) {
+                    Log::warning("Dose reminder for device {$device->id} not sent: " . $e->getMessage());
+                }
+            }
+        }
 
         return response()->json([
             'message' => 'Manual inhaler usage logged',
