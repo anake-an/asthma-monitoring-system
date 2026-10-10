@@ -131,6 +131,13 @@ class DeviceMessageHandler
 
     private function handleEvent(Device $device, array $data): void
     {
+        // The device's clock, for networks that block the internet time servers (UDP port 123):
+        // it asks over MQTT, which works wherever the device is connected at all.
+        if (($data['event'] ?? null) === 'time_request') {
+            app(Mqtt::class)->sendTime($device);
+
+            return;
+        }
         if (($data['event'] ?? null) !== 'cough') {
             return;
         }

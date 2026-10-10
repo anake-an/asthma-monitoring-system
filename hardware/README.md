@@ -9,16 +9,25 @@ The ESP32 is the central brain of the hardware system.
 *   **Comms:** Listens to UART2 (Serial2) for acoustic triggers from the Raspberry Pi Pico.
 *   **Broker:** connects as the `respirosync_device` account with client id = its pairing token, and only uses `respirosync/devices/<token>/...` topics.
 *   **Local alarm:** applies the thresholds it receives from the dashboard (retained `config` topic) and beeps/turns the red LED on when a reading crosses one, even when offline.
-*   **LCD (16×2):** only changed characters are rewritten, so it never flickers.
-    *   **Pages, every 4 s:**
-        1. **Air:** PM2.5 with OK/HI!, temperature, humidity.
-        2. **PM2.5 bar:** 16 blocks, full at the room's limit.
-        3. **Gas:** gas in ppm, plus one line about the air ("Air is good", "Dust rising...", "Open a window?").
-        4. **Clock:** time and date from the internet clock (Malaysia time), and whether the device is online.
-        5. **Dose reminder (only while due):** "Daily dose?" while the child's daily dose is overdue. The server sends `dose_due` in the config: a daily inhaler is used, but none was logged for 26 h.
-    *   **Over a limit:** the backlight blinks 3 times and the screen stays on e.g. `!! DUST HIGH !!` / `38 > 35` until the reading is back under the limit.
-    *   **Cough:** a 2-second animation.
-    *   **Start-up:** "RespiroSync" slides in, then "Connecting", then "Ready".
+*   **LCD (16×2):** every line is centred, and only changed characters are rewritten, so it never flickers.
+    *   **Start-up:**
+        1. "RespiroSync ♥" slides in.
+        2. "Connecting WiFi" (or "WiFi setup / Join RespiroSync" when the setup hotspot opens).
+        3. "WiFi connected" with the network name.
+        4. "Setting clock".
+        5. "Connecting cloud".
+        6. "Ready ♥ / Monitoring room".
+    *   **Pages, every 5 s:** the title stays on the top line, the values sit side by side on the bottom line.
+        1. **Air quality:** PM2.5 (µg/m³, shown as `ug`) and gas (ppm), e.g. `12.4ug  420ppm`. For the first **3 minutes** after power-on the gas sensor warms up: it is not read, the LCD shows a countdown (`Gas 2:15`), and gas is sent to the server as empty.
+        2. **Room climate:** temperature and humidity, e.g. `28.5C  64%`, or "Check sensor" when the DHT22 fails.
+        3. **Clock:** time with the online/offline icon, and the date (Malaysia time).
+        4. **Daily dose? (only while due):** shown while the child's daily dose is overdue. The server sends `dose_due` in the config: a daily inhaler is used, but none was logged for 26 h.
+    *   **Over a limit:** the backlight blinks 3 times and the screen stays on e.g. `!! DUST HIGH !!` / `38 > limit 35` until the reading is back under the limit. Several readings over their limits take turns every 2 s.
+    *   **Other screens:**
+        *   **Cough:** "Cough heard" with a moving pulse, for 2 s.
+        *   **Alert from the app:** "!! ALERT !!".
+        *   **Connection drops:** "Offline / Alarms still on".
+    *   **Clock source:** the internet time servers (NTP). Where a network blocks those (UDP port 123), the device asks the server over MQTT (a `time_request` event, answered with a `set_time` command), every 30 s until it has the time.
     *   **Night mode (21:00-07:00):** the backlight is off unless there is an alarm or a cough. It also lights up for 30 s after the board's **BOOT** button is pressed. Outside night mode, the BOOT button shows the next page.
 
 ## 2. Raspberry Pi Pico (Acoustic AI Coprocessor)

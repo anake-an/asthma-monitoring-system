@@ -103,4 +103,10 @@ class Mqtt
     {
         $this->publish(self::topic($device->device_token, 'commands'), json_encode(['command' => $command]));
     }
+
+    /** The current time (Unix seconds, UTC) for a device that asked for it ("time_request"). */
+    public function sendTime(Device $device): void
+    {
+        $this->publish(self::topic($device->device_token, 'commands'), json_encode(['command' => 'set_time', 'epoch' => time()]));
+    }
 }
