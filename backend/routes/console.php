@@ -11,6 +11,10 @@ Schedule::command('ai:train')->everyFourHours()->withoutOverlapping();
 // never raise it above, never touches locked limits, and changes each limit at most once a day.
 Schedule::command('ai:optimize')->everyFiveMinutes()->withoutOverlapping();
 
+// Every 5 minutes, tell each device whether its child's daily dose is overdue (the LCD's reminder);
+// only devices whose answer changed are sent anything (App\Console\Commands\DoseReminders).
+Schedule::command('devices:dose-reminders')->everyFiveMinutes()->withoutOverlapping();
+
 // Nightly, thin out old sensor readings: every reading for 7 days, then one 10-minute average per
 // device, deleted after a year (App\Console\Commands\TelemetryPrune).
 Schedule::command('telemetry:prune')->dailyAt('03:30')->withoutOverlapping();

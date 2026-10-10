@@ -304,6 +304,9 @@ class HardwareConfig extends Model
             'humidity_threshold' => $this->humidity_threshold,
             'mq135_threshold' => $this->mq135_threshold,
             'is_buzzer_muted' => $this->is_buzzer_muted,
+            // The room's child usually takes a daily dose and none is logged for 26 h: the LCD shows
+            // a reminder (devices:dose-reminders re-sends this when it changes).
+            'dose_due' => self::missedDailyDose($this->device?->patient_id, now()),
         ];
     }
 }

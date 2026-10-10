@@ -2,8 +2,10 @@
 
 namespace App\Support;
 
+use App\Console\Commands\DoseReminders;
 use App\Models\Device;
 use App\Models\HardwareConfig;
+use Illuminate\Support\Facades\Cache;
 use PhpMqtt\Client\ConnectionSettings;
 use PhpMqtt\Client\MqttClient;
 
@@ -68,7 +70,10 @@ class Mqtt
      */
     public function publishConfig(Device $device, HardwareConfig $config): void
     {
-        $this->publish(self::topic($device->device_token, 'config'), json_encode($config->toDevicePayload()), true);
+        $payload = $config->toDevicePayload();
+        $this->publish(self::topic($device->device_token, 'config'), json_encode($payload), true);
+        // What the device now shows, so devices:dose-reminders only sends changes.
+        Cache::forever(DoseReminders::cacheKey($device), $payload['dose_due']);
     }
 
     /**
