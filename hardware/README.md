@@ -68,7 +68,7 @@ To upgrade the Pico from Phase 1 math-based logic to Phase 2 True AI (Distinguis
 5.  Connect your ESP32 via USB and click **Upload**.
 6.  Once it has started, use your phone to connect to the **RespiroSync-Setup** Wi-Fi network, then enter your Wi-Fi password and the token from the dashboard.
 7.  Open `pico_cough_ai/pico_cough_ai.ino` in the Arduino IDE with the arduino-pico core selected.
-8.  Connect your Raspberry Pi Pico via USB and click **Upload**. Without the microphone it runs in test mode (see `WIRING_GUIDE.md`, "Test button").
+8.  Connect your Raspberry Pi Pico via USB and click **Upload**. The first time, hold **BOOTSEL** while plugging it in (it appears as the RPI-RP2 drive).
 9.  Mount the hardware in the bedroom and monitor the dashboard!
 
 ## Updating the ESP32 over Wi-Fi

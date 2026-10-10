@@ -149,7 +149,7 @@ The MQTT worker also answers a device's `time_request` event with the current ti
 ## 11. Testing alerts without waiting
 
 These commands are also in `docs/DEMO.md`, with the steps around them. Replace `ABC123` with the device token.
-- **Cough:** use the Pico's test button (GP2) or type `c` / `s` in its Serial Monitor (`hardware/WIRING_GUIDE.md`, "Test button").
+- **Cough:** cough or clap near the microphone, 3 times within 10 minutes (the alert rule); one sound is only logged.
 - **Device offline:** unplug the device, then:
   ```bash
   docker compose exec backend php artisan tinker --execute='App\Models\Device::where("device_token","ABC123")->update(["last_seen_at" => now()->subMinutes(31)]);'
