@@ -48,7 +48,7 @@ graph LR
     Mosquitto -- respirosync/devices/+/telemetry,events --> Worker[Laravel MQTT Worker]
     API[Laravel API] -- respirosync/devices/token/config, commands --> Mosquitto
     NextJS[Next.js Dashboard] -- REST /api --> API
-    API -- HTTP ?user_id= --> Python[Python AI Engine]
+    API -- HTTP ?device_id= / ?patient_id= --> Python[Python AI Engine]
     Worker -- SMTP --> Brevo[Brevo Email Alerts]
 ```
 

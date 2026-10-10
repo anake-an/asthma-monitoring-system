@@ -35,7 +35,7 @@ class AiOptimizeTest extends TestCase
         $this->artisan('ai:optimize')->assertSuccessful();
 
         Http::assertSentCount(1);
-        Http::assertSent(fn (Request $r) => $r['user_id'] == $alice->id);
+        Http::assertSent(fn (Request $r) => $r['device_id'] == $aliceDevice->id); // one call per room
 
         // Suggested 25, but within one day the AI may only move 10 %: 35 -> 31.5.
         $this->assertSame(31.5, HardwareConfig::forDevice($aliceDevice)->pm25_threshold);

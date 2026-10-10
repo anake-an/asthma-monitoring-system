@@ -218,7 +218,7 @@ class PatientsAndDevicesTest extends TestCase
 
         $this->artisan('ai:optimize')->assertSuccessful();
 
-        Http::assertSentCount(1); // one model per account until phase 4
+        Http::assertSentCount(2); // one prediction per room (room model + its child's risk model)
         $this->assertSame(20.0, HardwareConfig::forDevice($this->bedroom)->pm25_threshold, 'cap 20 wins');
         $this->assertSame(31.5, HardwareConfig::forDevice($this->nursery)->pm25_threshold, '35 - 10 %');
         $this->assertSame(['respirosync/devices/NUR001/config'], array_column($this->published, 0));

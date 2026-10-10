@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Brain, Activity, Clock } from "lucide-react";
+import { useRooms, withDevice } from "@/lib/rooms";
 
 type AiPrediction = {
   model_stage: string;
@@ -19,6 +20,7 @@ type AiPrediction = {
 const MODEL_NAME = { logistic_regression: "Logistic regression", random_forest: "Random forest" } as const;
 
 export default function AiRiskAssessment() {
+  const { deviceId } = useRooms(); // the room on screen: its own model
   const [prediction, setPrediction] = useState<AiPrediction | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -26,7 +28,7 @@ export default function AiRiskAssessment() {
     const fetchPrediction = async () => {
       try {
         const token = localStorage.getItem("auth_token");
-        const res = await fetch("/api/ai/predict", {
+        const res = await fetch(withDevice("/api/ai/predict", deviceId), {
           headers: {
             "Authorization": `Bearer ${token}`,
             "Accept": "application/json"
@@ -46,7 +48,7 @@ export default function AiRiskAssessment() {
     fetchPrediction();
     const interval = setInterval(fetchPrediction, 60000); // refresh every minute
     return () => clearInterval(interval);
-  }, []);
+  }, [deviceId]);
 
   if (loading) {
     return (
