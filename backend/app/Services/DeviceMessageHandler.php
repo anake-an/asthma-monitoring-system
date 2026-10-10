@@ -159,6 +159,7 @@ class DeviceMessageHandler
 
         $recentCoughs = CoughEvent::where('device_id', $device->id)
             ->where('recorded_at', '>=', $since)
+            ->notFalseAlarm() // sounds already marked as false alarms do not make a cluster
             ->count() + 1; // include this one
 
         $recentAlert = CoughEvent::where('device_id', $device->id)

@@ -45,7 +45,7 @@ function describe(e: Entry): string {
     case "device.removed": return `removed room ${d.room}`;
     case "settings.saved": return "saved Smart Alerts";
     case "dose.logged": return `logged a ${d.type === "controller" ? "daily" : "rescue"} dose`;
-    case "cough.marked": return d.verified ? (d.inhaler_used ? "confirmed a cough (inhaler used)" : "confirmed a cough") : "marked a cough as false alarm";
+    case "cough.marked": return d.verified === null || d.verified === undefined ? "undid a cough review" : d.verified ? (d.inhaler_used ? "confirmed a cough (inhaler used)" : "confirmed a cough") : "marked a cough as false alarm";
     default: return e.action;
   }
 }

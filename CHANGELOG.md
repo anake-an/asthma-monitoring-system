@@ -10,6 +10,7 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 - **Pico test mode (no microphone needed):** a push button between GP2 and GND sends a test cough to the ESP32. A short press sends a weak cough (3 within 10 minutes raise an alert); a long press sends a strong one (2 raise an alert). Typing `c` or `s` in the Pico's Serial Monitor does the same. This tests the whole path (Pico, ESP32, LCD, server, alerts) before the INMP441 is fitted. If the microphone is missing, the Pico now stays in test mode instead of stopping. The wiring guide has a layout for it.
 
 ### Fixed
+- **Reviewing coughs:** marking a cough as a false alarm now really takes it out:    - out of the Activity Log's counts and chart (the report says how many were left out);    - out of the red "cough-like sound" banner;    - out of the 3-coughs-in-10-minutes alert rule.  The review has three choices: **Inhaler**, **Real cough** (new: no dose logged) and **False alarm**. A **Change** link undoes a review, and removes the dose it logged. The emergency dose from the Inhaler choice is logged at the cough's time, not when it was reviewed.
 - **Pico: no more coughs from nothing.** Without a microphone (and briefly at power-on), the microphone's data pin picked up electrical noise that was reported as a weak cough. The firmware now pulls that line down (the INMP441 datasheet asks for this too), ignores the first 3 seconds after power-on, and needs a burst to last at least 2 blocks (32 ms; a cough lasts 200-500 ms).
 
 ## [6.1.0] - 2026-10-10
