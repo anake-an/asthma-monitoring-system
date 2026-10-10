@@ -16,7 +16,6 @@ class PatientController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-        $user->defaultPatient(); // every account has at least one patient
 
         $patients = $user->patients()->with('devices:id,patient_id,name,last_seen_at,status')->orderBy('patients.id')->get()
             ->map(fn (Patient $p) => [
