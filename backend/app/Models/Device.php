@@ -18,6 +18,9 @@ class Device extends Model
     /** No message for this long = offline (the device sends telemetry every 3 s). */
     public const OFFLINE_AFTER_SECONDS = 20;
 
+    /** Silent this long: its alert recipients get a "device offline" email and push (once per outage). */
+    public const OFFLINE_ALERT_MINUTES = 30;
+
     protected $fillable = [
         'user_id',
         'patient_id',
@@ -26,10 +29,12 @@ class Device extends Model
         'name',
         'status',
         'last_seen_at',
+        'offline_alerted_at',
     ];
 
     protected $casts = [
         'last_seen_at' => 'datetime',
+        'offline_alerted_at' => 'datetime', // set when the offline alert went out, cleared when it is back
     ];
 
     protected static function booted(): void

@@ -137,7 +137,7 @@ export default function SharePanel({ patient, onToast }: {
             disabled={busy}
             onChange={e => send("PATCH", `/api/patients/${patient.id}/alerts`, { alerts: e.target.checked }, e.target.checked ? "Alerts on" : "Alerts off")}
           />
-          Send me alerts (email and push) for {patient.name}: repeated coughing, and a reading over its limit for 5 minutes
+          Send me alerts (email and push) for {patient.name}: repeated coughing, a reading over its limit for 5 minutes, and a device offline for 30 minutes
         </label>
       )}
 

@@ -4,6 +4,9 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Added
+- **"Device offline" alert:** when a room's device has sent nothing for **30 minutes** (power cut, Wi-Fi down, unplugged), everyone who gets that child's alerts gets an email and a push. It is sent once per outage, and a "back online" push follows when the device reports again. Devices that never connected are ignored. `php artisan devices:offline-alerts` runs every 5 minutes. The "Send me alerts" switch now covers coughs, readings over a limit and offline devices.
+
 ## [6.1.0] - 2026-10-10
 
 Alerts when a reading stays over its limit, account photos and child badges, a PDF report that works in the iPhone app, and a redesigned device screen.
