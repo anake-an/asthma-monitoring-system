@@ -11,7 +11,7 @@ export type Device = {
   status: "pending" | "online" | "offline";
   device_token: string;
   patient_id: number | null; // null = shared room
-  patient: { id: number; name: string } | null;
+  patient: { id: number; name: string; color: string | null; emoji: string | null } | null;
   last_seen_at: string | null;
   can_configure: boolean;
 };
@@ -20,6 +20,8 @@ export type Patient = {
   id: number;
   name: string;
   birth_year: number | null;
+  color: string | null; // badge colour (components/ChildBadge), null: automatic
+  emoji: string | null; // badge emoji, null: the initial
   role: "owner" | "caregiver" | "viewer"; // my role for this child
   alerts: boolean; // whether I get its alerts (coughs, readings over a limit)
   devices: { id: number; name: string; status: string }[];

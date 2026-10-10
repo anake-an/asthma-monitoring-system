@@ -12,6 +12,10 @@ class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable, HasPushSubscriptions;
 
+    /** Account photo limits (AuthController::updateAvatar); the dashboard sends 256 x 256. */
+    public const AVATAR_MAX_BYTES = 150_000;
+    public const AVATAR_MAX_SIZE = 512;
+
     protected $fillable = [
         'name',
         'email',

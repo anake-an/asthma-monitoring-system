@@ -5,8 +5,9 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * The child being monitored (DESIGN_MULTI_PATIENT.md section 2). Stores a display name and an
- * optional birth year only: it is a child's health record (PDPA data minimisation).
+ * The child being monitored (DESIGN_MULTI_PATIENT.md section 2). Stores a display name, an
+ * optional birth year and a badge (colour + emoji or initial) only, never a photo: it is a child's
+ * health record (PDPA data minimisation).
  *
  * Access goes through patient_user roles and App\Policies\PatientPolicy, never ad-hoc checks.
  */
@@ -20,7 +21,13 @@ class Patient extends Model
 
     public const DEFAULT_NAME = 'My child';
 
-    protected $fillable = ['name', 'birth_year'];
+    /** Badge colours (the dashboard maps each to its own shades); null: picked from the id. */
+    public const COLORS = ['blue', 'emerald', 'amber', 'rose', 'violet', 'cyan', 'orange', 'pink'];
+
+    /** Badge emojis offered in the dashboard; null: the first letter of the name. */
+    public const EMOJIS = ['🦁', '🐼', '🐰', '🦊', '🐻', '🐱', '🐶', '🐸', '🦄', '🐧', '🐢', '🐝', '⭐', '🌈', '🚀', '⚽'];
+
+    protected $fillable = ['name', 'birth_year', 'color', 'emoji'];
 
     protected $casts = ['birth_year' => 'integer'];
 

@@ -6,8 +6,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { authHeaders, useRooms, type Patient } from "@/lib/rooms";
 import ThemedSelect, { type SelectOption } from "@/components/ThemedSelect";
+import Avatar from "@/components/Avatar";
 
-type Member = { user_id: number; name: string; email: string; role: Patient["role"]; alerts: boolean; is_me: boolean };
+type Member = { user_id: number; name: string; email: string; avatar: string | null; role: Patient["role"]; alerts: boolean; is_me: boolean };
 type Invite = { id: number; email: string; role: Patient["role"]; expires_at: string };
 type Entry = { action: string; by: string | null; details: Record<string, unknown> | null; created_at: string };
 
@@ -97,6 +98,7 @@ export default function SharePanel({ patient, onToast }: {
       <div className="space-y-2">
         {members.map(m => (
           <div key={m.user_id} className="flex items-center gap-2">
+            <Avatar name={m.name} src={m.avatar} size="sm" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-zinc-800 dark:text-zinc-200">{m.name}{m.is_me && " (you)"}</p>
               <p className="truncate text-[11px] text-zinc-500 dark:text-zinc-400">{m.email}</p>

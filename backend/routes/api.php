@@ -16,6 +16,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', function (Request $request) { return $request->user(); });
     Route::post('/user/password', [AuthController::class, 'updatePassword']);
     Route::delete('/user', [AuthController::class, 'deleteAccount']);
+    Route::put('/user/avatar', [AuthController::class, 'updateAvatar'])->middleware('throttle:10,1');
+    Route::delete('/user/avatar', [AuthController::class, 'deleteAvatar']);
     Route::post('/logout', [AuthController::class, 'logout']);
     
     Route::get('/patients', [\App\Http\Controllers\PatientController::class, 'index']);

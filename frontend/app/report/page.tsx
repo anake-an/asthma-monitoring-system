@@ -4,36 +4,12 @@ import { useEffect, useState, type ReactNode } from "react";
 import Head from "next/head";
 import { APP_VERSION } from "@/lib/version";
 import ThemedSelect from "@/components/ThemedSelect";
-
-type DailyData = {
-  date: string;
-  count: number;
-};
-
-type ReportData = {
-  patient?: { id: number; name: string }; // the child this report is about
-  start_date: string;
-  end_date: string;
-  total_events: number;
-  high_severity_events: number;
-  inhaler_doses: number;
-  rescue_doses: number;
-  controller_doses: number;
-  daily_breakdown: DailyData[];
-  daily_inhalers: { date: string; type: string; count: number }[];
-  limit_changes?: LimitChange[];
-};
-
-type LimitChange = {
-  limit_name: "pm25" | "temperature" | "humidity" | "mq135";
-  old_value: number | null;
-  new_value: number;
-  source: "ai" | "user" | "rule"; // rule: missed daily dose (15 % lower until a dose is logged)
-  reason: string | null;
-  created_at: string;
-  device_id?: number | null;
-  device_name?: string | null; // the room
-};
+import ChildBadge from "@/components/ChildBadge";
+import {
+  LIMITS_NOTE, chartMax, changeText, lastSevenDays, limitUpdates as groupLimitChanges, medicationText, observationText, whenText,
+  type ReportData,
+} from "@/lib/report";
+import { isIosHomeScreenApp, reportPdf, shareOrSave } from "@/lib/reportPdf";
 
 type PatientOption = { id: number; name: string; role: string };
 
@@ -44,8 +20,6 @@ const EXPORTS: [string, string][] = [
   ["doses", "Inhaler doses"],
   ["limits", "Alert limit changes"],
 ];
-
-const timesText = (n: number) => (n === 0 ? "0 times" : n === 1 ? "once" : `${n} times`);
 
 /** The icon in the top-right corner of a summary card; shown on screen and in the printed PDF. */
 function KpiIcon({ children, className }: { children: ReactNode; className: string }) {
@@ -58,13 +32,6 @@ function KpiIcon({ children, className }: { children: ReactNode; className: stri
   );
 }
 
-const LIMIT_LABELS:Record<LimitChange["limit_name"], { name: string; unit: string }> = {
-  pm25: { name: "PM2.5 dust", unit: " µg/m³" },
-  temperature: { name: "Temperature", unit: "°C" },
-  humidity: { name: "Humidity", unit: "%" },
-  mq135: { name: "Gas", unit: " ppm" },
-};
-
 export default function ReportPage() {
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -73,6 +40,11 @@ export default function ReportPage() {
   const [patientsLoaded, setPatientsLoaded] = useState(false);
   const [patientId, setPatientId] = useState<number | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
+  // iPhone/iPad Home Screen app: window.print() does nothing there, so the button shares a PDF made
+  // in advance (lib/reportPdf); the share sheet has to open straight from the tap.
+  const [iosApp, setIosApp] = useState(false);
+  const [pdf, setPdf] = useState<File | null>(null);
+  const [pdfFailed, setPdfFailed] = useState(false);
 
   // The API needs the bearer token, which a plain link cannot send: fetch the file, then save it.
   const download = async (kind: string) => {
@@ -84,6 +56,11 @@ export default function ReportPage() {
       });
       if (!res.ok) throw new Error(String(res.status));
       const name = /filename="?([^";]+)"?/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? `respirosync-${kind}.csv`;
+      if (iosApp) {
+        // The Home Screen app has no downloads bar: hand the file to the share sheet (Save to Files...).
+        await shareOrSave(new File([await res.blob()], name, { type: "text/csv" }));
+        return;
+      }
       const url = URL.createObjectURL(await res.blob());
       const a = document.createElement("a");
       a.href = url;
@@ -134,6 +111,19 @@ export default function ReportPage() {
     fetchReport();
   }, [patientId]);
 
+  useEffect(() => { setIosApp(isIosHomeScreenApp()); }, []);
+
+  useEffect(() => {
+    if (!iosApp || !data) return;
+    let current = true;
+    setPdf(null);
+    setPdfFailed(false);
+    reportPdf(data)
+      .then(file => { if (current) setPdf(file); })
+      .catch(() => { if (current) setPdfFailed(true); });
+    return () => { current = false; };
+  }, [iosApp, data]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-[#09090b] text-zinc-600 dark:text-zinc-400">
@@ -162,43 +152,16 @@ export default function ReportPage() {
     );
   }
 
-  // Ensure we have 7 days of data for the chart even if some days are missing
-  const last7Days = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    // Local calendar date (the API groups by the server's local date, not UTC)
-    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const foundCough = data.daily_breakdown.find(b => b.date === dateStr);
-    const rescueCount = data.daily_inhalers?.find(b => b.date === dateStr && b.type === 'rescue')?.count || 0;
-    const controllerCount = data.daily_inhalers?.find(b => b.date === dateStr && b.type === 'controller')?.count || 0;
-    
-    last7Days.push({
-      date: dateStr,
-      display_day: d.toLocaleDateString([], { weekday: 'short' }),
-      display_date: d.toLocaleDateString([], { month: 'short', day: 'numeric' }),
-      cough_count: foundCough ? foundCough.count : 0,
-      rescue_count: rescueCount,
-      controller_count: controllerCount,
-      inhaler_total: rescueCount + controllerCount
-    });
-  }
+  // The same numbers as the PDF (lib/report).
+  const last7Days = lastSevenDays(data);
+  const maxCount = chartMax(last7Days); // at least 10 for scale
+  const { updates: limitUpdates, severalRooms } = groupLimitChanges(data);
 
-  const maxCount = Math.max(...last7Days.flatMap(d => [d.cough_count, d.inhaler_total]), 10); // at least 10 for scale
-
-  // One line per update: the rows of one AI run or one Smart Alerts save share room, time, source and reason.
-  const limitOrder = Object.keys(LIMIT_LABELS);
-  const limitUpdates: { created_at: string; device_name: string | null; source: LimitChange["source"]; reason: string | null; changes: LimitChange[] }[] = [];
-  const severalRooms = new Set((data.limit_changes ?? []).map(c => c.device_id)).size > 1;
-  for (const c of data.limit_changes ?? []) {
-    const last = limitUpdates[limitUpdates.length - 1];
-    if (last && last.created_at === c.created_at && last.device_name === (c.device_name ?? null) && last.source === c.source && last.reason === c.reason) {
-      last.changes.push(c);
-    } else {
-      limitUpdates.push({ created_at: c.created_at, device_name: c.device_name ?? null, source: c.source, reason: c.reason, changes: [c] });
-    }
-  }
-  limitUpdates.forEach(u => u.changes.sort((a, b) => limitOrder.indexOf(a.limit_name) - limitOrder.indexOf(b.limit_name)));
+  // Print where the browser can; in the iPhone app, share the PDF made in advance.
+  const printOrShare = () => {
+    if (!iosApp) { setTimeout(() => window.print(), 300); return; }
+    if (pdf) shareOrSave(pdf);
+  };
 
   return (
     <div className="bg-gray-50 dark:bg-[#09090b] print:bg-white min-h-screen text-zinc-900 dark:text-zinc-100 print:text-black font-sans transition-all selection:bg-blue-500/30 print:min-h-0 print:h-auto print:overflow-visible">
@@ -218,10 +181,19 @@ export default function ReportPage() {
           <h2 className="text-sm font-semibold tracking-wide">Activity Log View</h2>
         </div>
         <div className="flex items-center gap-4">
-          <p className="text-xs text-zinc-600 dark:text-zinc-400 hidden sm:block">Press <kbd className="font-mono bg-zinc-200 dark:bg-white/10 px-1.5 py-0.5 rounded text-zinc-700 dark:text-zinc-300">Ctrl + P</kbd> to save as PDF</p>
-          <button onClick={() => setTimeout(() => window.print(), 300)} className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-zinc-900 dark:text-white rounded-full text-xs font-semibold tracking-wide transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
-            Print PDF
+          {!iosApp && <p className="text-xs text-zinc-600 dark:text-zinc-400 hidden sm:block">Press <kbd className="font-mono bg-zinc-200 dark:bg-white/10 px-1.5 py-0.5 rounded text-zinc-700 dark:text-zinc-300">Ctrl + P</kbd> to save as PDF</p>}
+          <button
+            onClick={printOrShare}
+            disabled={iosApp && !pdf}
+            title={iosApp ? "Opens the share sheet: Print, Save to Files, Mail..." : undefined}
+            className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-zinc-900 dark:text-white rounded-full text-xs font-semibold tracking-wide transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-60"
+          >
+            {iosApp ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" y1="2" x2="12" y2="15"></line></svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+            )}
+            {!iosApp ? "Print PDF" : pdf ? "Share PDF" : pdfFailed ? "PDF failed" : "Preparing PDF..."}
           </button>
         </div>
       </div>
@@ -252,7 +224,10 @@ export default function ReportPage() {
             </div>
             <div className="mt-6 md:mt-0 text-left md:text-right bg-zinc-100 dark:bg-white/5 print:bg-transparent px-5 py-4 rounded-2xl border border-zinc-200 dark:border-white/5 print:border-none print:p-0">
               <p className="text-sm text-zinc-600 dark:text-zinc-400 print:text-zinc-600 dark:text-zinc-400 uppercase tracking-widest mb-1 font-medium text-[10px]">Child</p>
-              <p className="text-lg font-medium text-zinc-900 dark:text-zinc-100 print:text-black">{data.patient?.name ?? "My child"}</p>
+              <p className="text-lg font-medium text-zinc-900 dark:text-zinc-100 print:text-black flex items-center gap-2 md:justify-end">
+                {data.patient && <ChildBadge child={data.patient} />}
+                {data.patient?.name ?? "My child"}
+              </p>
               {patients.length > 1 && (
                 <div className="print:hidden mt-2 flex md:justify-end">
                   <ThemedSelect
@@ -394,7 +369,7 @@ export default function ReportPage() {
           <div className="mb-12 bg-zinc-100 dark:bg-white/5 print:bg-transparent border border-zinc-300 dark:border-white/10 print:border-none rounded-2xl p-8 print:p-0 relative z-10">
             <h2 className="text-lg font-semibold text-zinc-900 dark:text-white print:text-black mb-1">Alert Limit Changes</h2>
             <p className="text-xs text-zinc-600 dark:text-zinc-400 print:text-gray-600 mb-6">
-              The AI may lower a limit below your own value, never raise it above, and changes each limit at most once a day (by up to 10 %). Rule: when a daily dose is missed, limits are 15 % lower until one is logged.
+              {LIMITS_NOTE}
             </p>
             {limitUpdates.length > 0 ? (
               <div className="overflow-x-auto">
@@ -411,18 +386,16 @@ export default function ReportPage() {
                     {limitUpdates.map((u, i) => (
                       <tr key={i} className="border-t border-zinc-300 dark:border-white/10 print:border-gray-200 text-zinc-700 dark:text-zinc-300 print:text-gray-700 align-top print:break-inside-avoid">
                         <td className="py-2.5 pr-4 font-mono text-xs whitespace-nowrap">
-                          {new Date(u.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          {whenText(u.created_at)}
                         </td>
                         <td className="py-2.5 pr-4">
                           {severalRooms && u.device_name && <div className="text-[10px] uppercase tracking-wider text-zinc-500 dark:text-zinc-400 print:text-gray-500">{u.device_name}</div>}
                           {u.changes.map(c => {
-                            const label = LIMIT_LABELS[c.limit_name] ?? { name: c.limit_name, unit: "" };
+                            const change = changeText(c);
                             return (
                               <div key={c.limit_name} className="whitespace-nowrap">
-                                {label.name}{" "}
-                                <span className="font-medium text-zinc-900 dark:text-white print:text-black">
-                                  {c.old_value === null ? "" : `${c.old_value}${label.unit} → `}{c.new_value}{label.unit}
-                                </span>
+                                {change.name}{" "}
+                                <span className="font-medium text-zinc-900 dark:text-white print:text-black">{change.value}</span>
                               </div>
                             );
                           })}
@@ -459,13 +432,12 @@ export default function ReportPage() {
               <div className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-300 print:text-gray-700 space-y-4">
                 <p>
                   <strong className="text-zinc-900 dark:text-white print:text-black font-semibold block mb-1">Observation:</strong> 
-                  During this reporting period, the device recorded {data.total_events} cough-like sounds (a loudness detector, not a diagnosis), of which {data.high_severity_events} met the alert rule (3 within 10 minutes, or 2 with a strong detection).
+                  {observationText(data)}
                 </p>
                 <p>
                   <strong className="text-zinc-900 dark:text-white print:text-black font-semibold block mb-1">Medication Log:</strong>
                   {/* Facts only: the app does not judge asthma control or suggest treatment changes. */}
-                  The emergency (blue) inhaler was logged {timesText(data.rescue_doses)} and the daily (brown) inhaler {timesText(data.controller_doses)} in these 7 days.
-                  {" "}This log records usage only and is not a medical assessment; show it to your doctor, especially if usage has changed.
+                  {medicationText(data)}
                 </p>
               </div>
             </div>

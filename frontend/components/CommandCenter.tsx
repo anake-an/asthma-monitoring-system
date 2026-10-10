@@ -1,10 +1,11 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GAS_NOTE, GAS_DEFAULT_LIMIT_PPM } from "@/lib/gas";
 import { authHeaders, roomLabel, useRooms, withDevice } from "@/lib/rooms";
 import ChildrenAndRooms from "@/components/ChildrenAndRooms";
 import PushSettings from "@/components/PushSettings";
 import { disablePush } from "@/lib/push";
+import Avatar, { photoToAvatar } from "@/components/Avatar";
 
 export default function CommandCenter() {
   // In Smart Alerts each *_threshold is the user's own value (the cap): the AI may lower the effective
@@ -28,7 +29,9 @@ export default function CommandCenter() {
   // Modal State
   const [showModal, setShowModal] = useState(false);
   const [showAccountModal, setShowAccountModal] = useState(false);
-  const [user, setUser] = useState<{name: string, email: string, created_at: string} | null>(null);
+  const [user, setUser] = useState<{name: string, email: string, created_at: string, avatar?: string | null} | null>(null);
+  const [savingPhoto, setSavingPhoto] = useState(false);
+  const photoInput = useRef<HTMLInputElement>(null);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -69,6 +72,35 @@ export default function CommandCenter() {
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3500);
+  };
+
+  // Account photo: resized to 256 px in the browser (components/Avatar), then saved; null removes it.
+  const savePhoto = async (file: File | null) => {
+    setSavingPhoto(true);
+    try {
+      let avatar: string | null = null;
+      if (file) {
+        try {
+          avatar = await photoToAvatar(file);
+        } catch {
+          throw new Error("This photo could not be read. Try a JPEG or PNG.");
+        }
+      }
+      const res = await fetch("/api/user/avatar", {
+        method: avatar ? "PUT" : "DELETE",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: avatar ? JSON.stringify({ avatar }) : undefined,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || "The photo could not be saved");
+      setUser(u => (u ? { ...u, avatar: data.avatar ?? null } : u));
+      showToast(avatar ? "Photo saved" : "Photo removed", "success");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Error connecting to server", "error");
+    } finally {
+      setSavingPhoto(false);
+      if (photoInput.current) photoInput.current.value = ""; // the same file can be chosen again
+    }
   };
 
   // The chosen room's limits (again whenever another room is picked).
@@ -471,9 +503,7 @@ export default function CommandCenter() {
             
             <div className="px-6 py-5 border-b border-zinc-200 dark:border-white/10 flex justify-between items-center bg-zinc-50/50 dark:bg-white/5">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-500/20 flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold">
-                  {user.name.charAt(0).toUpperCase()}
-                </div>
+                <Avatar name={user.name} src={user.avatar} />
                 <div>
                   <h3 className="font-semibold text-lg text-zinc-900 dark:text-white leading-tight">Account Settings</h3>
                   <p className="text-[11px] text-zinc-500 dark:text-zinc-400">{user.email}</p>
@@ -492,8 +522,38 @@ export default function CommandCenter() {
               {/* Profile Details */}
               <div>
                 <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-3 uppercase tracking-wider">Profile</h4>
-                <div className="bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/5 rounded-xl p-4 flex justify-between items-center">
-                  <div>
+                <div className="bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/5 rounded-xl p-4 flex items-center gap-4">
+                  {/* Photo: tap to choose one (camera roll or files); shown to people you share a child with */}
+                  <div className="flex flex-col items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => photoInput.current?.click()}
+                      disabled={savingPhoto}
+                      aria-label={user.avatar ? "Change photo" : "Add a photo"}
+                      className="relative rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
+                    >
+                      <Avatar name={user.name} src={user.avatar} size="xl" />
+                      <span className="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center border-2 border-zinc-50 dark:border-[#12121e]" aria-hidden="true">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                      </span>
+                    </button>
+                    <input
+                      ref={photoInput}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={e => { const f = e.target.files?.[0]; if (f) savePhoto(f); }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => (user.avatar ? savePhoto(null) : photoInput.current?.click())}
+                      disabled={savingPhoto}
+                      className="text-[10px] uppercase tracking-wider font-semibold text-blue-500 hover:text-blue-600 disabled:opacity-50"
+                    >
+                      {savingPhoto ? "Saving..." : user.avatar ? "Remove" : "Add photo"}
+                    </button>
+                  </div>
+                  <div className="min-w-0">
                     <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-1">Full Name</p>
                     <p className="font-medium text-zinc-900 dark:text-zinc-200 mb-4">{user.name}</p>
                     <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-1">Joined</p>

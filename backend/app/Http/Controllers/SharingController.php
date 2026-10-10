@@ -31,6 +31,7 @@ class SharingController extends Controller
                 'user_id' => $u->id,
                 'name' => $u->name,
                 'email' => $u->email,
+                'avatar' => $u->avatar, // account photo, so members can tell each other apart
                 'role' => $u->pivot->role,
                 'alerts' => (bool) $u->pivot->alerts,
                 'is_me' => (int) $u->id === (int) $user->id,
