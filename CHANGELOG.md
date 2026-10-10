@@ -4,6 +4,9 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Added
+- **Pico test mode (no microphone needed):** a push button between GP2 and GND sends a test cough to the ESP32. A short press sends a weak cough (3 within 10 minutes raise an alert); a long press sends a strong one (2 raise an alert). Typing `c` or `s` in the Pico's Serial Monitor does the same. This tests the whole path (Pico, ESP32, LCD, server, alerts) before the INMP441 is fitted. If the microphone is missing, the Pico now stays in test mode instead of stopping. The wiring guide has a layout for it.
+
 ## [6.1.0] - 2026-10-10
 
 Alerts when a reading stays over its limit, account photos and child badges, a PDF report that works in the iPhone app, and a redesigned device screen.
