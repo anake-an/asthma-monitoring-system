@@ -55,4 +55,16 @@ assert level == 0.8 and limits == {
 }, (level, limits)
 assert limits == main.respect_room_normal(limits, ROOM), "very unusual = the top of the normal range, not below"
 
+# Gas learned (C6 follow-up): a room usually at 500 +/- 100 ppm gets mean + 3 std = 800 ppm instead of 1000;
+# "very unusual" goes to mean + 2 std = 700. A gas reading alone can make the room unusual.
+gas_room = dict(ROOM, mq135_level_mean=500.0, mq135_level_std=100.0)
+assert main.room_limits(gas_room)["mq135_threshold"] == 800.0, main.room_limits(gas_room)
+assert main.room_normal_limits(gas_room)["mq135_threshold"] == 700.0
+level, limits = main.stage1(gas_room, pm25=3.0, temp=30.5, hum=70.0, gas=780.0)  # gas 2.8 std above usual
+assert level == 0.8 and limits["mq135_threshold"] == 700.0, (level, limits)
+level, _ = main.stage1(gas_room, pm25=3.0, temp=30.5, hum=70.0, gas=None)  # no gas reading right now
+assert level == 0.1
+# A clean room never pushes the gas limit below the 700 ppm floor.
+assert main.room_limits(dict(ROOM, mq135_level_mean=430.0, mq135_level_std=50.0))["mq135_threshold"] == 700.0
+
 print("respect_room_normal, room_limits, stage1: all checks passed")
