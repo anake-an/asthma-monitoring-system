@@ -103,7 +103,9 @@ asthma-monitoring-system/
 | Document | What it covers |
 |---|---|
 | [`docs/PROJECT_EXPLANATION.md`](docs/PROJECT_EXPLANATION.md) | How each component works, the alert rule and the AI, with their limits |
-| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Health checks, backups, resets, device factory reset, running the tests |
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Health checks, backups, resets, device factory reset, scheduled tasks, testing alerts, running the tests |
+| [`docs/DEMO.md`](docs/DEMO.md) | A 12-minute demo script, with commands to trigger the slow alerts on the spot |
+| [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) | Architecture, alert, AI, device and LCD diagrams (Mermaid) for the report and slides |
 | [`hardware/README.md`](hardware/README.md) | Firmware setup and the edge cough-classifier roadmap |
 | [`hardware/WIRING_GUIDE.md`](hardware/WIRING_GUIDE.md) | Pin-by-pin wiring, including the voltage dividers |
 

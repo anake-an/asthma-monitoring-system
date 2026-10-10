@@ -20,7 +20,13 @@ How the hardware, AI, backend and frontend fit together, what each part really d
     *   Reads the sensors every 3 s and publishes them to `respirosync/devices/<token>/telemetry`. Dust and gas are averaged over the last 4 readings (~12 s); the same smoothed values drive the local alarm, so the device and dashboard agree. A failed DHT22 read is sent as `null`, never as 0. Gas is an estimated CO₂-equivalent ppm (MQ-135 datasheet curve, calibrated against the cleanest air seen since power-on taken as 420 ppm), not a measured CO₂ value.
     *   Forwards each Pico detection to `respirosync/devices/<token>/events`.
     *   Receives its owner's thresholds on `respirosync/devices/<token>/config` (a retained message, so they arrive again after every reconnect) and sounds the buzzer/red LED when a reading crosses a threshold. This works offline too, using the last thresholds received. The dashboard can mute the buzzer.
-    *   Obeys `factory_reset`, `buzzer_on` and `buzzer_off` on `respirosync/devices/<token>/commands`.
+    *   Obeys `factory_reset`, `buzzer_on`, `buzzer_off` and `set_time` on `respirosync/devices/<token>/commands`.
+    *   **LCD:** every line is centred.
+        *   Start-up steps, then pages every 5 s: Air quality, Room climate, the clock, and "Daily dose?" while one is due.
+        *   Alerts and coughs interrupt the pages; night mode switches the backlight off from 21:00 to 07:00.
+        *   The gas sensor is not read for its first 3 minutes (warm-up).
+        *   The clock comes from NTP, or from the server over MQTT where NTP is blocked.
+        *   The firmware can be updated over Wi-Fi (ArduinoOTA).
 *   **Code:** `hardware/esp32_firmware/esp32_firmware.ino` (credentials in a gitignored `secrets.h`).
 
 ---
@@ -50,6 +56,10 @@ The Pico heuristic above. It produces candidate events and a strength value; it 
 ### ⚙️ Laravel 12
 *   **MQTT worker:** `app/Console/Commands/MqttSubscribe.php` subscribes to `respirosync/devices/+/telemetry` and `/events` and hands each message to `app/Services/DeviceMessageHandler.php`. Device identity comes from the topic, never from the payload.
 *   **Alert rule:** a cough raises an alert when there are **3 coughs in 10 minutes**, or **2 coughs in 10 minutes where this one has strength ≥ 0.8**. A single loud sound never alerts on its own. At most **one email per device per 10 minutes**. A mail failure is logged and never stops the worker.
+*   **Other alerts (email + push, same recipients):**
+    *   **A reading over its room's limit for 5 minutes**, at most once an hour per reading (`DeviceMessageHandler::checkLimits`).
+    *   **A device silent for 30 minutes**, once per outage, with a "back online" push afterwards (`devices:offline-alerts`).
+    *   **On the LCD only:** "Daily dose?" while a child's daily dose is overdue (`devices:dose-reminders`).
 *   **Alert email:** `resources/views/emails/cough_alert.blade.php` shows the cough count and the device-reported strength, or "Not reported by device". It never shows an invented confidence.
 *   **Patients, rooms and access:** a **patient** (the child: display name, optional birth year) is separate from the login; `patient_user` gives each account a role (owner now; caregiver and viewer with sharing). A **device** is a room: it belongs to one child or is a **shared room** (coughs shown, never counted for a child). Alert limits (`hardware_configs`) are **per device**; inhaler doses (`inhaler_logs.patient_id`) are per child; telemetry and coughs come from the device. Every API call resolves its `device_id` / `patient_id` through one check (`AppPoliciesDevicePolicy`, `PatientPolicy`, `Controller::device()` / `::patient()`): anything not yours is a 404. Devices record `last_seen_at` on every message; online = a message in the last 20 s.
 *   **REST API:** `routes/api.php`, protected by Sanctum tokens.
