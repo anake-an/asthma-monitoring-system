@@ -16,6 +16,9 @@ Route::post('/reset-password', [\App\Http\Controllers\PasswordResetController::c
 Route::get('/firmware/{release}/download', [\App\Http\Controllers\FirmwareController::class, 'download'])
     ->middleware(['signed:relative', 'throttle:20,1'])->name('firmware.download');
 
+// A new ESP32 build from CI (key in FIRMWARE_UPLOAD_TOKEN; off without it).
+Route::post('/firmware/upload', [\App\Http\Controllers\FirmwareController::class, 'upload'])->middleware('throttle:10,1');
+
 // Protected routes
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', function (Request $request) { return $request->user(); });
