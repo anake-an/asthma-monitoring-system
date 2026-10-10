@@ -65,7 +65,7 @@ class DeviceController extends Controller
     {
         $user = $request->user();
         $devices = $user->accessibleDevices()
-            ->with('patient:id,name')
+            ->with('patient:id,name,color,emoji')
             ->orderByRaw('last_seen_at IS NULL')->orderByDesc('last_seen_at')->orderByDesc('created_at')
             ->get()
             ->map(fn (Device $d) => $d->toArray() + ['can_configure' => $user->can('configure', $d)]);
@@ -91,7 +91,7 @@ class DeviceController extends Controller
 
         $before = ['name' => $device->name, 'patient' => $device->patient?->name, 'patient_id' => $device->patient_id];
         $device->update($validated);
-        $device->load('patient:id,name');
+        $device->load('patient:id,name,color,emoji');
 
         if ($device->name !== $before['name']) {
             AuditLog::record($request->user(), 'device.renamed', $device->patient_id, $device->id, ['from' => $before['name'], 'to' => $device->name]);
@@ -104,7 +104,7 @@ class DeviceController extends Controller
             }
         }
 
-        return response()->json($device->fresh()->load('patient:id,name'));
+        return response()->json($device->fresh()->load('patient:id,name,color,emoji'));
     }
 
     public function deleteDevice(Request $request, Mqtt $mqtt, $id)

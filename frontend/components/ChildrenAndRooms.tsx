@@ -7,6 +7,7 @@ import { useState } from "react";
 import { authHeaders, useRooms, type Device } from "@/lib/rooms";
 import SharePanel from "@/components/SharePanel";
 import ThemedSelect from "@/components/ThemedSelect";
+import ChildBadge, { BADGE_COLORS, BADGE_EMOJIS, BADGE_STYLES, badgeColor, type BadgeColor } from "@/components/ChildBadge";
 
 type Confirm = { title: string; message: string; isDanger: boolean; onConfirm: () => void };
 
@@ -39,6 +40,7 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
   const [pairingToken, setPairingToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [openShare, setOpenShare] = useState<number | null>(null); // child whose sharing panel is open
+  const [openBadge, setOpenBadge] = useState<number | null>(null); // child whose badge picker is open
   const sharedWithMe = patients.filter(p => p.role !== "owner");
   // Pairing is for your own children: shown when you own one, or have no children at all yet
   // (pairing then creates "My child"). Someone who only sees shared children cannot pair for them.
@@ -107,7 +109,7 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
       {/* Children */}
       <div>
         <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-1 uppercase tracking-wider">Children</h4>
-        <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mb-3">Each child has their own rooms, doses and report. Only a name is stored.</p>
+        <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mb-3">Each child has their own rooms, doses and report. Only a name and a badge are stored, never a photo; tap the badge to change it.</p>
         <div className="bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/5 rounded-xl p-4 space-y-3">
           {owned.length === 0 && (
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -119,6 +121,16 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
           {owned.map(p => (
             <div key={p.id}>
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOpenBadge(openBadge === p.id ? null : p.id)}
+                  aria-label={`Badge of ${p.name}`}
+                  aria-expanded={openBadge === p.id}
+                  title="Colour and emoji"
+                  className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                >
+                  <ChildBadge child={p} size="md" />
+                </button>
                 {nameField(`p${p.id}`, p.name, `/api/patients/${p.id}`, 60)}
                 <span className="text-[11px] text-zinc-500 dark:text-zinc-400 shrink-0 w-16 text-right">
                   {p.devices.length} room{p.devices.length === 1 ? "" : "s"}
@@ -143,6 +155,44 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
                   Delete
                 </button>
               </div>
+              {openBadge === p.id && (
+                <div className="mt-2 p-3 rounded-lg border border-zinc-200 dark:border-white/10 bg-white dark:bg-zinc-900 space-y-3">
+                  <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={`Colour for ${p.name}`}>
+                    {BADGE_COLORS.map(c => (
+                      <button
+                        key={c}
+                        type="button"
+                        role="radio"
+                        aria-checked={badgeColor(p) === c}
+                        aria-label={c}
+                        disabled={busy}
+                        onClick={() => act(() => send("PATCH", `/api/patients/${p.id}`, { color: c as BadgeColor }), "Badge saved")}
+                        className={`w-7 h-7 rounded-full ${BADGE_STYLES[c].swatch} disabled:opacity-50 ${badgeColor(p) === c ? "ring-2 ring-offset-2 ring-zinc-900 dark:ring-white ring-offset-white dark:ring-offset-zinc-900" : ""}`}
+                      />
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-6 sm:grid-cols-9 gap-1.5" role="radiogroup" aria-label={`Emoji for ${p.name}`}>
+                    {[null, ...BADGE_EMOJIS].map(e => {
+                      const chosen = (p.emoji ?? null) === e;
+                      return (
+                        <button
+                          key={e ?? "initial"}
+                          type="button"
+                          role="radio"
+                          aria-checked={chosen}
+                          aria-label={e ?? "First letter of the name"}
+                          title={e ? undefined : "First letter of the name"}
+                          disabled={busy}
+                          onClick={() => act(() => send("PATCH", `/api/patients/${p.id}`, { emoji: e }), "Badge saved")}
+                          className={`h-9 rounded-lg flex items-center justify-center text-lg disabled:opacity-50 ${chosen ? "bg-blue-100 dark:bg-blue-500/20 ring-1 ring-blue-500" : "hover:bg-zinc-100 dark:hover:bg-white/10"}`}
+                        >
+                          {e ?? <ChildBadge child={{ ...p, emoji: null }} size="sm" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {openShare === p.id && <SharePanel patient={p} onToast={onToast} />}
             </div>
           ))}
@@ -170,6 +220,7 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
             {sharedWithMe.map(p => (
               <div key={p.id}>
                 <div className="flex items-center gap-2">
+                  <ChildBadge child={p} />
                   <span className="flex-1 text-sm text-zinc-800 dark:text-zinc-200 truncate">{p.name}</span>
                   <span className="text-[11px] capitalize text-zinc-500 dark:text-zinc-400 shrink-0">{p.role}</span>
                   <button

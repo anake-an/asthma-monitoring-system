@@ -96,6 +96,42 @@ class AuthController extends Controller
         ]);
     }
 
+    /**
+     * Set the account photo: a data URL of a JPEG, PNG or WebP image the dashboard has already
+     * cropped and resized to 256 px (which also drops the photo's location data). The image is
+     * checked for real here; SVG is refused because it can carry scripts.
+     */
+    public function updateAvatar(Request $request)
+    {
+        $request->validate(['avatar' => 'required|string|max:' . (int) ceil(User::AVATAR_MAX_BYTES * 4 / 3 + 32)]);
+
+        $invalid = fn () => response()->json(['message' => 'Choose a JPEG, PNG or WebP photo.'], 422);
+        if (!preg_match('#^data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$#', $request->avatar, $m)) {
+            return $invalid();
+        }
+        $bytes = base64_decode($m[2], true);
+        if ($bytes === false || strlen($bytes) > User::AVATAR_MAX_BYTES) {
+            return $invalid();
+        }
+        $info = @getimagesizefromstring($bytes);
+        if (!$info || $info['mime'] !== "image/{$m[1]}" || $info[0] < 1 || $info[1] < 1
+            || $info[0] > User::AVATAR_MAX_SIZE || $info[1] > User::AVATAR_MAX_SIZE) {
+            return $invalid();
+        }
+
+        $user = $request->user();
+        $user->forceFill(['avatar' => $request->avatar])->save();
+
+        return response()->json(['avatar' => $user->avatar]);
+    }
+
+    public function deleteAvatar(Request $request)
+    {
+        $request->user()->forceFill(['avatar' => null])->save();
+
+        return response()->json(['avatar' => null]);
+    }
+
     public function deleteAccount(Request $request)
     {
         $user = $request->user();

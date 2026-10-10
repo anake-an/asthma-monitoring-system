@@ -6,10 +6,11 @@ use App\Models\AuditLog;
 use App\Models\Patient;
 use App\Support\AiEngine;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 /**
- * Patients (children) this user can see. Only a display name and an optional birth year are
- * stored (PDPA data minimisation). Changes need "manage" (PatientPolicy, owner only).
+ * Patients (children) this user can see. Only a display name, an optional birth year and a badge
+ * (colour + emoji) are stored (PDPA data minimisation). Changes need "manage" (PatientPolicy, owner only).
  */
 class PatientController extends Controller
 {
@@ -22,6 +23,8 @@ class PatientController extends Controller
                 'id' => $p->id,
                 'name' => $p->name,
                 'birth_year' => $p->birth_year,
+                'color' => $p->color,
+                'emoji' => $p->emoji,
                 'role' => $p->pivot->role,
                 'alerts' => (bool) $p->pivot->alerts, // my own cough alerts for this child
                 'devices' => $p->devices->map->only(['id', 'name', 'status'])->values(),
@@ -78,6 +81,9 @@ class PatientController extends Controller
         return $request->validate([
             'name' => "{$required}|string|max:60",
             'birth_year' => 'sometimes|nullable|integer|min:1990|max:' . now()->year,
+            // The badge: a colour and an emoji from fixed lists (null = automatic colour / initial).
+            'color' => ['sometimes', 'nullable', Rule::in(Patient::COLORS)],
+            'emoji' => ['sometimes', 'nullable', Rule::in(Patient::EMOJIS)],
         ]);
     }
 }

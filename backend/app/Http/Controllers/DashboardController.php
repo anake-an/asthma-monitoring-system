@@ -186,7 +186,7 @@ class DashboardController extends Controller
         $controllerDoses = $inhalers()->where('type', 'controller')->count();
 
         return response()->json([
-            'patient' => ['id' => $patient->id, 'name' => $patient->name],
+            'patient' => ['id' => $patient->id, 'name' => $patient->name, 'color' => $patient->color, 'emoji' => $patient->emoji],
             'start_date' => $startDate->toDateString(),
             'end_date' => now()->toDateString(),
             'total_events' => $coughs()->count(),

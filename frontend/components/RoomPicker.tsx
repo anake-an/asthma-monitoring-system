@@ -5,6 +5,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useRooms, type Device } from "@/lib/rooms";
+import ChildBadge from "@/components/ChildBadge";
 
 const STATUS: Record<string, { dot: string; text: string }> = {
   online: { dot: "bg-emerald-500", text: "Online" },
@@ -51,12 +52,12 @@ export default function RoomPicker() {
   };
 
   // Rooms grouped by child, in the order the API gives them (most recently seen first).
-  const groups: { child: string; rooms: Device[] }[] = [];
+  const groups: { child: string; patient: Device["patient"]; rooms: Device[] }[] = [];
   for (const d of devices) {
     const child = d.patient ? d.patient.name : "Shared rooms";
     const group = groups.find(g => g.child === child);
     if (group) group.rooms.push(d);
-    else groups.push({ child, rooms: [d] });
+    else groups.push({ child, patient: d.patient, rooms: [d] });
   }
   const childNames = groups.length > 1;
   const ordered = groups.flatMap(g => g.rooms); // the order shown, which the arrow keys follow
@@ -82,7 +83,7 @@ export default function RoomPicker() {
         <span className={`w-2 h-2 rounded-full shrink-0 ${statusOf(device).dot}`} title={statusOf(device).text} />
         <span className="flex-1 min-w-0 truncate text-left">
           {device.name}
-          {device.patient && <span className="text-zinc-500 dark:text-zinc-400"> · {device.patient.name}</span>}
+          {device.patient && <span className="text-zinc-500 dark:text-zinc-400"> · <ChildBadge child={device.patient} size="xs" className="align-[-3px] mr-1" />{device.patient.name}</span>}
         </span>
         {several && (
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 opacity-60 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true">
@@ -104,7 +105,10 @@ export default function RoomPicker() {
           {groups.map(g => (
             <li key={g.child} role="presentation">
               {childNames && (
-                <p className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">{g.child}</p>
+                <p className="flex items-center gap-1.5 px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                  {g.patient && <ChildBadge child={g.patient} size="xs" />}
+                  {g.child}
+                </p>
               )}
               <ul role="presentation">
                 {g.rooms.map(d => {
