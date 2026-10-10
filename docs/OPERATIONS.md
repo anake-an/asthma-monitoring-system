@@ -47,6 +47,18 @@ Removes all telemetry, coughs and inhaler logs for every account. Deleted in thi
 docker compose exec backend php artisan tinker --execute="DB::table('inhaler_logs')->delete(); DB::table('cough_events')->delete(); DB::table('telemetry_logs')->delete();"
 ```
 
+### Automatic retention (nightly, 03:30)
+
+`php artisan telemetry:prune` runs every night (scheduler container). Sensor readings only; coughs, doses, limit changes and the audit log are never touched.
+
+| Age | Kept as |
+|---|---|
+| last 7 days | every reading (one every 3 s) |
+| 7 days to 1 year | one average per device per 10 minutes (`samples` = how many readings it replaced) |
+| older than 1 year | deleted |
+
+The AI averages readings into the same 10-minute windows before it learns, so the averages train it the same way. Run it by hand with `docker compose exec backend php artisan telemetry:prune`; running it twice changes nothing. The numbers are `RAW_DAYS`, `BUCKET_MINUTES` and `KEEP_DAYS` in `backend/app/Models/TelemetryLog.php`.
+
 ---
 
 ## 4. Rebuild the database from zero
