@@ -134,7 +134,7 @@ export default function CommandCenter() {
     setConfirmAction({
       isOpen: true,
       title: "Permanently Delete Account",
-      message: "DANGER: Are you absolutely sure you want to PERMANENTLY delete your account and all associated medical data? This action is irreversible.",
+      message: "DANGER: Are you absolutely sure you want to PERMANENTLY delete your account and all associated health data? This action is irreversible.",
       isDanger: true,
       onConfirm: () => deleteAccount(false),
     });
@@ -561,7 +561,7 @@ export default function CommandCenter() {
                 </h4>
                 <div className="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl p-4">
                   <p className="text-xs text-red-600 dark:text-red-400 mb-4">
-                    Permanently delete your account and all associated medical data in accordance with the PDPA Right to Erasure. This action cannot be undone.
+                    Permanently delete your account and all associated health data in accordance with the PDPA Right to Erasure. This action cannot be undone.
                   </p>
                   <button 
                     onClick={handleDeleteAccount}

@@ -24,7 +24,18 @@ class CoughAlertMail extends Mailable
                 'windowMinutes' => \App\Services\DeviceMessageHandler::WINDOW_MINUTES,
                 // Pico detection strength (heuristic 0..1). Null means the device did not report one.
                 'strength' => $this->event->confidence,
+                // The room and its child, like the push ("Bedroom (Aiman)").
+                'where' => self::where($this->event->device),
                 'dashboardUrl' => config('services.frontend.url'),
             ]);
+    }
+
+    public static function where(?\App\Models\Device $device): string
+    {
+        if (!$device) {
+            return 'the room';
+        }
+
+        return $device->name . ($device->patient ? " ({$device->patient->name})" : '');
     }
 }

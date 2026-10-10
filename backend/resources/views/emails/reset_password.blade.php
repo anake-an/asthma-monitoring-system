@@ -29,7 +29,7 @@
             <p style="margin-bottom: 0; font-size: 13px;">If you didn't request a password reset, you can safely ignore this email. Your account remains secure.</p>
         </div>
         <div class="footer" style="margin-top: 24px;">
-            &copy; {{ date('Y') }} RespiroSync Medical Dashboard.<br>All rights reserved.
+            &copy; {{ date('Y') }} RespiroSync.<br>All rights reserved.
         </div>
     </div>
 </body>
