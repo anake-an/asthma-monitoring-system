@@ -18,7 +18,7 @@ type PaginationData = {
 };
 
 export default function EventTimeline() {
-  const { device, deviceId } = useRooms(); // the room on screen
+  const { device, deviceId, canMarkCoughs } = useRooms(); // the room on screen; viewers only look
   const [events, setEvents] = useState<CoughEvent[]>([]);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState<PaginationData | null>(null);
@@ -154,7 +154,9 @@ export default function EventTimeline() {
                   </span>
                 </div>
                 <div className="flex items-center justify-end gap-1.5">
-                  {isVerified === null ? (
+                  {isVerified === null && !canMarkCoughs ? (
+                    <span className="text-[10px] px-2 py-1 rounded border bg-zinc-100 dark:bg-zinc-800/50 text-zinc-500 border-zinc-200 dark:border-zinc-800">Not reviewed</span>
+                  ) : isVerified === null ? (
                     <>
                       <button 
                         onClick={() => handleVerify(ev.id, true, true)}

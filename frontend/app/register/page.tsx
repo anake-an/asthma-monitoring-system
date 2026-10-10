@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { afterLoginPath } from "@/lib/afterLogin";
 import ThemeToggle from "@/components/ThemeToggle";
 import { Mail, Lock, User as UserIcon, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import Link from "next/link";
@@ -62,7 +63,7 @@ export default function RegisterPage() {
         success = true;
         // Small artificial delay so the loading spinner doesn't flash off instantly
         setTimeout(() => {
-          router.push("/");
+          router.push(afterLoginPath()); // back to an invitation link, if one was opened
         }, 300);
       } else {
         setError("Account created, but failed to automatically log in.");

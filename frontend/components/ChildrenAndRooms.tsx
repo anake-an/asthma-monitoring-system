@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 import { authHeaders, useRooms, type Device } from "@/lib/rooms";
+import SharePanel from "@/components/SharePanel";
 
 type Confirm = { title: string; message: string; isDanger: boolean; onConfirm: () => void };
 
@@ -36,6 +37,10 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
   const [pairFor, setPairFor] = useState<number | null>(null);
   const [pairingToken, setPairingToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [openShare, setOpenShare] = useState<number | null>(null); // child whose sharing panel is open
+  const sharedWithMe = patients.filter(p => p.role !== "owner");
+  // New devices go to a child I own: the chosen one, the room on screen's child, or the first.
+  const pairTarget = pairFor ?? (owned.some(p => p.id === patientId) ? patientId : owned[0]?.id ?? null);
 
   const send = async (method: string, url: string, body?: object) => {
     const res = await fetch(url, {
@@ -84,7 +89,7 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
   const pair = async () => {
     setBusy(true);
     try {
-      const data = await send("POST", "/api/devices/generate-token", { patient_id: pairFor ?? patientId });
+      const data = await send("POST", "/api/devices/generate-token", { patient_id: pairTarget });
       setPairingToken(data.token);
     } catch (e) {
       onToast(e instanceof Error ? e.message : "Failed to generate setup token", "error");
@@ -101,24 +106,33 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
         <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mb-3">Each child has their own rooms, doses and report. Only a name is stored.</p>
         <div className="bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/5 rounded-xl p-4 space-y-3">
           {owned.map(p => (
-            <div key={p.id} className="flex items-center gap-2">
-              {nameField(`p${p.id}`, p.name, `/api/patients/${p.id}`, 60)}
-              <span className="text-[11px] text-zinc-500 dark:text-zinc-400 shrink-0 w-16 text-right">
-                {p.devices.length} room{p.devices.length === 1 ? "" : "s"}
-              </span>
-              <button
-                disabled={busy || owned.length < 2}
-                title={owned.length < 2 ? "Keep at least one child: rename instead" : "Delete this child"}
-                onClick={() => onConfirm({
-                  title: `Delete ${p.name}`,
-                  message: `This permanently deletes ${p.name} and their dose history. Their rooms stay, as shared rooms.`,
-                  isDanger: true,
-                  onConfirm: () => act(() => send("DELETE", `/api/patients/${p.id}`), "Child deleted"),
-                })}
-                className="text-[10px] text-zinc-400 hover:text-red-500 disabled:opacity-30 disabled:hover:text-zinc-400 uppercase tracking-wider font-semibold shrink-0"
-              >
-                Delete
-              </button>
+            <div key={p.id}>
+              <div className="flex items-center gap-2">
+                {nameField(`p${p.id}`, p.name, `/api/patients/${p.id}`, 60)}
+                <span className="text-[11px] text-zinc-500 dark:text-zinc-400 shrink-0 w-16 text-right">
+                  {p.devices.length} room{p.devices.length === 1 ? "" : "s"}
+                </span>
+                <button
+                  onClick={() => setOpenShare(openShare === p.id ? null : p.id)}
+                  className="text-[10px] text-blue-500 hover:text-blue-600 uppercase tracking-wider font-semibold shrink-0"
+                >
+                  {openShare === p.id ? "Close" : "Share"}
+                </button>
+                <button
+                  disabled={busy || owned.length < 2}
+                  title={owned.length < 2 ? "Keep at least one child: rename instead" : "Delete this child"}
+                  onClick={() => onConfirm({
+                    title: `Delete ${p.name}`,
+                    message: `This permanently deletes ${p.name} and their dose history, for everyone ${p.name} is shared with. Their rooms stay, as shared rooms.`,
+                    isDanger: true,
+                    onConfirm: () => act(() => send("DELETE", `/api/patients/${p.id}`), "Child deleted"),
+                  })}
+                  className="text-[10px] text-zinc-400 hover:text-red-500 disabled:opacity-30 disabled:hover:text-zinc-400 uppercase tracking-wider font-semibold shrink-0"
+                >
+                  Delete
+                </button>
+              </div>
+              {openShare === p.id && <SharePanel patient={p} onToast={onToast} />}
             </div>
           ))}
           <form
@@ -135,6 +149,31 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
           </form>
         </div>
       </div>
+
+      {/* Children other accounts shared with me */}
+      {sharedWithMe.length > 0 && (
+        <div>
+          <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-1 uppercase tracking-wider">Shared with you</h4>
+          <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mb-3">Children another account shared with you. Their rooms appear in the room picker.</p>
+          <div className="bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/5 rounded-xl p-4 space-y-3">
+            {sharedWithMe.map(p => (
+              <div key={p.id}>
+                <div className="flex items-center gap-2">
+                  <span className="flex-1 text-sm text-zinc-800 dark:text-zinc-200 truncate">{p.name}</span>
+                  <span className="text-[11px] capitalize text-zinc-500 dark:text-zinc-400 shrink-0">{p.role}</span>
+                  <button
+                    onClick={() => setOpenShare(openShare === p.id ? null : p.id)}
+                    className="text-[10px] text-blue-500 hover:text-blue-600 uppercase tracking-wider font-semibold shrink-0"
+                  >
+                    {openShare === p.id ? "Close" : "Details"}
+                  </button>
+                </div>
+                {openShare === p.id && <SharePanel patient={p} onToast={onToast} />}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Rooms */}
       <div>
@@ -186,6 +225,9 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
                             )}
                           >
                             {owned.map(p => <option key={p.id} value={p.id}>{p.name}&apos;s room</option>)}
+                            {d.patient && !owned.some(p => p.id === d.patient_id) && (
+                              <option value={d.patient.id}>{d.patient.name}&apos;s room (shared with you)</option>
+                            )}
                             <option value="">Shared room (not counted for a child)</option>
                           </select>
                           {d.can_configure && (
@@ -211,7 +253,7 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
               )}
               <div className="flex items-center gap-2">
                 {owned.length > 1 && (
-                  <select className={input} value={pairFor ?? patientId ?? ""} onChange={e => setPairFor(Number(e.target.value))} disabled={busy}>
+                  <select className={input} value={pairTarget ?? ""} onChange={e => setPairFor(Number(e.target.value))} disabled={busy}>
                     {owned.map(p => <option key={p.id} value={p.id}>For {p.name}</option>)}
                   </select>
                 )}

@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export default function LogoutButton() {
+export default function LogoutButton({ className = "" }: { className?: string }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
@@ -36,7 +36,7 @@ export default function LogoutButton() {
     <button 
       onClick={handleLogout}
       disabled={loading}
-      className={`flex items-center gap-2 transition-colors border rounded px-2 md:px-3 py-1.5 ml-0 md:ml-2 disabled:opacity-70 ${
+      className={`flex items-center justify-center gap-2 h-10 transition-colors border rounded-full px-4 disabled:opacity-70 ${className} ${
         loading 
           ? 'bg-red-500/20 border-red-500/30' 
           : 'bg-red-500/10 hover:bg-red-500/20 border-red-500/20'

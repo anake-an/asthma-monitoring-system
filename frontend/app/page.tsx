@@ -40,7 +40,7 @@ export default function Home() {
     <main className="min-h-screen p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto transition-all duration-500">
 
       {/* Header */}
-      <header className="bg-white/80 dark:bg-[#12121e]/60 backdrop-blur-xl border border-zinc-200 dark:border-white/5 rounded-3xl px-6 py-5 mb-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl">
+      <header className="bg-white/80 dark:bg-[#12121e]/60 backdrop-blur-xl border border-zinc-200 dark:border-white/5 rounded-3xl px-4 sm:px-6 py-5 mb-6 sm:mb-8 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 shadow-xl">
         <div className="flex items-center gap-4 w-full sm:w-auto">
           <div className="w-12 h-12 shrink-0 drop-shadow-lg">
             <img src="/logo.jpg?v=3" alt="Logo" className="w-full h-full object-contain rounded-xl" />
@@ -54,29 +54,34 @@ export default function Home() {
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-end">
+        {/* Phone: the room picker on its own row, then the four buttons sharing one row.
+            From sm up: everything on one line next to the title. */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full sm:w-auto">
           <RoomPicker />
-          <button 
-            onClick={() => handleSleepToggle(true)}
-            className="flex items-center gap-2 bg-indigo-500/10 hover:bg-indigo-500/20 transition-colors border border-indigo-500/20 rounded-full px-4 py-2 text-indigo-400 text-xs font-medium"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-            </svg>
-            <span className="hidden sm:inline">Sleep Mode</span>
-          </button>
-          <a href="/report" className="flex items-center gap-2 bg-blue-500/10 hover:bg-blue-500/20 transition-colors border border-blue-500/20 rounded-full px-4 py-2 text-blue-400 text-xs font-medium">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-              <line x1="16" y1="13" x2="8" y2="13"></line>
-              <line x1="16" y1="17" x2="8" y2="17"></line>
-              <polyline points="10 9 9 9 8 9"></polyline>
-            </svg>
-            <span className="hidden sm:inline">Activity Log</span>
-          </a>
-          <ThemeToggle />
-          <LogoutButton />
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              onClick={() => handleSleepToggle(true)}
+              aria-label="Sleep Mode"
+              className="flex flex-1 sm:flex-none items-center justify-center gap-2 h-10 bg-indigo-500/10 hover:bg-indigo-500/20 transition-colors border border-indigo-500/20 rounded-full px-4 text-indigo-400 text-xs font-medium"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+              </svg>
+              <span className="hidden sm:inline">Sleep Mode</span>
+            </button>
+            <a href="/report" aria-label="Activity Log" className="flex flex-1 sm:flex-none items-center justify-center gap-2 h-10 bg-blue-500/10 hover:bg-blue-500/20 transition-colors border border-blue-500/20 rounded-full px-4 text-blue-400 text-xs font-medium">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+              </svg>
+              <span className="hidden sm:inline">Activity Log</span>
+            </a>
+            <ThemeToggle className="flex-1 sm:flex-none sm:w-10" />
+            <LogoutButton className="flex-1 sm:flex-none" />
+          </div>
         </div>
       </header>
 

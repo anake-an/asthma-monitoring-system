@@ -144,29 +144,41 @@ export default function CommandCenter() {
       title: "Permanently Delete Account",
       message: "DANGER: Are you absolutely sure you want to PERMANENTLY delete your account and all associated medical data? This action is irreversible.",
       isDanger: true,
-      onConfirm: async () => {
-        setDeletingAccount(true);
-        try {
-          const res = await fetch("/api/user", {
-            method: "DELETE",
-            headers: {
-              "Authorization": `Bearer ${localStorage.getItem("auth_token")}`,
-              "Accept": "application/json"
-            }
-          });
-          if(res.ok) {
-            localStorage.removeItem("auth_token");
-            window.location.href = "/login";
-          } else {
-            showToast("Failed to delete account", "error");
-            setDeletingAccount(false);
-          }
-        } catch(e) {
-          showToast("Error connecting to server", "error");
-          setDeletingAccount(false);
-        }
-      }
+      onConfirm: () => deleteAccount(false),
     });
+  };
+
+  // A child shared with others and no other owner is only deleted after a second, explicit "yes".
+  const deleteAccount = async (deleteSharedChildren: boolean) => {
+    setDeletingAccount(true);
+    try {
+      const res = await fetch("/api/user", {
+        method: "DELETE",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ delete_shared_children: deleteSharedChildren }),
+      });
+      if (res.ok) {
+        localStorage.removeItem("auth_token");
+        window.location.href = "/login";
+        return;
+      }
+      setDeletingAccount(false);
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        setConfirmAction({
+          isOpen: true,
+          title: "Shared children",
+          message: `${data.message} Delete them for everyone?`,
+          isDanger: true,
+          onConfirm: () => deleteAccount(true),
+        });
+        return;
+      }
+      showToast(data.message || "Failed to delete account", "error");
+    } catch (e) {
+      showToast("Error connecting to server", "error");
+      setDeletingAccount(false);
+    }
   };
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
@@ -313,7 +325,8 @@ export default function CommandCenter() {
                 <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Smart Alerts Configuration</h3>
                 <p className="text-xs text-zinc-600 dark:text-zinc-400 font-light mt-0.5">
                   {device
-                    ? <>Limits for <span className="font-medium text-zinc-800 dark:text-zinc-200">{roomLabel(device)}</span>. Each room has its own; pick another in the header.</>
+                    ? <>Limits for <span className="font-medium text-zinc-800 dark:text-zinc-200">{roomLabel(device)}</span>. Each room has its own; pick another in the header.
+                        {!canConfigure && <span className="block mt-1 text-amber-600 dark:text-amber-400">View only: an owner of {device.patient?.name ?? "this room"} changes these limits.</span>}</>
                     : "Pair a device first: limits are set per room."}
                 </p>
               </div>
