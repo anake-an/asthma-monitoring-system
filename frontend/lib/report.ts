@@ -113,6 +113,6 @@ export const observationText = (data: ReportData) =>
   + (data.false_alarms ? ` ${data.false_alarms} other ${data.false_alarms === 1 ? "sound was" : "sounds were"} marked as false alarms and are not counted.` : "");
 // Facts only: the app does not judge asthma control or suggest treatment changes.
 export const medicationText = (data: ReportData) =>
-  `The emergency (blue) inhaler was logged ${timesText(data.rescue_doses)} and the daily (brown) inhaler ${timesText(data.controller_doses)} in these 7 days. This log records usage only and is not a medical assessment; show it to your doctor, especially if usage has changed.`;
+  `The emergency (blue) inhaler was logged ${timesText(data.rescue_doses)} and the daily (brown) inhaler ${timesText(data.controller_doses)} in these 7 days. This log records usage only and is not a medical assessment. Show it to your doctor, especially if usage has changed.`;
 export const LIMITS_NOTE =
   "The AI may lower a limit below your own value, never raise it above, and changes each limit at most once a day (by up to 10 %). Rule: when a daily dose is missed, limits are 15 % lower until one is logged.";
