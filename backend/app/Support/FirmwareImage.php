@@ -20,7 +20,7 @@ class FirmwareImage
 
     private const HASH_APPENDED_OFFSET = 23; // esp_image_header_t.hash_appended
 
-    /** @return array{version: string, image_sha256: string, size: int} */
+    /** @return array{version: string, build: ?string, image_sha256: string, size: int} */
     public static function inspect(string $bytes): array
     {
         $size = strlen($bytes);
@@ -34,10 +34,13 @@ class FirmwareImage
         if (ord($bytes[self::HASH_APPENDED_OFFSET]) !== 1) {
             throw new InvalidArgumentException('The image has no appended SHA-256 (hash_appended is off).');
         }
-        if (!preg_match('/' . preg_quote(FirmwareRelease::VERSION_TAG, '/') . '(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)/', $bytes, $m)) {
-            throw new InvalidArgumentException('No RespiroSync firmware version found in the file (is it the RespiroSync ESP32 firmware, 6.2.0 or newer?).');
+        // "RespiroSync-firmware:3.1.0 build 261010.2" (the build is "dev" in a build made outside CI)
+        $pattern = '/' . preg_quote(FirmwareRelease::VERSION_TAG, '/') . '(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)(?: build ([0-9.]+|dev))?/';
+        if (!preg_match($pattern, $bytes, $m)) {
+            throw new InvalidArgumentException('No RespiroSync firmware version found in the file (is it the RespiroSync ESP32 firmware, 3.0.0 or newer?).');
         }
+        [$version, $build] = FirmwareRelease::normalize($m[1], ($m[2] ?? '') !== '' ? $m[2] : null);
 
-        return ['version' => $m[1], 'image_sha256' => bin2hex(substr($bytes, -32)), 'size' => $size];
+        return ['version' => $version, 'build' => $build, 'image_sha256' => bin2hex(substr($bytes, -32)), 'size' => $size];
     }
 }

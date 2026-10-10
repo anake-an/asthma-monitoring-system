@@ -13,10 +13,18 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
   Rooms shows each device's firmware version and Updating / Updated / Update failed (with the reason). A device answers with its version when it connects. **Needs** the "Minimal SPIFFS (1.9MB APP with OTA)" partition scheme and one USB flash of firmware 6.2.0. The firmware is not signed (no secure boot).
 
   **Automatic publishing:** when a push to `main` changes the firmware, GitHub Actions builds it with the real broker settings (GitHub secrets) and uploads it to the server (`POST /api/firmware/upload`, key `FIRMWARE_UPLOAD_TOKEN`). Owners see the update without anyone exporting or copying files. The `.bin` holds the device password, so it is never kept in GitHub. A version the server already has is ignored.
+- **Firmware versions like a real device:** `3.1.0 Build 261011`, separate from the website's versions. The version is set in the firmware (major.feature.fix); CI adds the build stamp (build date, `.2` for a second build that day). The earlier builds are numbered from the Git history in `hardware/FIRMWARE_HISTORY.md` (1.0.0 → 3.0.1); the first cloud builds that called themselves "6.2.0" / "6.2.1" show as 3.0.0 / 3.0.1. The LCD shows `FW 3.1.0` / `Build 261011` at start-up. The server compares version, then build.
+- **Friendlier firmware updates for owners:**
+    - a dashboard banner "An update is available for Ali Bedroom" (dismissible);
+    - in Rooms, one short status: ✓ Up to date, ● Update available, Updating... don't unplug, or Update didn't finish with "Your device is still working normally" and Try again;
+    - an "Update available" dialog with "What's new" points, "Takes about 1 minute. Keep the device plugged in." and **Later / Update now**;
+    - a toast when it is done.
+
+  "What's new" comes from `hardware/esp32_firmware/WHATS_NEW.txt`, written for owners, instead of the PR title. The device and model (RespiroSync Room Monitor, RS-100 rev A) are in the API for the dashboard.
 - **"Device offline" alert:** when a room's device has sent nothing for **30 minutes** (power cut, Wi-Fi down, unplugged), everyone who gets that child's alerts gets an email and a push. It is sent once per outage, and a "back online" push follows when the device reports again. Devices that never connected are ignored. `php artisan devices:offline-alerts` runs every 5 minutes. The "Send me alerts" switch now covers coughs, readings over a limit and offline devices.
 
 ### Changed
-- **ESP32 start-up screens are slower, so they can be read** (firmware 6.2.1): the name slides in at a gentler speed, the firmware version shows for 1.5 s, "WiFi connected" for 2 s and "Ready" for 2.5 s.
+- **ESP32 start-up screens are slower, so they can be read** (firmware 3.0.1): the name slides in at a gentler speed, the firmware version shows for 1.5 s, "WiFi connected" for 2 s and "Ready" for 2.5 s.
 
 ### Fixed
 - **Reviewing coughs:** marking a cough as a false alarm now really takes it out:

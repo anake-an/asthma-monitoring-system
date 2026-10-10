@@ -38,8 +38,18 @@
 #include "secrets.h"            // MQTT_URI, MQTT_USERNAME, MQTT_PASSWORD
 
 // Raise this for every build you publish (php artisan firmware:publish reads it from the file).
-#define FIRMWARE_VERSION "6.2.1"
-const char FIRMWARE_TAG[] = "RespiroSync-firmware:" FIRMWARE_VERSION;  // keep this format
+// Firmware "3.1.0 Build 261011": the version is set here (major.feature.fix, history in
+// hardware/FIRMWARE_HISTORY.md); the build stamp (build date YYMMDD, ".2" for a second build that
+// day) is written by CI into build_info.h. A build made in the Arduino IDE says "dev".
+#define FIRMWARE_VERSION "3.1.0"
+#if __has_include("build_info.h")
+#include "build_info.h"
+#endif
+#ifndef FIRMWARE_BUILD
+#define FIRMWARE_BUILD "dev"
+#endif
+// Read by the server from the .bin when it is published: keep this format.
+const char FIRMWARE_TAG[] = "RespiroSync-firmware:" FIRMWARE_VERSION " build " FIRMWARE_BUILD;
 
 // Works with ArduinoJson 6.x and 7.x
 #if ARDUINOJSON_VERSION_MAJOR >= 7
@@ -661,8 +671,10 @@ void bootAnimation() {
     }
     delay(90);  // slide speed
   }
-  showLine(1, "Firmware " FIRMWARE_VERSION);
+  showLine(1, "FW " FIRMWARE_VERSION);
   delay(1500);  // time to read the version
+  showLine(1, "Build " FIRMWARE_BUILD);
+  delay(1200);
 }
 
 /** WiFiManager opened its setup hotspot (no Wi-Fi saved, or the saved one is not found). */
@@ -706,8 +718,8 @@ void runOta() {
   setBuzzer(false);
   setBacklight(true);
   char l0[17];
-  snprintf(l0, sizeof(l0), "Updating %s", otaJob.version);
-  showScreen(l0, "Keep power on");
+  snprintf(l0, sizeof(l0), "Updating 0%%");
+  showScreen(l0, "Don't unplug");
   Serial.printf("Updating to %s from %s\n", otaJob.version, otaJob.url);
 
   esp_http_client_config_t http = {};
@@ -730,8 +742,8 @@ void runOta() {
     if (pct > 100) pct = 100;
     if (pct != shownPct) {
       char l1[17];
-      snprintf(l1, sizeof(l1), "%d%%", pct);
-      showLine(1, l1);
+      snprintf(l1, sizeof(l1), "Updating %d%%", pct);
+      showLine(0, l1);
       shownPct = pct;
     }
   }
@@ -797,6 +809,7 @@ void sayHello() {
     Doc doc;
     doc["event"] = "hello";
     doc["firmware"] = FIRMWARE_VERSION;
+    doc["build"] = FIRMWARE_BUILD;
     if (firstSinceBoot) doc["boot"] = true;
     publishJson(topicEvents, doc);
     firstSinceBoot = false;

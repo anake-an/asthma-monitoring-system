@@ -1,0 +1,5 @@
+# What owners see under "What's new" when this firmware is offered as an update.
+# One short point per line, in plain words (no technical terms). Lines starting with # are ignored.
+# Update it together with FIRMWARE_VERSION in esp32_firmware.ino.
+Start-up screens show the firmware version and build
+Clearer messages while the device updates
