@@ -13,6 +13,7 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
   Rooms shows each device's firmware version and Updating / Updated / Update failed (with the reason). A device answers with its version when it connects. **Needs** the "Minimal SPIFFS (1.9MB APP with OTA)" partition scheme and one USB flash of firmware 6.2.0. The firmware is not signed (no secure boot).
 - **"Device offline" alert:** when a room's device has sent nothing for **30 minutes** (power cut, Wi-Fi down, unplugged), everyone who gets that child's alerts gets an email and a push. It is sent once per outage, and a "back online" push follows when the device reports again. Devices that never connected are ignored. `php artisan devices:offline-alerts` runs every 5 minutes. The "Send me alerts" switch now covers coughs, readings over a limit and offline devices.
 
+### Changed- **ESP32 start-up screens are slower, so they can be read** (firmware 6.2.1): the name slides in at a gentler speed, the firmware version shows for 1.5 s, "WiFi connected" for 2 s and "Ready" for 2.5 s.
 ### Fixed
 - **Reviewing coughs:** marking a cough as a false alarm now really takes it out:
     - out of the Activity Log's counts and chart (the report says how many were left out);
