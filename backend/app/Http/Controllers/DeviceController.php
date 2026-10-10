@@ -66,6 +66,7 @@ class DeviceController extends Controller
     {
         $user = $request->user();
         $latest = FirmwareRelease::latest(); // owners can update a device that runs an older version
+        $latestEdgeAi = FirmwareRelease::latest('pico');
         $devices = $user->accessibleDevices()
             ->with('patient:id,name,color,emoji')
             ->orderByRaw('last_seen_at IS NULL')->orderByDesc('last_seen_at')->orderByDesc('created_at')
@@ -75,6 +76,10 @@ class DeviceController extends Controller
                 'ota' => $d->otaState(),
                 'firmware_label' => FirmwareRelease::label($d->firmware_version, $d->firmware_build),
                 'update_available' => $latest !== null && $latest->isNewerThan($d->firmware_version, $d->firmware_build),
+                'edge_ai_label' => FirmwareRelease::label($d->edge_ai_version, $d->edge_ai_build),
+                // only when the module is connected and the device firmware can pass updates on (it reports the module)
+                'edge_ai_update_available' => $latestEdgeAi !== null && $d->edge_ai_version !== null
+                    && $latestEdgeAi->isNewerThan($d->edge_ai_version, $d->edge_ai_build),
             ]);
 
         return response()->json([
@@ -84,6 +89,12 @@ class DeviceController extends Controller
                 'build' => $latest->build,
                 'label' => FirmwareRelease::label($latest->version, $latest->build),
                 'notes' => $latest->notes,
+            ] : null,
+            'latest_edge_ai' => $latestEdgeAi ? [
+                'version' => $latestEdgeAi->version,
+                'build' => $latestEdgeAi->build,
+                'label' => FirmwareRelease::label($latestEdgeAi->version, $latestEdgeAi->build),
+                'notes' => $latestEdgeAi->notes,
             ] : null,
             'product' => ['name' => FirmwareRelease::PRODUCT, 'model' => FirmwareRelease::MODEL, 'hardware' => FirmwareRelease::HARDWARE_REVISION],
         ]);

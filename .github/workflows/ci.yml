@@ -168,7 +168,8 @@ jobs:
 
       - uses: arduino/compile-sketches@v1
         with:
-          fqbn: rp2040:rp2040:rpipico
+          # 1 MB for the sketch and 1 MB of file system: the file system receives cloud updates
+          fqbn: rp2040:rp2040:rpipico:flash=2097152_1048576
           platforms: |
             - name: rp2040:rp2040
               source-url: https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
@@ -224,52 +225,59 @@ jobs:
           assert (u.username, u.password, u.host, u.database) == ('respiro', 'p@ss:w/rd#1', 'db', 'asthma_db'), repr(u);
           print('ok', repr(u))"
 
-  # Cloud firmware updates: when a push to main changes the ESP32 firmware, build it with the real
-  # broker settings (GitHub secrets) and upload it to the server, where owners then see "Update".
-  # The .bin contains the device password, so it is never stored as an artifact or a release.
-  # Skipped (with a note) until the secrets are set; the server ignores a version it already has.
+  # Cloud firmware updates: when a push to main changes the ESP32 firmware or the Edge AI (Pico)
+  # build, build it (the ESP32 one with the real broker settings from GitHub secrets) and upload it
+  # to the server, where owners then see "Update". The ESP32 .bin contains the device password, so
+  # nothing is stored as an artifact or a release. Skipped (with a note) until the secrets are set;
+  # the server ignores a version it already has.
   firmware-deploy:
-    name: Publish ESP32 firmware to the server
+    name: Publish firmware to the server
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: firmware-esp32
+    needs: [firmware-esp32, firmware-pico]
     runs-on: ubuntu-latest
     env:
-      FQBN: esp32:esp32:esp32:PartitionScheme=min_spiffs
+      ESP32_FQBN: esp32:esp32:esp32:PartitionScheme=min_spiffs
+      PICO_FQBN: rp2040:rp2040:rpipico:flash=2097152_1048576
       ESP32_INDEX: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+      PICO_INDEX: https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
       MQTT_URI: ${{ secrets.MQTT_URI }}
       MQTT_USERNAME: ${{ secrets.MQTT_USERNAME }}
       MQTT_PASSWORD: ${{ secrets.MQTT_PASSWORD }}
       UPLOAD_URL: ${{ secrets.FIRMWARE_UPLOAD_URL }}
       UPLOAD_TOKEN: ${{ secrets.FIRMWARE_UPLOAD_TOKEN }}
+      TZ: Asia/Kuala_Lumpur
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0  # full history: the build stamp counts today's firmware builds
+          fetch-depth: 0  # full history: the build stamp counts today's builds
 
-      - name: Firmware changed and secrets set?
+      - name: What changed, and are the secrets set?
         id: check
         run: |
-          if ! git diff --name-only HEAD~1 HEAD | grep -q '^hardware/esp32_firmware/'; then
-            echo "Firmware unchanged in this push: nothing to publish."
-          elif [ -z "$UPLOAD_TOKEN" ] || [ -z "$UPLOAD_URL" ] || [ -z "$MQTT_URI" ] || [ -z "$MQTT_PASSWORD" ]; then
-            echo "::notice::Firmware changed, but the GitHub secrets for publishing are not set (see hardware/README.md)."
-          else
-            echo "publish=true" >> "$GITHUB_OUTPUT"
+          changed=$(git diff --name-only HEAD~1 HEAD)
+          if [ -z "$UPLOAD_TOKEN" ] || [ -z "$UPLOAD_URL" ]; then
+            echo "::notice::The GitHub secrets for publishing firmware are not set (see hardware/README.md)."
+            exit 0
           fi
+          if echo "$changed" | grep -q '^hardware/esp32_firmware/'; then
+            if [ -z "$MQTT_URI" ] || [ -z "$MQTT_PASSWORD" ]; then
+              echo "::notice::ESP32 firmware changed, but MQTT_URI / MQTT_PASSWORD secrets are not set."
+            else
+              echo "esp32=true" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+          if echo "$changed" | grep -q '^hardware/pico_cough_ai/'; then echo "pico=true" >> "$GITHUB_OUTPUT"; fi
+          echo "$changed" | grep -qE '^hardware/(esp32_firmware|pico_cough_ai)/' || echo "No firmware changed in this push: nothing to publish."
 
       - uses: arduino/setup-arduino-cli@v2
-        if: steps.check.outputs.publish == 'true'
+        if: steps.check.outputs.esp32 == 'true' || steps.check.outputs.pico == 'true'
 
-      - name: Install the ESP32 core and libraries
-        if: steps.check.outputs.publish == 'true'
+      - name: Build the ESP32 firmware with the real broker settings
+        if: steps.check.outputs.esp32 == 'true'
         run: |
           arduino-cli core update-index --additional-urls "$ESP32_INDEX"
           arduino-cli core install esp32:esp32 --additional-urls "$ESP32_INDEX"
           arduino-cli lib install WiFiManager ArduinoJson "DHT sensor library" "Adafruit Unified Sensor" "LiquidCrystal I2C"
-
-      - name: Build with the real broker settings
-        if: steps.check.outputs.publish == 'true'
-        run: |
           umask 077
           {
             echo '#pragma once'
@@ -277,29 +285,40 @@ jobs:
             printf '#define MQTT_USERNAME "%s"\n' "${MQTT_USERNAME:-respirosync_device}"
             printf '#define MQTT_PASSWORD "%s"\n' "$MQTT_PASSWORD"
           } > hardware/esp32_firmware/secrets.h
-          # Build stamp: date (Malaysia) YYMMDD, plus ".N" when this is the Nth firmware change on main today.
-          export TZ=Asia/Kuala_Lumpur
-          DAY=$(date +%y%m%d)
-          N=$(git log --first-parent --since="$(date +%Y-%m-%d) 00:00" --format=%H -- hardware/esp32_firmware | wc -l)
-          BUILD=$DAY; [ "$N" -gt 1 ] && BUILD="$DAY.$N"
+          BUILD=$(.github/firmware-build-stamp.sh hardware/esp32_firmware)
           echo "#define FIRMWARE_BUILD \"$BUILD\"" > hardware/esp32_firmware/build_info.h
-          echo "Firmware build $BUILD"
-          arduino-cli compile --fqbn "$FQBN" --output-dir build hardware/esp32_firmware
+          echo "ESP32 firmware build $BUILD"
+          arduino-cli compile --fqbn "$ESP32_FQBN" --output-dir build-esp32 hardware/esp32_firmware
           rm hardware/esp32_firmware/secrets.h hardware/esp32_firmware/build_info.h
-          ls -l build/esp32_firmware.ino.bin
+
+      - name: Build the Edge AI (Pico) firmware
+        if: steps.check.outputs.pico == 'true'
+        run: |
+          arduino-cli core update-index --additional-urls "$PICO_INDEX"
+          arduino-cli core install rp2040:rp2040 --additional-urls "$PICO_INDEX"
+          BUILD=$(.github/firmware-build-stamp.sh hardware/pico_cough_ai)
+          echo "#define EDGE_AI_BUILD \"$BUILD\"" > hardware/pico_cough_ai/build_info.h
+          echo "Edge AI build $BUILD"
+          arduino-cli compile --fqbn "$PICO_FQBN" --output-dir build-pico hardware/pico_cough_ai
+          rm hardware/pico_cough_ai/build_info.h
 
       - name: Upload to the server
-        if: steps.check.outputs.publish == 'true'
+        if: steps.check.outputs.esp32 == 'true' || steps.check.outputs.pico == 'true'
         run: |
-          # "What's new" for owners: the lines of WHATS_NEW.txt (joined by |), else the PR title.
-          NOTES=$(grep -v '^[[:space:]]*#' hardware/esp32_firmware/WHATS_NEW.txt 2>/dev/null | sed '/^[[:space:]]*$/d' | paste -sd'|' -)
-          [ -n "$NOTES" ] || NOTES=$(git log -1 --pretty=%b | head -n 1)
-          [ -n "$NOTES" ] || NOTES=$(git log -1 --pretty=%s)
-          curl --fail-with-body -sS -X POST "$UPLOAD_URL" \
-            -H "Authorization: Bearer $UPLOAD_TOKEN" \
-            -H "Content-Type: application/octet-stream" \
-            -H "X-Firmware-Notes: ${NOTES:0:480}" \
-            -A "RespiroSync-CI" \
-            --data-binary @build/esp32_firmware.ino.bin
-          echo
-          rm -rf build
+          # "What's new" for owners: the lines of the folder's WHATS_NEW.txt (joined by |), else the PR title.
+          publish() {
+            folder=$1; file=$2
+            [ -f "$file" ] || return 0
+            notes=$(grep -v '^[[:space:]]*#' "$folder/WHATS_NEW.txt" 2>/dev/null | sed '/^[[:space:]]*$/d' | paste -sd'|' -)
+            [ -n "$notes" ] || notes=$(git log -1 --pretty=%b | head -n 1)
+            curl --fail-with-body -sS -X POST "$UPLOAD_URL" \
+              -H "Authorization: Bearer $UPLOAD_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              -H "X-Firmware-Notes: ${notes:0:480}" \
+              -A "RespiroSync-CI" \
+              --data-binary @"$file"
+            echo
+          }
+          publish hardware/esp32_firmware build-esp32/esp32_firmware.ino.bin
+          publish hardware/pico_cough_ai build-pico/pico_cough_ai.ino.bin
+          rm -rf build-esp32 build-pico

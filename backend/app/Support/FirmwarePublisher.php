@@ -20,15 +20,16 @@ class FirmwarePublisher
     public static function publish(string $bytes, ?string $notes = null): array
     {
         $image = FirmwareImage::inspect($bytes);
-        if ($existing = FirmwareRelease::where('version', $image['version'])->first()) {
+        if ($existing = FirmwareRelease::where('target', $image['target'])->where('version', $image['version'])->first()) {
             return ['release' => $existing, 'created' => false];
         }
 
         File::ensureDirectoryExists(FirmwareRelease::directory());
-        $filename = "esp32-{$image['version']}.bin";
+        $filename = ($image['target'] === 'pico' ? 'edge-ai' : 'esp32') . "-{$image['version']}.bin";
         File::put(FirmwareRelease::directory() . DIRECTORY_SEPARATOR . $filename, $bytes);
 
         $release = FirmwareRelease::create([
+            'target' => $image['target'],
             'version' => $image['version'],
             'build' => $image['build'],
             'filename' => $filename,

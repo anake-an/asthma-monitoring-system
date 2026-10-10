@@ -312,6 +312,7 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
                         </div>
                         <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Token {d.device_token} · {lastSeen(d)}</p>
                         <FirmwareUpdate device={d} onToast={onToast} />
+                        <FirmwareUpdate device={d} part="pico" onToast={onToast} />
                       </div>
                     );
                   })}
