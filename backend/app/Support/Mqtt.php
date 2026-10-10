@@ -99,9 +99,10 @@ class Mqtt
         $this->publish(self::topic($device->device_token, 'config'), '', true);
     }
 
-    public function sendCommand(Device $device, string $command): void
+    /** A command for one device, with optional fields (e.g. the "ota" link). */
+    public function sendCommand(Device $device, string $command, array $data = []): void
     {
-        $this->publish(self::topic($device->device_token, 'commands'), json_encode(['command' => $command]));
+        $this->publish(self::topic($device->device_token, 'commands'), json_encode(['command' => $command] + $data, JSON_UNESCAPED_SLASHES));
     }
 
     /** The current time (Unix seconds, UTC) for a device that asked for it ("time_request"). */

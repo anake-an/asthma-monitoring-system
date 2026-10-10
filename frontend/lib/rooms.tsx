@@ -14,6 +14,8 @@ export type Device = {
   patient: { id: number; name: string; color: string | null; emoji: string | null } | null;
   last_seen_at: string | null;
   can_configure: boolean;
+  firmware_version: string | null; // reported by the device when it connects (6.2.0 and newer)
+  ota: { status: "updating" | "updated" | "failed" | null; target: string | null; error: string | null };
 };
 
 export type Patient = {
@@ -27,9 +29,12 @@ export type Patient = {
   devices: { id: number; name: string; status: string }[];
 };
 
+export type FirmwareInfo = { version: string; notes: string | null };
+
 type Rooms = {
   loaded: boolean;
   devices: Device[];
+  latestFirmware: FirmwareInfo | null; // newest firmware published on the server
   patients: Patient[];
   device: Device | null; // the room on screen
   deviceId: number | null;
@@ -54,6 +59,7 @@ export function withDevice(url: string, deviceId: number | null): string {
 
 export function RoomsProvider({ children }: { children: ReactNode }) {
   const [devices, setDevices] = useState<Device[]>([]);
+  const [latestFirmware, setLatestFirmware] = useState<FirmwareInfo | null>(null);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [chosen, setChosen] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -81,7 +87,11 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
         window.location.href = "/login";
         return;
       }
-      if (d.ok) setDevices((await d.json()).devices ?? []);
+      if (d.ok) {
+        const data = await d.json();
+        setDevices(data.devices ?? []);
+        setLatestFirmware(data.latest_firmware ?? null);
+      }
       if (p.ok) setPatients((await p.json()).patients ?? []);
     } catch {
     } finally {
@@ -110,7 +120,7 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <RoomsContext.Provider value={{ loaded, devices, patients, device, deviceId: device?.id ?? null, patientId, canLogDose, canMarkCoughs, selectDevice, refresh }}>
+    <RoomsContext.Provider value={{ loaded, devices, latestFirmware, patients, device, deviceId: device?.id ?? null, patientId, canLogDose, canMarkCoughs, selectDevice, refresh }}>
       {children}
     </RoomsContext.Provider>
   );
@@ -125,4 +135,25 @@ export function useRooms(): Rooms {
 /** "Bedroom · Aiman", or "Bedroom · shared room". */
 export function roomLabel(device: Device): string {
   return `${device.name} · ${device.patient ? device.patient.name : "shared room"}`;
+}
+
+/** True when version a is newer than b (b null = a device too old to report one). "6.10.0" > "6.9.1". */
+export function isNewerVersion(a: string, b: string | null): boolean {
+  if (!b) return true;
+  const parse = (v: string) => {
+    const [core, suffix] = v.split("-", 2);
+    return { parts: core.split(".").map(n => parseInt(n, 10) || 0), suffix: suffix ?? null };
+  };
+  const x = parse(a), y = parse(b);
+  for (let i = 0; i < 3; i++) {
+    const d = (x.parts[i] ?? 0) - (y.parts[i] ?? 0);
+    if (d !== 0) return d > 0;
+  }
+  return x.suffix === null && y.suffix !== null; // 6.2.0 is newer than 6.2.0-test
+}
+
+/** An owner can update this room's device to the newest published firmware. */
+export function firmwareUpdateFor(device: Device, latest: FirmwareInfo | null): string | null {
+  if (!latest || !device.can_configure || device.ota?.status === "updating") return null;
+  return isNewerVersion(latest.version, device.firmware_version) ? latest.version : null;
 }

@@ -11,6 +11,11 @@ Route::post('/register', [AuthController::class, 'register'])->middleware('throt
 Route::post('/forgot-password', [\App\Http\Controllers\PasswordResetController::class, 'sendResetLinkEmail'])->middleware('throttle:3,1');
 Route::post('/reset-password', [\App\Http\Controllers\PasswordResetController::class, 'resetPassword']);
 
+// Firmware download for a device (no login: a one-time signed link sent with its "ota" command).
+// Relative signature: the request reaches Laravel through the dashboard's /api proxy.
+Route::get('/firmware/{release}/download', [\App\Http\Controllers\FirmwareController::class, 'download'])
+    ->middleware(['signed:relative', 'throttle:20,1'])->name('firmware.download');
+
 // Protected routes
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', function (Request $request) { return $request->user(); });
@@ -41,6 +46,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/devices/{id}', [\App\Http\Controllers\DeviceController::class, 'updateDevice']);
     Route::delete('/devices/{id}', [\App\Http\Controllers\DeviceController::class, 'deleteDevice']);
     Route::post('/devices/generate-token', [\App\Http\Controllers\DeviceController::class, 'generateToken']);
+    Route::post('/devices/{id}/firmware-update', [\App\Http\Controllers\FirmwareController::class, 'update'])->middleware('throttle:6,1');
     
     Route::get('/telemetry', [DashboardController::class, 'getTelemetry']);
     Route::get('/cough-events', [DashboardController::class, 'getCoughEvents']);

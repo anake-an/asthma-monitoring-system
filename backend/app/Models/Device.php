@@ -35,6 +35,7 @@ class Device extends Model
     protected $casts = [
         'last_seen_at' => 'datetime',
         'offline_alerted_at' => 'datetime', // set when the offline alert went out, cleared when it is back
+        'ota_started_at' => 'datetime',
     ];
 
     protected static function booted(): void
@@ -46,6 +47,25 @@ class Device extends Model
                 $device->patient_id = User::find($device->user_id)?->defaultPatient()->id;
             }
         });
+    }
+
+    /** A firmware update with no answer from the device after this long has failed. */
+    public const OTA_TIMEOUT_MINUTES = 15;
+
+    /**
+     * The last firmware update: status (null, updating, updated, failed), target version, error.
+     * "updating" without an answer for OTA_TIMEOUT_MINUTES counts as failed.
+     */
+    public function otaState(): array
+    {
+        $status = $this->ota_status;
+        $error = $this->ota_error;
+        if ($status === 'updating' && $this->ota_started_at?->lt(now()->subMinutes(self::OTA_TIMEOUT_MINUTES))) {
+            $status = 'failed';
+            $error = 'No answer from the device within ' . self::OTA_TIMEOUT_MINUTES . ' minutes. It still runs its old firmware.';
+        }
+
+        return ['status' => $status, 'target' => $this->ota_target_version, 'error' => $error];
     }
 
     /** pending (never connected), online, or offline (no message for OFFLINE_AFTER_SECONDS). */

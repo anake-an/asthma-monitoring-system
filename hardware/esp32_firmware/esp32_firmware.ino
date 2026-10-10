@@ -5,7 +5,7 @@
  * - Receives cough detections from the Raspberry Pi Pico over UART2
  * - Publishes to   respirosync/devices/<token>/telemetry and /events
  * - Subscribes to  respirosync/devices/<token>/config   (retained thresholds)
- *                  respirosync/devices/<token>/commands (factory_reset, buzzer_on, buzzer_off, set_time)
+ *                  respirosync/devices/<token>/commands (factory_reset, buzzer_on, buzzer_off, set_time, ota)
  * - Sounds the local alarm when a reading crosses its threshold, even while offline
  * - 16x2 LCD, every line centred: start-up steps (Wi-Fi, clock, cloud), pages every 5 s with the
  *   title on top and values below (Air quality, Room climate, clock, "Daily dose?" while due), alerts
@@ -13,7 +13,9 @@
  *   unless there is an alert or the BOOT button is pressed)
  * - Gas sensor warm-up: not read for the first 3 minutes (sent as null)
  * - Clock from NTP, or asked from the server over MQTT where NTP is blocked
- * - Firmware updates over Wi-Fi (ArduinoOTA, password OTA_PASSWORD in secrets.h)
+ * - Cloud firmware updates: the owner presses "Update" in the dashboard and the device downloads
+ *   the new firmware from the server over HTTPS, checks it, installs it, and goes back to the
+ *   previous one if the new one does not reach the cloud (FIRMWARE_VERSION below)
  *
  * Setup: copy secrets.example.h to secrets.h and fill it in. Pairing token is
  * entered on the "RespiroSync-Setup" Wi-Fi portal.
@@ -31,14 +33,19 @@
 #include <DHT.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>  // https://github.com/johnrickman/LiquidCrystal_I2C
-#include <ArduinoOTA.h>         // firmware updates over Wi-Fi (Arduino IDE network port)
+#include "esp_https_ota.h"      // cloud firmware updates
+#include "esp_ota_ops.h"
 #include "secrets.h"            // MQTT_URI, MQTT_USERNAME, MQTT_PASSWORD
+
+// Raise this for every build you publish (php artisan firmware:publish reads it from the file).
+#define FIRMWARE_VERSION "6.2.0"
+const char FIRMWARE_TAG[] = "RespiroSync-firmware:" FIRMWARE_VERSION;  // keep this format
 
 // Works with ArduinoJson 6.x and 7.x
 #if ARDUINOJSON_VERSION_MAJOR >= 7
 typedef JsonDocument Doc;
 #else
-typedef StaticJsonDocument<256> Doc;
+typedef StaticJsonDocument<512> Doc;  // the "ota" command carries a link and a checksum
 #endif
 
 // --- Pins ---
@@ -105,6 +112,16 @@ volatile PendingCommand pendingCommand = CMD_NONE;
 bool cloudAlarm = false;
 volatile uint32_t serverEpoch = 0;  // time from the server ("set_time"), applied in loop()
 
+// A cloud firmware update the server asked for ("ota" command), run by loop() (runOta).
+struct OtaJob {
+  char url[256];
+  char version[33];
+  char sha256[65];
+  uint32_t size;
+};
+OtaJob otaJob;
+volatile bool otaPending = false;
+
 void saveConfigCallback() { shouldSaveConfig = true; }
 
 bool isValidToken(const char *t) {
@@ -165,6 +182,19 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         else if (strcmp(cmd, "buzzer_on") == 0) pendingCommand = CMD_BUZZER_ON;
         else if (strcmp(cmd, "buzzer_off") == 0) pendingCommand = CMD_BUZZER_OFF;
         else if (strcmp(cmd, "set_time") == 0) serverEpoch = doc["epoch"] | 0UL;
+        else if (strcmp(cmd, "ota") == 0 && !otaPending) {
+          const char *url = doc["url"] | "";
+          const char *version = doc["version"] | "";
+          const char *sha = doc["sha256"] | "";
+          if (strncmp(url, "https://", 8) == 0 && strlen(url) < sizeof(otaJob.url) && strlen(sha) == 64
+              && *version && strlen(version) < sizeof(otaJob.version)) {
+            strcpy(otaJob.url, url);
+            strcpy(otaJob.version, version);
+            strcpy(otaJob.sha256, sha);
+            otaJob.size = doc["size"] | 0UL;
+            otaPending = true;  // last: loop() starts the update
+          }
+        }
       }
       break;
     }
@@ -631,7 +661,7 @@ void bootAnimation() {
     }
     delay(60);
   }
-  showLine(1, "Starting up");
+  showLine(1, "Firmware " FIRMWARE_VERSION);
   delay(800);
 }
 
@@ -640,38 +670,138 @@ void onSetupPortal(WiFiManager *wm) {
   showScreen("WiFi setup", "Join RespiroSync");  // the "RespiroSync-Setup" network
 }
 
+// ===================== Cloud firmware updates (OTA) =====================
+// An owner presses "Update" in the dashboard; the server sends an "ota" command with a one-time
+// HTTPS link to the firmware on the NAS and the image's SHA-256. The device downloads it into the
+// spare app slot (needs the "Minimal SPIFFS (1.9MB APP with OTA)" partition scheme), checks it,
+// and restarts into it. The new firmware must reach the cloud within OTA_CONFIRM_MS, else the
+// ESP32 goes back to the previous firmware (rollback; see ota_rollback.cpp).
+
+const unsigned long OTA_CONFIRM_MS = 120000;
+
+/** Tell the server how the update went ("failed" with a reason, or "installed"). */
+void reportOta(const char *status, const char *error) {
+  Doc doc;
+  doc["event"] = "ota";
+  doc["status"] = status;
+  doc["version"] = otaJob.version;
+  if (error) doc["error"] = error;
+  publishJson(topicEvents, doc);
+}
+
+void otaFail(const char *lcdLine, const char *error) {
+  Serial.printf("Update failed: %s\n", error);
+  showScreen("Update failed", lcdLine);
+  reportOta("failed", error);
+  delay(3000);  // long enough to read; the pages come back afterwards
+}
+
+/** Download, check and install the firmware the server announced, then restart into it. */
+void runOta() {
+  if (alarmMask || cloudAlarm) {
+    reportOta("failed", "An alarm is active on the device. Try again when it is over.");
+    otaPending = false;
+    return;
+  }
+  setBuzzer(false);
+  setBacklight(true);
+  char l0[17];
+  snprintf(l0, sizeof(l0), "Updating %s", otaJob.version);
+  showScreen(l0, "Keep power on");
+  Serial.printf("Updating to %s from %s\n", otaJob.version, otaJob.url);
+
+  esp_http_client_config_t http = {};
+  http.url = otaJob.url;
+  http.crt_bundle_attach = esp_crt_bundle_attach;  // a verified HTTPS connection, like the broker's
+  http.timeout_ms = 20000;
+  esp_https_ota_config_t cfg = {};
+  cfg.http_config = &http;
+  esp_https_ota_handle_t ota = nullptr;
+  otaPending = false;
+  if (esp_https_ota_begin(&cfg, &ota) != ESP_OK) {
+    otaFail("Download error", "The download did not start (link expired, or the server is unreachable).");
+    return;
+  }
+  esp_err_t err;
+  int shownPct = -1;
+  while ((err = esp_https_ota_perform(ota)) == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
+    int read = esp_https_ota_get_image_len_read(ota);
+    int pct = otaJob.size ? (int)((int64_t)read * 100 / otaJob.size) : 0;
+    if (pct > 100) pct = 100;
+    if (pct != shownPct) {
+      char l1[17];
+      snprintf(l1, sizeof(l1), "%d%%", pct);
+      showLine(1, l1);
+      shownPct = pct;
+    }
+  }
+  if (err != ESP_OK || !esp_https_ota_is_complete_data_received(ota)) {
+    esp_https_ota_abort(ota);
+    otaFail("Download error", "The download was interrupted. The old firmware keeps running.");
+    return;
+  }
+  if (esp_https_ota_finish(ota) != ESP_OK) {  // checks the image and makes it the next to start
+    otaFail("Bad file", "The downloaded file is not a valid firmware image.");
+    return;
+  }
+
+  // The installed image must be exactly the published one.
+  uint8_t sha[32];
+  char hex[65];
+  bool same = esp_partition_get_sha256(esp_ota_get_boot_partition(), sha) == ESP_OK;
+  for (int i = 0; i < 32; i++) snprintf(hex + i * 2, 3, "%02x", sha[i]);
+  if (!same || strcasecmp(hex, otaJob.sha256) != 0) {
+    esp_ota_set_boot_partition(esp_ota_get_running_partition());  // keep the current firmware
+    otaFail("Bad checksum", "The checksum does not match: the update was not installed.");
+    return;
+  }
+
+  reportOta("installed", nullptr);
+  showScreen("Update done", "Restarting...");
+  delay(1500);
+  ESP.restart();
+}
+
+/** True while a just-installed firmware has not been confirmed yet (it can still go back). */
+bool firmwareUnconfirmed() {
+  esp_ota_img_states_t state;
+  return esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK
+         && state == ESP_OTA_IMG_PENDING_VERIFY;
+}
+
 /**
- * Firmware updates over Wi-Fi: the Arduino IDE lists the device as a network port named
- * "respirosync-<token>" (same Wi-Fi as the PC). Needs OTA_PASSWORD in secrets.h, and the
- * "Minimal SPIFFS (1.9MB APP with OTA)" partition scheme (the default one has no room for it).
+ * After an update: once the new firmware has reached the cloud, keep it. If it has not within
+ * OTA_CONFIRM_MS, go back to the previous one. (Any restart before that goes back too.)
  */
-void setupOta() {
-#ifdef OTA_PASSWORD
-  char host[24];
-  snprintf(host, sizeof(host), "respirosync-%s", device_token);
-  for (char *c = host; *c; c++) *c = tolower(*c);
-  ArduinoOTA.setHostname(host);
-  ArduinoOTA.setPassword(OTA_PASSWORD);
-  ArduinoOTA.onStart([]() {
-    setBuzzer(false);
-    setBacklight(true);
-    showScreen("Updating...", "Keep power on");
-  });
-  ArduinoOTA.onProgress([](unsigned int done, unsigned int total) {
-    char l1[17];
-    snprintf(l1, sizeof(l1), "%u%%", total ? done * 100 / total : 0);
-    showScreen("Updating...", l1);
-  });
-  ArduinoOTA.onEnd([]() { showScreen("Update done", "Restarting..."); });
-  ArduinoOTA.onError([](ota_error_t error) {
-    showScreen("Update failed", error == OTA_AUTH_ERROR ? "Wrong password" : "Try again");
-    Serial.printf("OTA error %u\n", error);
-  });
-  ArduinoOTA.begin();
-  Serial.printf("OTA ready: network port %s\n", host);
-#else
-  Serial.println("OTA off: add OTA_PASSWORD to secrets.h to update over Wi-Fi");
-#endif
+void confirmFirmware() {
+  static bool settled = false;
+  if (settled) return;
+  if (!firmwareUnconfirmed()) {
+    settled = true;
+  } else if (mqtt_connected) {
+    esp_ota_mark_app_valid_cancel_rollback();
+    Serial.println("New firmware confirmed");
+    settled = true;
+  } else if (millis() > OTA_CONFIRM_MS) {
+    showScreen("Update failed", "Going back...");
+    delay(1500);
+    esp_ota_mark_app_invalid_rollback_and_reboot();
+  }
+}
+
+/** "hello" with the firmware version each time it connects (boot=true the first time). */
+void sayHello() {
+  static bool connectedBefore = false;
+  static bool firstSinceBoot = true;
+  if (mqtt_connected && !connectedBefore) {
+    Doc doc;
+    doc["event"] = "hello";
+    doc["firmware"] = FIRMWARE_VERSION;
+    if (firstSinceBoot) doc["boot"] = true;
+    publishJson(topicEvents, doc);
+    firstSinceBoot = false;
+  }
+  connectedBefore = mqtt_connected;
 }
 
 void factoryReset() {
@@ -688,6 +818,7 @@ void factoryReset() {
 
 void setup() {
   Serial.begin(115200);
+  Serial.println(FIRMWARE_TAG);
   EEPROM.begin(512);
 
   pinMode(DUST_LED_PIN, OUTPUT);
@@ -719,6 +850,11 @@ void setup() {
   wm.addParameter(&custom_token);
   wm.setSaveConfigCallback(saveConfigCallback);
   wm.setAPCallback(onSetupPortal);
+  if (firmwareUnconfirmed()) {
+    // Just updated: if this firmware cannot get online, restart (which goes back to the previous
+    // one) instead of waiting in the setup hotspot forever.
+    wm.setConfigPortalTimeout(OTA_CONFIRM_MS / 1000);
+  }
 
   if (!isValidToken(device_token)) {
     Serial.println("No valid token stored: opening setup portal");
@@ -756,7 +892,6 @@ void setup() {
   delay(1500);
 
   setClock();
-  setupOta();
 
   buildTopics();
   Serial.printf("Device token %s\n", device_token);
@@ -891,8 +1026,8 @@ void loop() {
   updateOutputs();
   updateDisplay();
   retryClock();
-#ifdef OTA_PASSWORD
-  ArduinoOTA.handle();
-#endif
+  sayHello();
+  confirmFirmware();
+  if (otaPending) runOta();
   delay(10);
 }

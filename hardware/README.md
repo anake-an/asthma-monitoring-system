@@ -56,31 +56,43 @@ To upgrade the Pico from Phase 1 math-based logic to Phase 2 True AI (Distinguis
 ## Setup Instructions
 
 1.  Open `WIRING_GUIDE.md` and wire all hardware exactly as specified.
-2.  Copy `esp32_firmware/secrets.example.h` to `esp32_firmware/secrets.h` and fill in:
-    *   the broker URL and the device password;
-    *   an `OTA_PASSWORD` of your own (for updates over Wi-Fi).
-
+2.  Copy `esp32_firmware/secrets.example.h` to `esp32_firmware/secrets.h` and fill in the broker URL and the device password.
     Delete `esp32_firmware.example.ino` if it is still in the folder: the IDE compiles every `.ino` in a sketch folder together.
 3.  Open `esp32_firmware/esp32_firmware.ino` in the Arduino IDE. It needs these libraries: WiFiManager, ArduinoJson 6 or 7, DHT sensor library, LiquidCrystal_I2C.
 4.  Under **Tools**, choose:
     *   **Board:** "ESP32 Dev Module".
-    *   **Partition Scheme:** "**Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)**". The default scheme leaves too little room for this sketch with updates over Wi-Fi.
+    *   **Partition Scheme:** "**Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)**". It has the two app slots that cloud updates need; the default scheme is too small.
 5.  Connect your ESP32 via USB and click **Upload**.
 6.  Once it has started, use your phone to connect to the **RespiroSync-Setup** Wi-Fi network, then enter your Wi-Fi password and the token from the dashboard.
 7.  Open `pico_cough_ai/pico_cough_ai.ino` in the Arduino IDE with the arduino-pico core selected.
 8.  Connect your Raspberry Pi Pico via USB and click **Upload**. The first time, hold **BOOTSEL** while plugging it in (it appears as the RPI-RP2 drive).
 9.  Mount the hardware in the bedroom and monitor the dashboard!
 
-## Updating the ESP32 over Wi-Fi
+## Updating the ESP32 from the cloud (OTA)
 
-Once the board runs this firmware (with `OTA_PASSWORD` set), it does not need the USB cable for updates:
-1.  Keep the PC on the **same Wi-Fi** as the device.
-2.  In the Arduino IDE, open **Tools → Port**. Under "Network ports", choose **respirosync-xxxxxx** (your token in small letters).
-3.  Click **Upload** and enter the `OTA_PASSWORD` when asked.
-4.  The LCD shows **Updating... 0-100%**, then "Update done", and the device restarts. The token and Wi-Fi are kept.
+Once a device runs firmware 6.2.0 or newer (flashed once over USB with the partition scheme above), new versions are installed over the internet. Nothing needs to be on the same Wi-Fi.
 
-If the port does not appear:
-*   Check that the PC and device are on the same network. Some routers and campus Wi-Fi block devices from seeing each other; on those, use USB.
-*   Restart the IDE.
+**1. Build** (developer, on the PC):
+1.  In `esp32_firmware.ino`, raise `FIRMWARE_VERSION` (e.g. `"6.2.1"`).
+2.  In the Arduino IDE, keep the same board and partition scheme. Then **Sketch → Export Compiled Binary**.
+3.  The file you need is `build/.../esp32_firmware.ino.bin`, not `.merged.bin` or `.bootloader.bin`.
 
-The first upload with the new partition scheme must be over USB. Do **not** tick "Erase All Flash Before Sketch Upload" for normal updates: it also erases the token and Wi-Fi, so the device would need pairing again.
+**2. Publish** (developer, on the NAS):
+1.  Copy the `.ino.bin` into `backend/storage/app/firmware/` in the project folder (e.g. with the NAS file manager).
+2.  Run:
+    ```bash
+    sudo docker compose exec backend php artisan firmware:publish storage/app/firmware/esp32_firmware.ino.bin --notes="What changed"
+    ```
+    It checks the file is an ESP32 app image that fits, reads the version from it, and keeps it as `esp32-<version>.bin`.
+3.  `--list` shows the published versions, and `--remove=6.2.1` withdraws one.
+
+**3. Install** (owner, in the dashboard):
+1.  **Account Settings** shows a blue dot. Under **Rooms**, each device shows its firmware and **Update to 6.2.1**.
+2.  The device must be online, and no alarm may be active.
+3.  The LCD shows **Updating 6.2.1** with a percentage, then "Update done", and restarts. Rooms then shows **Updated**.
+
+**Safety:**
+*   **The link:** the device downloads over HTTPS through a one-time link (valid 10 minutes, only for that device).
+*   **The checksum:** after writing the image, the device compares its SHA-256 with the published one. On a mismatch it keeps the old firmware.
+*   **Rollback:** the new firmware must reach the cloud within 2 minutes, or the ESP32 starts the previous firmware again. Rooms then shows "Update failed" with the reason. A failed download also leaves the old firmware running.
+*   **Not done here:** the image is not cryptographically signed. Commercial devices also use secure boot / signed images. That burns keys into the chip permanently, so it is left out of this prototype.
