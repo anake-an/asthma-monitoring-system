@@ -4,7 +4,8 @@
  * Hardware: Raspberry Pi Pico (or Pico W) + INMP441 I2S microphone
  *
  * WHAT THIS IS (and is not):
- *   A sound-level heuristic. It flags short, loud bursts and reports a
+ *   A sound-level heuristic. It flags short, loud bursts (at least 32 ms, ignoring the first
+ *   3 s after power-on) and reports a
  *   "detection strength" between 0 and 1. It does NOT tell a cough apart from a
  *   clap, a door slam or a shout. See README "Phase 2" for a trained classifier.
  *
@@ -49,11 +50,14 @@ const int FRAMES_PER_BLOCK = 256;  // 16 ms per analysis block
 const float RMS_THRESHOLD = 50000.0f;
 const unsigned long DEBOUNCE_MS = 1500;    // one cough = one event
 const unsigned long LONG_PRESS_MS = 800;   // test button: held this long = strong cough
+const unsigned long SETTLE_MS = 3000;      // ignore sound for this long after power-on
+const int MIN_LOUD_BLOCKS = 2;             // a burst must last 2 blocks (32 ms); a cough lasts 200-500 ms
 #define DEBUG_LEVELS 0
 
 I2S i2s(INPUT);
 bool micReady = false;
 unsigned long lastCoughTime = 0;
+int loudBlocks = 0;  // consecutive blocks above the threshold
 
 /** Send one detection to the ESP32 and blink the LED. */
 void sendCough(int level, float strength, const char *source) {
@@ -105,6 +109,9 @@ void setup() {
   i2s.setFrequency(SAMPLE_RATE);
 
   micReady = i2s.begin();
+  // Pull the data line down: without a microphone (or while it starts) it would float and
+  // pick up noise that looks like a loud burst. The INMP441 datasheet asks for a pull-down too.
+  gpio_pull_down(I2S_DATA);
   if (micReady) {
     Serial.println("I2S microphone ready. Listening... (test: c / s, or the GP2 button)");
   } else {
@@ -139,7 +146,12 @@ void loop() {
   Serial.println(rms);
 #endif
 
-  if (rms < RMS_THRESHOLD) return;
+  if (rms < RMS_THRESHOLD) {
+    loudBlocks = 0;
+    return;
+  }
+  // Not during start-up, and not for a single 16 ms spike (electrical noise, a click).
+  if (millis() < SETTLE_MS || ++loudBlocks < MIN_LOUD_BLOCKS) return;
 
   unsigned long now = millis();
   if (now - lastCoughTime < DEBOUNCE_MS) return;
