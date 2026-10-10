@@ -27,7 +27,7 @@ The ESP32 is the central brain of the hardware system.
         *   **Cough:** "Cough heard" with a moving pulse, for 2 s.
         *   **Alert from the app:** "!! ALERT !!".
         *   **Connection drops:** "Offline / Alarms still on".
-    *   **Clock source:** the internet time servers (NTP). Where a network blocks those (UDP port 123), the device reads the time from the `Date` header of an HTTPS request to the broker's own host instead.
+    *   **Clock source:** the internet time servers (NTP). Where a network blocks those (UDP port 123), the device asks the server over MQTT (a `time_request` event, answered with a `set_time` command), every 30 s until it has the time.
     *   **Night mode (21:00-07:00):** the backlight is off unless there is an alarm or a cough. It also lights up for 30 s after the board's **BOOT** button is pressed. Outside night mode, the BOOT button shows the next page.
 
 ## 2. Raspberry Pi Pico (Acoustic AI Coprocessor)

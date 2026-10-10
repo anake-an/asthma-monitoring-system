@@ -5,14 +5,14 @@
  * - Receives cough detections from the Raspberry Pi Pico over UART2
  * - Publishes to   respirosync/devices/<token>/telemetry and /events
  * - Subscribes to  respirosync/devices/<token>/config   (retained thresholds)
- *                  respirosync/devices/<token>/commands (factory_reset, buzzer_on, buzzer_off)
+ *                  respirosync/devices/<token>/commands (factory_reset, buzzer_on, buzzer_off, set_time)
  * - Sounds the local alarm when a reading crosses its threshold, even while offline
  * - 16x2 LCD, every line centred: start-up steps (Wi-Fi, clock, cloud), pages every 5 s with the
  *   title on top and values below (Air quality, Room climate, clock, "Daily dose?" while due), alerts
  *   that blink the backlight, a cough animation, and night mode (backlight off 21:00-07:00
  *   unless there is an alert or the BOOT button is pressed)
  * - Gas sensor warm-up: not read for the first 3 minutes (sent as null)
- * - Clock from NTP, or from the Date header of the broker's host where NTP is blocked
+ * - Clock from NTP, or asked from the server over MQTT where NTP is blocked
  *
  * Setup: copy secrets.example.h to secrets.h and fill it in. Pairing token is
  * entered on the "RespiroSync-Setup" Wi-Fi portal.
@@ -24,7 +24,6 @@
 #include <ArduinoJson.h>
 #include "mqtt_client.h"  // ESP-IDF MQTT client (WebSockets + TLS)
 #include "esp_crt_bundle.h"
-#include "esp_http_client.h"  // clock from the server when NTP is blocked
 #include <sys/time.h>
 #include <DHT.h>
 #include <Wire.h>
@@ -100,6 +99,7 @@ portMUX_TYPE thresholdsMux = portMUX_INITIALIZER_UNLOCKED;
 enum PendingCommand { CMD_NONE, CMD_FACTORY_RESET, CMD_BUZZER_ON, CMD_BUZZER_OFF };
 volatile PendingCommand pendingCommand = CMD_NONE;
 bool cloudAlarm = false;
+volatile uint32_t serverEpoch = 0;  // time from the server ("set_time"), applied in loop()
 
 void saveConfigCallback() { shouldSaveConfig = true; }
 
@@ -160,6 +160,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         if (strcmp(cmd, "factory_reset") == 0) pendingCommand = CMD_FACTORY_RESET;
         else if (strcmp(cmd, "buzzer_on") == 0) pendingCommand = CMD_BUZZER_ON;
         else if (strcmp(cmd, "buzzer_off") == 0) pendingCommand = CMD_BUZZER_OFF;
+        else if (strcmp(cmd, "set_time") == 0) serverEpoch = doc["epoch"] | 0UL;
       }
       break;
     }
@@ -360,8 +361,8 @@ void setBacklight(bool on) {
 
 // ===================== Clock =====================
 // Malaysia time (UTC+8, no daylight saving) from internet time servers (NTP, UDP port 123). Some
-// networks block that port, so the time is also read from the Date header of an HTTPS request to
-// the broker's own host, which is reachable whenever the device can connect at all.
+// networks block that port, so until the clock is set the device also asks the server over MQTT
+// ("time_request" event, answered with a "set_time" command), which works wherever it connects.
 
 /** Local time, or false before it has been set. */
 bool localTime(struct tm *t) {
@@ -381,63 +382,7 @@ bool isNight() {
   return localTime(&t) && (t.tm_hour >= 21 || t.tm_hour < 7);
 }
 
-char httpDate[40] = "";
-
-esp_err_t onHttpEvent(esp_http_client_event_t *evt) {
-  if (evt->event_id == HTTP_EVENT_ON_HEADER && strcasecmp(evt->header_key, "Date") == 0) {
-    strncpy(httpDate, evt->header_value, sizeof(httpDate) - 1);
-  }
-  return ESP_OK;
-}
-
-/** Days since 1970-01-01 for a calendar date (H. Hinnant's days_from_civil). */
-long daysFromCivil(int y, int m, int d) {
-  y -= m <= 2;
-  long era = (y >= 0 ? y : y - 399) / 400;
-  long yoe = y - era * 400;
-  long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
-  long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-  return era * 146097 + doe - 719468;
-}
-
-/** Set the clock from the "Date:" header of https://<broker host>/. */
-bool clockFromServer() {
-  const char *host = strstr(MQTT_URI, "://");
-  host = host ? host + 3 : MQTT_URI;
-  int len = strcspn(host, ":/");
-  if (len <= 0 || len > 64) return false;
-  char url[80];
-  snprintf(url, sizeof(url), "https://%.*s/", len, host);
-
-  esp_http_client_config_t cfg = {};
-  cfg.url = url;
-  cfg.method = HTTP_METHOD_HEAD;
-  cfg.timeout_ms = 4000;
-  cfg.crt_bundle_attach = esp_crt_bundle_attach;  // a verified connection, like the broker's
-  cfg.event_handler = onHttpEvent;
-  httpDate[0] = '\0';
-  esp_http_client_handle_t client = esp_http_client_init(&cfg);
-  if (!client) return false;
-  esp_http_client_perform(client);
-  esp_http_client_cleanup(client);
-
-  // e.g. "Fri, 10 Oct 2026 13:45:12 GMT"
-  char mon[4] = "";
-  int d, y, hh, mm, ss;
-  if (sscanf(httpDate, "%*3s, %d %3s %d %d:%d:%d", &d, mon, &y, &hh, &mm, &ss) != 6) return false;
-  const char *months = "JanFebMarAprMayJunJulAugSepOctNovDec";
-  const char *at = strstr(months, mon);
-  if (!at || strlen(mon) != 3) return false;
-  int m = (at - months) / 3 + 1;
-  struct timeval tv;
-  tv.tv_sec = (time_t)(daysFromCivil(y, m, d) * 86400L + hh * 3600L + mm * 60L + ss);
-  tv.tv_usec = 0;
-  settimeofday(&tv, nullptr);
-  Serial.printf("Clock set from %s: %s\n", url, httpDate);
-  return true;
-}
-
-/** Start-up: wait up to 6 s for the time servers, else ask the broker's host. */
+/** Start-up: start NTP and wait up to 6 s for it (the server is asked once connected). */
 void setClock() {
   configTzTime("MYT-8", "pool.ntp.org", "time.cloudflare.com", "time.google.com");
   unsigned long start = millis();
@@ -445,20 +390,29 @@ void setClock() {
     showLoading("Setting clock");
     delay(100);
   }
-  if (!clockSet()) {
-    showScreen("Setting clock", "via server...");
-    clockFromServer();
-  }
-  Serial.println(clockSet() ? "Clock set" : "Clock not set yet (retrying later)");
+  Serial.println(clockSet() ? "Clock set (NTP)" : "No NTP answer yet: will ask the server");
 }
 
-/** While the clock is still not set, try the server again every 10 minutes. */
+/** Until the clock is set: apply the server's answer, and ask again every 30 s. */
 void retryClock() {
-  static unsigned long lastTry = 0;
-  if (clockSet() || !mqtt_connected || millis() - lastTry < 600000) return;
-  lastTry = millis();
-  clockFromServer();
+  static unsigned long lastAsk = 0;
+  uint32_t epoch = serverEpoch;
+  if (epoch) {
+    serverEpoch = 0;
+    struct timeval tv;
+    tv.tv_sec = (time_t)epoch;
+    tv.tv_usec = 0;
+    settimeofday(&tv, nullptr);
+    Serial.println("Clock set from the server");
+  }
+  if (clockSet() || !mqtt_connected) return;
+  if (lastAsk && millis() - lastAsk < 30000) return;
+  lastAsk = millis();
+  Doc doc;
+  doc["event"] = "time_request";
+  publishJson(topicEvents, doc);
 }
+
 
 // ===================== Screens =====================
 void fmtValue(char *out, size_t size, float v, int decimals) {

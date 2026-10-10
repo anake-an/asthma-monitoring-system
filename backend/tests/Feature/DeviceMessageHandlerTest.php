@@ -51,6 +51,18 @@ class DeviceMessageHandlerTest extends TestCase
         $this->assertNull($log->humidity);
     }
 
+    public function test_a_time_request_is_answered_with_the_current_time(): void
+    {
+        $this->send('events', ['event' => 'time_request']);
+
+        [$topic, $payload] = collect($this->published)->sole();
+        $this->assertSame('respirosync/devices/AAA111/commands', $topic);
+        $answer = json_decode($payload, true);
+        $this->assertSame('set_time', $answer['command']);
+        $this->assertEqualsWithDelta(time(), $answer['epoch'], 5);
+        $this->assertSame(0, CoughEvent::count());
+    }
+
     public function test_telemetry_without_pm25_is_rejected(): void
     {
         $this->send('telemetry', ['temperature' => 30]);
