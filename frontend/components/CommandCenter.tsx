@@ -20,6 +20,7 @@ export default function CommandCenter() {
     humidity_locked: false,
     mq135_locked: false,
     is_buzzer_muted: false,
+    night_mode: true, // LCD backlight off 21:00-07:00 (per room)
     ai_optimization_enabled: true
   });
   const [saving, setSaving] = useState(false);
@@ -128,6 +129,7 @@ export default function CommandCenter() {
         humidity_locked: !!data.humidity_locked,
         mq135_locked: !!data.mq135_locked,
         is_buzzer_muted: data.is_buzzer_muted || false,
+        night_mode: data.night_mode !== undefined ? !!data.night_mode : true,
         ai_optimization_enabled: data.ai_optimization_enabled !== undefined ? data.ai_optimization_enabled : true
       }))
       .catch(err => console.error(err));
@@ -499,6 +501,18 @@ export default function CommandCenter() {
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" className="sr-only peer" checked={config.is_buzzer_muted} onChange={(e) => setConfig({...config, is_buzzer_muted: e.target.checked})} />
+                    <div className="w-11 h-6 bg-zinc-100 dark:bg-zinc-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                  </label>
+                </div>
+
+                {/* Night mode toggle */}
+                <div className="bg-zinc-100 dark:bg-white/5 border border-zinc-200 dark:border-white/5 rounded-2xl p-4 flex items-center justify-between gap-3">
+                  <div>
+                    <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200 block">Night Mode</span>
+                    <span className="text-[11px] text-zinc-600 dark:text-zinc-400 font-light">Screen light off from 9 pm to 7 am. Alerts still light it up.</span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input type="checkbox" className="sr-only peer" checked={config.night_mode} onChange={(e) => setConfig({...config, night_mode: e.target.checked})} />
                     <div className="w-11 h-6 bg-zinc-100 dark:bg-zinc-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
                   </label>
                 </div>

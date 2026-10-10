@@ -14,7 +14,8 @@ Raise `FIRMWARE_VERSION` and write `WHATS_NEW.txt` (what owners read in the upda
 
 | Firmware | Build | What changed |
 |---|---|---|
-| **3.1.0** | set by CI | Start-up shows the firmware version and build; clearer update screens ("Updating 45%", "Don't unplug"); reports its build stamp |
+| **3.2.0** | set by CI | Night mode can be switched off per room in Smart Alerts |
+| 3.1.0 | 261010.7 | Start-up shows the firmware version and build; clearer update screens ("Updating 45%", "Don't unplug"); reports its build stamp |
 | 3.0.1 | 261010.6 | Start-up screens slower, so they can be read *(first update installed from the cloud; it called itself "6.2.1")* |
 | **3.0.0** | 261010.5 | Cloud updates from the dashboard, with checksum and rollback; new memory layout (two app slots), **one USB re-flash needed** *(called itself "6.2.0")* |
 | 2.3.0 | 261010.4 | Updates over Wi-Fi from the Arduino IDE (removed in 3.0.0) |
