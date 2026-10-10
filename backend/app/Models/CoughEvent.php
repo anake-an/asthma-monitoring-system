@@ -39,4 +39,10 @@ class CoughEvent extends Model
     {
         return $this->belongsTo(Device::class);
     }
+
+    /** Not marked as a false alarm (real, or not reviewed yet): what the report and banner count. */
+    public function scopeNotFalseAlarm($query)
+    {
+        return $query->where(fn ($q) => $q->whereNull('is_verified')->orWhere('is_verified', true));
+    }
 }

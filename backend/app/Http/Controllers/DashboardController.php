@@ -49,6 +49,8 @@ class DashboardController extends Controller
 
         $events = CoughEvent::with('device:id,name')
             ->whereIn('device_id', $deviceIds)
+            // ?exclude_false_alarms=1: only coughs not marked as false alarm (the dashboard's banner)
+            ->when($request->boolean('exclude_false_alarms'), fn ($q) => $q->notFalseAlarm())
             ->orderBy('recorded_at', 'desc')
             ->paginate($perPage);
 
@@ -56,8 +58,10 @@ class DashboardController extends Controller
     }
 
     /**
-     * Caregiver feedback on a cough event (confirmed / false alarm, inhaler used).
-     * The AI engine excludes events marked as false alarms from training.
+     * Caregiver feedback on a cough event: a real cough (with or without the emergency inhaler),
+     * a false alarm, or null to undo the review. The AI engine, the report and the dashboard's
+     * cough banner leave false alarms out. An inhaler dose is logged at the cough's time and
+     * removed again when the review changes.
      */
     public function verifyCoughEvent(Request $request, $id)
     {
@@ -65,16 +69,18 @@ class DashboardController extends Controller
         $this->authorizeOr404($request, $event?->device, 'logDose');
 
         $request->validate([
-            'is_verified' => 'required|boolean',
+            'is_verified' => 'present|nullable|boolean',
             'inhaler_used' => 'required|boolean',
         ]);
+        $verified = $request->input('is_verified') === null ? null : $request->boolean('is_verified');
+        $inhalerUsed = $verified === true && $request->boolean('inhaler_used'); // only for a real cough
 
         $event->update([
-            'is_verified' => $request->boolean('is_verified'),
-            'inhaler_used' => $request->boolean('inhaler_used'),
+            'is_verified' => $verified,
+            'inhaler_used' => $inhalerUsed,
         ]);
 
-        if ($request->boolean('inhaler_used')) {
+        if ($inhalerUsed) {
             InhalerLog::firstOrCreate(
                 ['cough_event_id' => $event->id],
                 [
@@ -83,7 +89,7 @@ class DashboardController extends Controller
                     // The room's child; NULL in a shared room (not attributed to a child).
                     'patient_id' => $event->device->patient_id,
                     'device_id' => $event->device_id,
-                    'administered_at' => now(),
+                    'administered_at' => $event->recorded_at ?? now(), // when the cough happened, not when it was reviewed
                 ]
             );
         } else {
@@ -92,8 +98,8 @@ class DashboardController extends Controller
 
         AuditLog::record($request->user(), 'cough.marked', $event->device->patient_id, $event->device_id, [
             'cough_event_id' => $event->id,
-            'verified' => $request->boolean('is_verified'),
-            'inhaler_used' => $request->boolean('inhaler_used'),
+            'verified' => $verified,
+            'inhaler_used' => $inhalerUsed,
         ]);
 
         return response()->json($event->makeHidden('device'));
@@ -193,7 +199,8 @@ class DashboardController extends Controller
         $startDate = now()->subDays(7);
         $deviceIds = $patient->devices()->pluck('id');
 
-        $coughs = fn () => CoughEvent::whereIn('device_id', $deviceIds)->where('recorded_at', '>=', $startDate);
+        $all = fn () => CoughEvent::whereIn('device_id', $deviceIds)->where('recorded_at', '>=', $startDate);
+        $coughs = fn () => $all()->notFalseAlarm(); // false alarms are not counted, only reported as a number
         $inhalers = fn () => InhalerLog::where('patient_id', $patient->id)->where('administered_at', '>=', $startDate);
 
         $rescueDoses = $inhalers()->where('type', 'rescue')->count();
@@ -204,6 +211,7 @@ class DashboardController extends Controller
             'start_date' => $startDate->toDateString(),
             'end_date' => now()->toDateString(),
             'total_events' => $coughs()->count(),
+            'false_alarms' => $all()->where('is_verified', false)->count(),
             'high_severity_events' => $coughs()->where('severity', '>=', CoughEvent::SEVERITY_ALERT)->count(),
             'inhaler_doses' => $rescueDoses + $controllerDoses,
             'rescue_doses' => $rescueDoses,

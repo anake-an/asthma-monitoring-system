@@ -22,6 +22,7 @@ export type ReportData = {
   start_date: string;
   end_date: string;
   total_events: number;
+  false_alarms?: number; // marked as false alarm in the cough history: not counted anywhere else
   high_severity_events: number;
   inhaler_doses: number;
   rescue_doses: number;
@@ -108,7 +109,8 @@ export const whenText = (iso: string) =>
 
 // The texts of the summary box, shared by the page and the PDF.
 export const observationText = (data: ReportData) =>
-  `During this reporting period, the device recorded ${data.total_events} cough-like sounds (a loudness detector, not a diagnosis), of which ${data.high_severity_events} met the alert rule (3 within 10 minutes, or 2 with a strong detection).`;
+  `During this reporting period, the device recorded ${data.total_events} cough-like sounds (a loudness detector, not a diagnosis), of which ${data.high_severity_events} met the alert rule (3 within 10 minutes, or 2 with a strong detection).`
+  + (data.false_alarms ? ` ${data.false_alarms} other ${data.false_alarms === 1 ? "sound was" : "sounds were"} marked as false alarms and are not counted.` : "");
 // Facts only: the app does not judge asthma control or suggest treatment changes.
 export const medicationText = (data: ReportData) =>
   `The emergency (blue) inhaler was logged ${timesText(data.rescue_doses)} and the daily (brown) inhaler ${timesText(data.controller_doses)} in these 7 days. This log records usage only and is not a medical assessment; show it to your doctor, especially if usage has changed.`;

@@ -59,7 +59,8 @@ export default function EventTimeline() {
   // Another room: back to its first page.
   useEffect(() => setPage(1), [deviceId]);
 
-  const handleVerify = async (id: number, isVerified: boolean, inhalerUsed: boolean) => {
+  // isVerified: true = a real cough, false = false alarm, null = undo the review.
+  const handleVerify = async (id: number, isVerified: boolean | null, inhalerUsed: boolean) => {
     try {
       const token = localStorage.getItem("auth_token");
       const res = await fetch(`/api/cough-events/${id}/verify`, {
@@ -115,13 +116,13 @@ export default function EventTimeline() {
       </div>
 
       <div className="flex-1 overflow-x-auto overflow-y-auto border border-zinc-200 dark:border-[#1e1e30] rounded-md">
-        <div className="min-w-[550px]">
+        <div className="min-w-[600px]">
           {/* Table Header */}
-          <div className="grid grid-cols-[1fr_80px_80px_180px] gap-3 px-4 py-2.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-400 uppercase tracking-wider bg-gray-50 dark:bg-[#0e0e18] border-b border-zinc-200 dark:border-[#1e1e30]">
+          <div className="grid grid-cols-[1fr_80px_80px_230px] gap-3 px-4 py-2.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-400 uppercase tracking-wider bg-gray-50 dark:bg-[#0e0e18] border-b border-zinc-200 dark:border-[#1e1e30]">
             <span>Timestamp</span>
             <span title="Sound-level heuristic from the Pico, not a probability">Strength</span>
             <span>Status</span>
-            <span className="text-right">AI Feedback</span>
+            <span className="text-right" title="Your review teaches the AI: false alarms are left out of training and the report">Your review</span>
           </div>
 
           <div className="flex flex-col">
@@ -132,7 +133,7 @@ export default function EventTimeline() {
             return (
               <div
                 key={ev.id}
-                className="grid grid-cols-[1fr_80px_80px_180px] gap-3 px-4 py-3 border-b border-zinc-200 dark:border-[#1a1a2e] hover:bg-zinc-50 dark:hover:bg-[#16162a] transition-colors items-center"
+                className="grid grid-cols-[1fr_80px_80px_230px] gap-3 px-4 py-3 border-b border-zinc-200 dark:border-[#1a1a2e] hover:bg-zinc-50 dark:hover:bg-[#16162a] transition-colors items-center"
               >
                 <div className="flex items-center gap-3">
                   <span className={`inline-block w-1.5 h-1.5 rounded-full ${sev.dot}`}></span>
@@ -158,25 +159,43 @@ export default function EventTimeline() {
                     <span className="text-[10px] px-2 py-1 rounded border bg-zinc-100 dark:bg-zinc-800/50 text-zinc-500 border-zinc-200 dark:border-zinc-800">Not reviewed</span>
                   ) : isVerified === null ? (
                     <>
-                      <button 
+                      <button
                         onClick={() => handleVerify(ev.id, true, true)}
-                        className="px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded text-[10px] transition-colors"
-                        title="Confirm Asthma & Inhaler Used"
+                        className="px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20 rounded text-[10px] transition-colors"
+                        title="A real cough, and the emergency (blue) inhaler was used: logs a dose at the cough's time"
                       >
                         Inhaler
                       </button>
-                      <button 
-                        onClick={() => handleVerify(ev.id, false, false)}
-                        className="px-2 py-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-700 text-zinc-600 dark:text-zinc-400 border border-zinc-700 rounded text-[10px] transition-colors"
-                        title="Mark as False Alarm"
+                      <button
+                        onClick={() => handleVerify(ev.id, true, false)}
+                        className="px-2 py-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 dark:text-blue-400 border border-blue-500/20 rounded text-[10px] transition-colors"
+                        title="A real cough, no inhaler needed"
                       >
-                        False Alarm
+                        Real cough
+                      </button>
+                      <button
+                        onClick={() => handleVerify(ev.id, false, false)}
+                        className="px-2 py-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-400 border border-zinc-300 dark:border-zinc-700 rounded text-[10px] transition-colors"
+                        title="Not a cough (a door, a clap...): left out of the report and the AI's training"
+                      >
+                        False alarm
                       </button>
                     </>
                   ) : (
-                    <span className={`text-[10px] px-2 py-1 rounded border ${isVerified ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-zinc-100 dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'}`}>
-                      {isVerified ? (ev.inhaler_used ? 'Inhaler Confirmed' : 'Verified') : 'False Alarm'}
-                    </span>
+                    <>
+                      <span className={`text-[10px] px-2 py-1 rounded border ${isVerified ? 'bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border-emerald-500/20' : 'bg-zinc-100 dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'}`}>
+                        {isVerified ? (ev.inhaler_used ? 'Inhaler used' : 'Real cough') : 'False alarm'}
+                      </span>
+                      {canMarkCoughs && (
+                        <button
+                          onClick={() => handleVerify(ev.id, null, false)}
+                          className="text-[10px] text-zinc-400 hover:text-blue-500 underline-offset-2 hover:underline"
+                          title={ev.inhaler_used ? "Undo the review (also removes the inhaler dose it logged)" : "Undo the review"}
+                        >
+                          Change
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>

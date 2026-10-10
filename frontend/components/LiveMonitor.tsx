@@ -112,7 +112,8 @@ export default function LiveMonitor() {
 
     const fetchSlow = async (headers: HeadersInit) => {
         // Fetch Cough Events to set AI Status
-        const coughRes = await fetch(withDevice("/api/cough-events?per_page=1", deviceId), { headers });
+        // The newest cough not marked as a false alarm.
+        const coughRes = await fetch(withDevice("/api/cough-events?per_page=1&exclude_false_alarms=1", deviceId), { headers });
         if (coughRes.ok) {
           const coughData = await coughRes.json();
           if (!active) return;
@@ -120,6 +121,8 @@ export default function LiveMonitor() {
             const latestEvent = coughData.data[0];
             const diffHours = (new Date().getTime() - new Date(latestEvent.recorded_at).getTime()) / (1000 * 60 * 60);
             setCoughDetected(diffHours < 12); // Alert if cough detected in last 12 hours
+          } else {
+            setCoughDetected(false); // none, or only false alarms
           }
         }
 
