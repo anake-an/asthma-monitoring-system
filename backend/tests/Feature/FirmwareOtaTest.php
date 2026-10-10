@@ -47,11 +47,12 @@ class FirmwareOtaTest extends TestCase
     }
 
     /** A minimal ESP32 app image: magic byte, hash_appended flag, version marker, 32-byte digest. */
-    private function image(string $version, bool $hashAppended = true, string $magic = "\xE9"): string
+    private function image(string $version, bool $hashAppended = true, string $magic = "\xE9", ?string $build = null): string
     {
         $header = $magic . str_repeat("\0", 22) . ($hashAppended ? "\x01" : "\0");
+        $tag = FirmwareRelease::VERSION_TAG . $version . ($build !== null ? " build {$build}" : '');
 
-        return $header . str_repeat("\x55", 100) . FirmwareRelease::VERSION_TAG . $version . "\0" . str_repeat("\x55", 100) . hash('sha256', $version, true);
+        return $header . str_repeat("\x55", 100) . $tag . "\0" . str_repeat("\x55", 100) . hash('sha256', $version . $build, true);
     }
 
     private function publish(string $version): FirmwareRelease
@@ -214,5 +215,50 @@ class FirmwareOtaTest extends TestCase
         Sanctum::actingAs($this->owner);
 
         $this->getJson('/api/devices')->assertJsonPath('devices.0.ota.status', 'failed');
+    }
+
+    public function test_builds_are_read_and_compared_after_the_version(): void
+    {
+        $this->assertSame('261011.2', FirmwareImage::inspect($this->image('3.1.0', build: '261011.2'))['build']);
+        $this->assertNull(FirmwareImage::inspect($this->image('3.1.0'))['build']);
+
+        $this->assertGreaterThan(0, FirmwareRelease::compare('3.1.0', '261011', '3.0.1', '261010.6'));
+        $this->assertGreaterThan(0, FirmwareRelease::compare('3.1.0', '261011.10', '3.1.0', '261011.9'));
+        $this->assertSame(0, FirmwareRelease::compare('3.1.0', 'dev', '3.1.0', '261011'));
+        $this->assertSame('3.1.0 Build 261011', FirmwareRelease::label('3.1.0', '261011'));
+        $this->assertSame('3.1.0', FirmwareRelease::label('3.1.0', 'dev'));
+    }
+
+    public function test_the_first_builds_6_2_x_count_as_firmware_3_0_x(): void
+    {
+        $this->hello(['firmware' => '6.2.1', 'boot' => true]);
+        $device = $this->bedroom->fresh();
+        $this->assertSame(['3.0.1', '261010.6'], [$device->firmware_version, $device->firmware_build]);
+
+        // So 3.1.0 is offered to it, and 3.0.1 is not.
+        $this->assertTrue(FirmwareRelease::make(['version' => '3.1.0', 'build' => '261011'])->isNewerThan('6.2.1', null));
+        $this->assertFalse(FirmwareRelease::make(['version' => '3.0.1', 'build' => '261010.6'])->isNewerThan('6.2.1', null));
+    }
+
+    public function test_owners_see_the_update_and_whats_new_line_by_line(): void
+    {
+        config(['services.firmware.upload_token' => 'ci-key']);
+        $this->call('POST', '/api/firmware/upload', [], [], [], [
+            'HTTP_AUTHORIZATION' => 'Bearer ci-key',
+            'CONTENT_TYPE' => 'application/octet-stream',
+            'HTTP_X_FIRMWARE_NOTES' => 'Start-up screens are easier to read|Clearer update messages',
+        ], $this->image('3.1.0', build: '261011'))->assertCreated();
+        Sanctum::actingAs($this->owner);
+
+        $this->getJson('/api/devices')
+            ->assertJsonPath('latest_firmware.label', '3.1.0 Build 261011')
+            ->assertJsonPath('latest_firmware.notes', "Start-up screens are easier to read\nClearer update messages")
+            ->assertJsonPath('devices.0.update_available', true)
+            ->assertJsonPath('product.model', FirmwareRelease::MODEL);
+
+        $this->hello(['firmware' => '3.1.0', 'build' => '261011', 'boot' => true]);
+        $this->getJson('/api/devices')
+            ->assertJsonPath('devices.0.update_available', false)
+            ->assertJsonPath('devices.0.firmware_label', '3.1.0 Build 261011');
     }
 }

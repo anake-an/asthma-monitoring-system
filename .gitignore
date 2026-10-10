@@ -57,3 +57,6 @@ hardware/esp32_firmware/secrets.h
 # Auto-deploy log on the server, and the file Next.js generates on every build
 deploy.log
 frontend/next-env.d.ts
+
+# Written by CI with the firmware's build stamp
+hardware/esp32_firmware/build_info.h

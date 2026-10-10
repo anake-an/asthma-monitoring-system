@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\CoughEvent;
 use App\Models\Device;
+use App\Models\FirmwareRelease;
 use App\Models\HardwareConfig;
 use App\Models\LimitAlert;
 use App\Models\TelemetryLog;
@@ -214,7 +215,9 @@ class DeviceMessageHandler
         if (!is_string($version) || !preg_match('/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/', $version)) {
             return;
         }
-        $changes = ['firmware_version' => $version];
+        $build = is_string($data['build'] ?? null) && preg_match('/^([0-9.]{1,32}|dev)$/', $data['build']) ? $data['build'] : null;
+        [$version, $build] = FirmwareRelease::normalize($version, $build); // the first builds said "6.2.x"
+        $changes = ['firmware_version' => $version, 'firmware_build' => $build];
         if ($device->ota_status === 'updating') {
             if ($version === $device->ota_target_version) {
                 $changes += ['ota_status' => 'updated', 'ota_error' => null];

@@ -48,7 +48,12 @@ export default function CommandCenter() {
   // Smart Alerts are per room: the one chosen in the header.
   const { device, deviceId, devices, latestFirmware } = useRooms();
   // Rooms this owner can update to newer firmware: a dot on "Account Settings" (updates are in Rooms).
-  const firmwareUpdates = devices.filter(d => firmwareUpdateFor(d, latestFirmware)).length;
+  const updateRooms = devices.filter(d => firmwareUpdateFor(d, latestFirmware));
+  const firmwareUpdates = updateRooms.length;
+  const [bannerDismissedFor, setBannerDismissedFor] = useState<string | null>(null);
+  useEffect(() => {
+    try { setBannerDismissedFor(localStorage.getItem("respirosync_fw_banner")); } catch {}
+  }, []);
   const canConfigure = !!device?.can_configure;
 
   // Lock switch under each limit, with a line saying what the AI may do with it.
@@ -316,6 +321,25 @@ export default function CommandCenter() {
           </div>
         </div>
 
+        {/* Firmware update available: like a phone app's update banner; hidden once dismissed for that version */}
+        {updateRooms.length > 0 && latestFirmware && bannerDismissedFor !== latestFirmware.label && (
+          <div className="mb-3 flex items-center gap-3 rounded-xl border border-blue-500/20 bg-blue-50 dark:bg-blue-500/10 px-3 py-2.5 text-sm">
+            <span className="flex-1 text-blue-800 dark:text-blue-200">
+              An update is available for {updateRooms.length === 1 ? updateRooms[0].name : `${updateRooms.length} rooms`}.
+            </span>
+            <button onClick={() => setShowAccountModal(true)} className="text-xs font-semibold text-blue-600 dark:text-blue-300 hover:underline shrink-0">View</button>
+            <button
+              onClick={() => {
+                setBannerDismissedFor(latestFirmware.label);
+                try { localStorage.setItem("respirosync_fw_banner", latestFirmware.label); } catch {}
+              }}
+              aria-label="Dismiss"
+              className="text-blue-400 hover:text-blue-600 shrink-0"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
+        )}
         <div className="space-y-2">
           <button 
             onClick={() => setShowModal(true)}

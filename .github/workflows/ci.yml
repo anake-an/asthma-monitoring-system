@@ -244,7 +244,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 2
+          fetch-depth: 0  # full history: the build stamp counts today's firmware builds
 
       - name: Firmware changed and secrets set?
         id: check
@@ -277,20 +277,28 @@ jobs:
             printf '#define MQTT_USERNAME "%s"\n' "${MQTT_USERNAME:-respirosync_device}"
             printf '#define MQTT_PASSWORD "%s"\n' "$MQTT_PASSWORD"
           } > hardware/esp32_firmware/secrets.h
+          # Build stamp: date (Malaysia) YYMMDD, plus ".N" when this is the Nth firmware change on main today.
+          export TZ=Asia/Kuala_Lumpur
+          DAY=$(date +%y%m%d)
+          N=$(git log --first-parent --since="$(date +%Y-%m-%d) 00:00" --format=%H -- hardware/esp32_firmware | wc -l)
+          BUILD=$DAY; [ "$N" -gt 1 ] && BUILD="$DAY.$N"
+          echo "#define FIRMWARE_BUILD \"$BUILD\"" > hardware/esp32_firmware/build_info.h
+          echo "Firmware build $BUILD"
           arduino-cli compile --fqbn "$FQBN" --output-dir build hardware/esp32_firmware
-          rm hardware/esp32_firmware/secrets.h
+          rm hardware/esp32_firmware/secrets.h hardware/esp32_firmware/build_info.h
           ls -l build/esp32_firmware.ino.bin
 
       - name: Upload to the server
         if: steps.check.outputs.publish == 'true'
         run: |
-          # The PR title of a merge commit (its message body), else the commit subject.
-          NOTES=$(git log -1 --pretty=%b | head -n 1)
+          # "What's new" for owners: the lines of WHATS_NEW.txt (joined by |), else the PR title.
+          NOTES=$(grep -v '^[[:space:]]*#' hardware/esp32_firmware/WHATS_NEW.txt 2>/dev/null | sed '/^[[:space:]]*$/d' | paste -sd'|' -)
+          [ -n "$NOTES" ] || NOTES=$(git log -1 --pretty=%b | head -n 1)
           [ -n "$NOTES" ] || NOTES=$(git log -1 --pretty=%s)
           curl --fail-with-body -sS -X POST "$UPLOAD_URL" \
             -H "Authorization: Bearer $UPLOAD_TOKEN" \
             -H "Content-Type: application/octet-stream" \
-            -H "X-Firmware-Notes: ${NOTES:0:200}" \
+            -H "X-Firmware-Notes: ${NOTES:0:480}" \
             -A "RespiroSync-CI" \
             --data-binary @build/esp32_firmware.ino.bin
           echo

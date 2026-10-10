@@ -27,8 +27,8 @@ class FirmwareController extends Controller
         $device = $this->device($request, 'configure');
 
         $release = FirmwareRelease::latest();
-        if (!$release || !FirmwareRelease::isNewer($release->version, $device->firmware_version)) {
-            return response()->json(['message' => 'This device already has the newest firmware.'], 422);
+        if (!$release || !$release->isNewerThan($device->firmware_version, $device->firmware_build)) {
+            return response()->json(['message' => 'This device is already up to date.'], 422);
         }
         if ($device->status !== 'online') {
             return response()->json(['message' => 'The device is offline. Turn it on and try again.'], 422);

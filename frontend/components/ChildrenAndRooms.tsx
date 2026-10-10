@@ -4,7 +4,8 @@
 // not counted for any child). Only a name is stored for a child (PDPA data minimisation).
 
 import { useState } from "react";
-import { authHeaders, firmwareUpdateFor, useRooms, type Device } from "@/lib/rooms";
+import { authHeaders, useRooms, type Device } from "@/lib/rooms";
+import FirmwareUpdate from "@/components/FirmwareUpdate";
 import SharePanel from "@/components/SharePanel";
 import ThemedSelect from "@/components/ThemedSelect";
 import ChildBadge, { BADGE_COLORS, BADGE_EMOJIS, BADGE_STYLES, badgeColor, type BadgeColor } from "@/components/ChildBadge";
@@ -32,7 +33,7 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
   onToast: (message: string, type: "success" | "error") => void;
   onConfirm: (confirm: Confirm) => void;
 }) {
-  const { devices, patients, patientId, latestFirmware, refresh } = useRooms();
+  const { devices, patients, patientId, refresh } = useRooms();
   const owned = patients.filter(p => p.role === "owner");
   const [names, setNames] = useState<Record<string, string>>({}); // drafts: "p<id>" / "d<id>"
   const [newChild, setNewChild] = useState("");
@@ -91,43 +92,6 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
       onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
     />
   );
-
-  // Firmware of a room's device, the state of its last cloud update, and "Update to x.y.z" for owners.
-  const firmwareLine = (d: Device) => {
-    const update = firmwareUpdateFor(d, latestFirmware);
-    const ota = d.ota ?? { status: null, target: null, error: null };
-    return (
-      <div className="space-y-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-          <span>Firmware {d.firmware_version ?? "older than 6.2.0"}</span>
-          {ota.status === "updating" && (
-            <span className="text-blue-500 dark:text-blue-400">· Updating to {ota.target}... (about a minute, keep it powered)</span>
-          )}
-          {ota.status === "updated" && d.firmware_version === ota.target && !update && (
-            <span className="text-emerald-600 dark:text-emerald-400">· Updated</span>
-          )}
-          {ota.status === "failed" && <span className="text-red-500">· Update to {ota.target} failed</span>}
-          {update && (
-            <button
-              disabled={busy || d.status !== "online"}
-              title={d.status !== "online" ? "The device is offline" : undefined}
-              onClick={() => onConfirm({
-                title: `Update ${d.name}`,
-                message: `${d.name} will download firmware ${update} from the server, install it and restart. This takes about a minute; keep it powered. If the new firmware does not work, the device goes back to the current one by itself.`
-                  + (latestFirmware?.notes ? ` What's new: ${latestFirmware.notes}` : ""),
-                isDanger: false,
-                onConfirm: () => act(() => send("POST", `/api/devices/${d.id}/firmware-update`), `Updating ${d.name} to ${update}`),
-              })}
-              className="ml-auto px-2 py-0.5 rounded-md bg-blue-500 hover:bg-blue-600 text-white text-[10px] font-semibold uppercase tracking-wider disabled:opacity-40"
-            >
-              Update to {update}
-            </button>
-          )}
-        </div>
-        {ota.status === "failed" && ota.error && <p className="text-[11px] text-red-500/80">{ota.error}</p>}
-      </div>
-    );
-  };
 
   const pair = async () => {
     setBusy(true);
@@ -347,7 +311,7 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
                           )}
                         </div>
                         <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Token {d.device_token} · {lastSeen(d)}</p>
-                        {firmwareLine(d)}
+                        <FirmwareUpdate device={d} onToast={onToast} />
                       </div>
                     );
                   })}

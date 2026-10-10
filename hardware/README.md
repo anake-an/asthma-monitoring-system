@@ -70,10 +70,10 @@ To upgrade the Pico from Phase 1 math-based logic to Phase 2 True AI (Distinguis
 
 ## Updating the ESP32 from the cloud (OTA)
 
-Once a device runs firmware 6.2.0 or newer (flashed once over USB with the partition scheme above), new versions are installed over the internet. Nothing needs to be on the same Wi-Fi.
+Once a device runs firmware 3.0.0 or newer (flashed once over USB with the partition scheme above), new versions are installed over the internet. Nothing needs to be on the same Wi-Fi. Versions read like `3.1.0 Build 261011`; see `FIRMWARE_HISTORY.md`.
 
 **Automatic (recommended):**
-1.  Raise `FIRMWARE_VERSION` and push to `main`.
+1.  Raise `FIRMWARE_VERSION` (e.g. `"3.1.1"`), write what owners should read in `WHATS_NEW.txt` (one plain point per line), and push to `main`.
 2.  GitHub Actions builds the firmware with the real broker settings and uploads it to the server (job "Publish ESP32 firmware to the server").
 3.  Owners see the update in the dashboard.
 
@@ -96,7 +96,7 @@ If Cloudflare's "Bot Fight Mode" is on, it may block the upload; turn it off, or
 **By hand (without GitHub):**
 
 **1. Build** (developer, on the PC):
-1.  In `esp32_firmware.ino`, raise `FIRMWARE_VERSION` (e.g. `"6.2.1"`).
+1.  In `esp32_firmware.ino`, raise `FIRMWARE_VERSION` (e.g. `"3.1.1"`).
 2.  In the Arduino IDE, keep the same board and partition scheme. Then **Sketch → Export Compiled Binary**.
 3.  The file you need is `build/.../esp32_firmware.ino.bin`, not `.merged.bin` or `.bootloader.bin`.
 
@@ -107,12 +107,12 @@ If Cloudflare's "Bot Fight Mode" is on, it may block the upload; turn it off, or
     sudo docker compose exec backend php artisan firmware:publish storage/app/firmware/esp32_firmware.ino.bin --notes="What changed"
     ```
     It checks the file is an ESP32 app image that fits, reads the version from it, and keeps it as `esp32-<version>.bin`.
-3.  `--list` shows the published versions, and `--remove=6.2.1` withdraws one.
+3.  `--list` shows the published versions, and `--remove=3.1.1` withdraws one.
 
 **3. Install** (owner, in the dashboard):
-1.  **Account Settings** shows a blue dot. Under **Rooms**, each device shows its firmware and **Update to 6.2.1**.
+1.  Owners see a banner ("An update is available for Ali Bedroom") and a dot on **Account Settings**. Under **Rooms**, the device shows "Firmware 3.1.0 · ● Update available" and an **Update** button. The dialog lists "What's new" and has **Later** / **Update now**.
 2.  The device must be online, and no alarm may be active.
-3.  The LCD shows **Updating 6.2.1** with a percentage, then "Update done", and restarts. Rooms then shows **Updated**.
+3.  The LCD shows **Updating 45%** / **Don't unplug**, then "Update done", and restarts. Rooms then shows **✓ Up to date**.
 
 **Safety:**
 *   **The link:** the device downloads over HTTPS through a one-time link (valid 10 minutes, only for that device).

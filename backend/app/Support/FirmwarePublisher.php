@@ -30,12 +30,24 @@ class FirmwarePublisher
 
         $release = FirmwareRelease::create([
             'version' => $image['version'],
+            'build' => $image['build'],
             'filename' => $filename,
             'size' => $image['size'],
             'image_sha256' => $image['image_sha256'],
-            'notes' => $notes !== null && $notes !== '' ? mb_substr($notes, 0, 500) : null,
+            'notes' => self::notes($notes),
         ]);
 
         return ['release' => $release, 'created' => true];
+    }
+
+    /**
+     * "What's new" for owners, one point per line. CI sends the lines of WHATS_NEW.txt joined by
+     * "|" (a header cannot hold line breaks); stored with line breaks.
+     */
+    private static function notes(?string $notes): ?string
+    {
+        $lines = array_values(array_filter(array_map('trim', preg_split('/[|\r\n]+/', (string) $notes))));
+
+        return $lines ? mb_substr(implode("\n", $lines), 0, 500) : null;
     }
 }

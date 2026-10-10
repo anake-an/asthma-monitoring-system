@@ -14,7 +14,10 @@ export type Device = {
   patient: { id: number; name: string; color: string | null; emoji: string | null } | null;
   last_seen_at: string | null;
   can_configure: boolean;
-  firmware_version: string | null; // reported by the device when it connects (6.2.0 and newer)
+  firmware_version: string | null; // reported by the device when it connects (3.0.0 and newer)
+  firmware_build: string | null; // build stamp, e.g. "261011.2"
+  firmware_label: string | null; // "3.1.0 Build 261011"
+  update_available: boolean; // a newer firmware is published on the server
   ota: { status: "updating" | "updated" | "failed" | null; target: string | null; error: string | null };
 };
 
@@ -29,7 +32,7 @@ export type Patient = {
   devices: { id: number; name: string; status: string }[];
 };
 
-export type FirmwareInfo = { version: string; notes: string | null };
+export type FirmwareInfo = { version: string; build: string | null; label: string; notes: string | null };
 
 type Rooms = {
   loaded: boolean;
@@ -137,23 +140,11 @@ export function roomLabel(device: Device): string {
   return `${device.name} · ${device.patient ? device.patient.name : "shared room"}`;
 }
 
-/** True when version a is newer than b (b null = a device too old to report one). "6.10.0" > "6.9.1". */
-export function isNewerVersion(a: string, b: string | null): boolean {
-  if (!b) return true;
-  const parse = (v: string) => {
-    const [core, suffix] = v.split("-", 2);
-    return { parts: core.split(".").map(n => parseInt(n, 10) || 0), suffix: suffix ?? null };
-  };
-  const x = parse(a), y = parse(b);
-  for (let i = 0; i < 3; i++) {
-    const d = (x.parts[i] ?? 0) - (y.parts[i] ?? 0);
-    if (d !== 0) return d > 0;
-  }
-  return x.suffix === null && y.suffix !== null; // 6.2.0 is newer than 6.2.0-test
-}
-
-/** An owner can update this room's device to the newest published firmware. */
+/**
+ * The firmware an owner can install on this room's device ("3.1.0"), or null: none newer, not an
+ * owner, or an update is already running. The server decides what is newer (version, then build).
+ */
 export function firmwareUpdateFor(device: Device, latest: FirmwareInfo | null): string | null {
-  if (!latest || !device.can_configure || device.ota?.status === "updating") return null;
-  return isNewerVersion(latest.version, device.firmware_version) ? latest.version : null;
+  if (!latest || !device.can_configure || !device.update_available || device.ota?.status === "updating") return null;
+  return latest.version;
 }

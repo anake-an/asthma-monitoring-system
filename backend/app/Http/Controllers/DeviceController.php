@@ -65,14 +65,28 @@ class DeviceController extends Controller
     public function getDevices(Request $request)
     {
         $user = $request->user();
+        $latest = FirmwareRelease::latest(); // owners can update a device that runs an older version
         $devices = $user->accessibleDevices()
             ->with('patient:id,name,color,emoji')
             ->orderByRaw('last_seen_at IS NULL')->orderByDesc('last_seen_at')->orderByDesc('created_at')
             ->get()
-            ->map(fn (Device $d) => $d->toArray() + ['can_configure' => $user->can('configure', $d), 'ota' => $d->otaState()]);
-        $latest = FirmwareRelease::latest(); // owners can update a device that runs an older version
+            ->map(fn (Device $d) => $d->toArray() + [
+                'can_configure' => $user->can('configure', $d),
+                'ota' => $d->otaState(),
+                'firmware_label' => FirmwareRelease::label($d->firmware_version, $d->firmware_build),
+                'update_available' => $latest !== null && $latest->isNewerThan($d->firmware_version, $d->firmware_build),
+            ]);
 
-        return response()->json(['devices' => $devices, 'latest_firmware' => $latest ? ['version' => $latest->version, 'notes' => $latest->notes] : null]);
+        return response()->json([
+            'devices' => $devices,
+            'latest_firmware' => $latest ? [
+                'version' => $latest->version,
+                'build' => $latest->build,
+                'label' => FirmwareRelease::label($latest->version, $latest->build),
+                'notes' => $latest->notes,
+            ] : null,
+            'product' => ['name' => FirmwareRelease::PRODUCT, 'model' => FirmwareRelease::MODEL, 'hardware' => FirmwareRelease::HARDWARE_REVISION],
+        ]);
     }
 
     /** Rename a device (its room) or move it to another child / a shared room (patient_id null). */
