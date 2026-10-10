@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { authHeaders, useRooms, type Patient } from "@/lib/rooms";
+import ThemedSelect, { type SelectOption } from "@/components/ThemedSelect";
 
 type Member = { user_id: number; name: string; email: string; role: Patient["role"]; alerts: boolean; is_me: boolean };
 type Invite = { id: number; email: string; role: Patient["role"]; expires_at: string };
@@ -16,7 +17,14 @@ export const ROLE_HELP: Record<Patient["role"], string> = {
   viewer: "Viewer: sees readings and reports",
 };
 
-const input = "bg-white dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-blue-500";
+// Owner, caregiver, viewer, with what each may do (shown in the role dropdowns).
+const ROLE_OPTIONS: SelectOption<Patient["role"]>[] = [
+  { value: "owner", label: "Owner", hint: "Everything, incl. limits, rooms and sharing" },
+  { value: "caregiver", label: "Caregiver", hint: "Sees all, gets alerts, logs doses" },
+  { value: "viewer", label: "Viewer", hint: "Sees readings and reports" },
+];
+
+const input ="bg-white dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-blue-500";
 
 /** One readable line per audit entry. */
 function describe(e: Entry): string {
@@ -94,17 +102,15 @@ export default function SharePanel({ patient, onToast }: {
               <p className="truncate text-[11px] text-zinc-500 dark:text-zinc-400">{m.email}</p>
             </div>
             {isOwner ? (
-              <select
-                className={input}
+              <ThemedSelect<Patient["role"]>
+                ariaLabel={`Role of ${m.name}`}
+                className="shrink-0"
                 value={m.role}
                 disabled={busy}
                 title={ROLE_HELP[m.role]}
-                onChange={e => send("PATCH", `/api/patients/${patient.id}/members/${m.user_id}`, { role: e.target.value }, "Role changed")}
-              >
-                <option value="owner">Owner</option>
-                <option value="caregiver">Caregiver</option>
-                <option value="viewer">Viewer</option>
-              </select>
+                onChange={role => send("PATCH", `/api/patients/${patient.id}/members/${m.user_id}`, { role }, "Role changed")}
+                options={ROLE_OPTIONS}
+              />
             ) : (
               <span className="text-[11px] capitalize text-zinc-500 dark:text-zinc-400" title={ROLE_HELP[m.role]}>{m.role}</span>
             )}
@@ -156,11 +162,15 @@ export default function SharePanel({ patient, onToast }: {
             }}
           >
             <input type="email" required placeholder="Email to invite" value={email} onChange={e => setEmail(e.target.value)} disabled={busy} className={`${input} flex-1 min-w-[10rem]`} />
-            <select value={role} onChange={e => setRole(e.target.value as Patient["role"])} disabled={busy} className={input} title={ROLE_HELP[role]}>
-              <option value="caregiver">Caregiver</option>
-              <option value="viewer">Viewer</option>
-              <option value="owner">Owner</option>
-            </select>
+            <ThemedSelect<Patient["role"]>
+              ariaLabel="Role for the invited person"
+              className="shrink-0"
+              value={role}
+              onChange={setRole}
+              disabled={busy}
+              title={ROLE_HELP[role]}
+              options={[ROLE_OPTIONS[1], ROLE_OPTIONS[2], ROLE_OPTIONS[0]]}
+            />
             <button type="submit" disabled={busy || !email} className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">Invite</button>
           </form>
           <p className="text-[11px] text-zinc-500 dark:text-zinc-400">{ROLE_HELP[role]}. The link works once, for that email, for 7 days.</p>
