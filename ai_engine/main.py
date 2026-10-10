@@ -48,14 +48,23 @@ engine = create_engine(DB_URL, pool_pre_ping=True)
 MODEL_DIR = os.getenv("MODEL_DIR", "/app/models")
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-# controller_24h: 1 if a controller (daily, preventive) dose was logged in the 24 h up to this window.
-# It is an input, not a label: only rescue doses mark an episode.
-FEATURES = ["pm25_level", "temperature", "humidity", "cough_count", "controller_24h"]
+# Inputs of the risk model, one row per 10-minute window (DESIGN_MULTI_PATIENT.md 5.2):
+#   pm25_level, temperature, humidity  window averages
+#   cough_count                        coughs in the window
+#   controller_24h                     1 if a daily (controller) dose was logged in the 24 h up to the
+#                                      window; an input, not a label (only rescue doses mark episodes)
+#   pm25_change, humidity_change       change since the previous window ("rising fast" vs stable)
+#   night                              1 for windows starting 22:00-05:59 (asthma often worsens at night)
+FEATURES = ["pm25_level", "temperature", "humidity", "cough_count", "controller_24h",
+            "pm25_change", "humidity_change", "night"]
 CONTROLLER_WINDOWS = 144  # 24 h of 10-minute windows
 WINDOW = "10min"
 HORIZON = 6  # windows = 60 minutes
 MAX_INTERPOLATE_WINDOWS = 3  # bridge gaps up to 30 min; longer gaps (device offline) are dropped
-MIN_STD = {"pm25_level": 2.0, "temperature": 0.5, "humidity": 2.0}
+NIGHT_HOURS = {22, 23, 0, 1, 2, 3, 4, 5}
+MIN_STD = {"pm25_level": 2.0, "temperature": 0.5, "humidity": 2.0, "mq135_level": 50.0}
+# Gas is learned only from at least 6 h of gas readings (the MQ-135 estimate settles slowly).
+MIN_GAS_WINDOWS = 36
 
 DEFAULT_THRESHOLDS = {
     "pm25_threshold": 35.0,
@@ -72,24 +81,35 @@ LIMIT_RANGE = {
     "humidity_threshold": (55.0, 90.0),
     "mq135_threshold": (700.0, 3000.0),
 }
-ROOM_FEATURE = {"pm25_threshold": "pm25_level", "temperature_threshold": "temperature", "humidity_threshold": "humidity"}
+# Limits learned from the room's own readings. A baseline without gas (too few gas readings, or saved
+# before gas was learned) leaves the gas limit at its default.
+ROOM_FEATURE = {"pm25_threshold": "pm25_level", "temperature_threshold": "temperature",
+                "humidity_threshold": "humidity", "mq135_threshold": "mq135_level"}
+
+
+def learned(baseline: dict | None):
+    """(limit key, reading) pairs this baseline has learned."""
+    if not baseline:
+        return []
+    return [(key, feat) for key, feat in ROOM_FEATURE.items() if f"{feat}_mean" in baseline]
 
 
 def room_normal_limits(baseline: dict | None) -> dict | None:
     """Top of the room's normal range (mean + 2 std) for each limit that has a room reading."""
     if not baseline:
         return None
-    return {key: round(baseline[f"{feat}_mean"] + 2 * baseline[f"{feat}_std"], 1) for key, feat in ROOM_FEATURE.items()}
+    return {key: round(baseline[f"{feat}_mean"] + 2 * baseline[f"{feat}_std"], 1) for key, feat in learned(baseline)}
 
 
 def respect_room_normal(thresholds: dict, baseline: dict | None) -> dict:
     """The AI may tighten limits, but never below the room's own normal range (learned mean + 2 std):
     a limit inside the normal range alarms all the time. Every limit also stays within LIMIT_RANGE.
     Example: a room that is normally 69.6 +/- 2 % humidity never gets a humidity limit below 73.6 %."""
+    normal = dict(learned(baseline))
     out = {}
     for key, value in thresholds.items():
-        feature = ROOM_FEATURE.get(key)
-        if baseline and feature:
+        feature = normal.get(key)
+        if feature:
             value = max(value, baseline[f"{feature}_mean"] + 2 * baseline[f"{feature}_std"])
         low, high = LIMIT_RANGE[key]
         out[key] = round(min(max(value, low), high), 1)
@@ -99,10 +119,10 @@ def respect_room_normal(thresholds: dict, baseline: dict | None) -> dict:
 # Learned limits (DESIGN_MULTI_PATIENT.md 5.4): each room reading's limit sits LEARNED_STD spreads above
 # the room's own mean. Usual readings stay below it (about 1 window in 700 for a normal spread), so the
 # alarm means "clearly unusual for this room" rather than "above a fixed national number".
-# Gas is not learned: the MQ-135 estimate drifts with temperature and humidity, so it keeps its default.
 LEARNED_STD = 3.0
 
-# Stage 1 levels: how far above the room mean each limit sits, and the gas limit, per room level.
+# Stage 1 levels: how far above the room mean each limit sits, and the gas limit used while gas is
+# not learned yet, per room level.
 #   normal        -> the learned limits (mean + 3 std)
 #   unusual       -> mean + 2.5 std
 #   very unusual  -> mean + 2 std, the top of the room's normal range (never lower: respect_room_normal)
@@ -111,23 +131,21 @@ STAGE1_LEVELS = {0.1: (LEARNED_STD, 1000.0), 0.5: (2.5, 900.0), 0.8: (2.0, 800.0
 
 def room_limits(baseline: dict | None, stds: float = LEARNED_STD,
                 gas: float = DEFAULT_THRESHOLDS["mq135_threshold"]) -> dict:
-    """Limits learned from the room: mean + `stds` spreads per room reading, within LIMIT_RANGE.
+    """Limits learned from the room: mean + `stds` spreads per learned reading, within LIMIT_RANGE.
     Without a baseline, the defaults. Example: a room at 2.6 +/- 3.5 ug/m3 dust gets a PM2.5 limit of
     13.0, raised to the 15 floor; one at 69.6 +/- 2 % humidity gets 75.6."""
     limits = dict(DEFAULT_THRESHOLDS, mq135_threshold=gas)
-    if baseline:
-        for key, feature in ROOM_FEATURE.items():
-            limits[key] = baseline[f"{feature}_mean"] + stds * baseline[f"{feature}_std"]
+    for key, feature in learned(baseline):
+        limits[key] = baseline[f"{feature}_mean"] + stds * baseline[f"{feature}_std"]
     return respect_room_normal(limits, baseline)
 
 
-def stage1(baseline: dict, pm25: float, temp: float, hum: float) -> tuple[float, dict]:
+def stage1(baseline: dict, pm25: float, temp: float, hum: float, gas: float | None = None) -> tuple[float, dict]:
     """Stage 1 (no personal model yet): how unusual the current window is for this room, as one of
     three fixed levels (0.1 normal, 0.5 unusual, 0.8 very unusual, not a calculated probability),
-    and the limits for that level, tightened from the room's learned limits."""
-    z = max((pm25 - baseline["pm25_level_mean"]) / baseline["pm25_level_std"],
-            (temp - baseline["temperature_mean"]) / baseline["temperature_std"],
-            (hum - baseline["humidity_mean"]) / baseline["humidity_std"])
+    and the limits for that level, tightened from the room's learned limits. Gas counts once learned."""
+    now = {"pm25_level": pm25, "temperature": temp, "humidity": hum, "mq135_level": gas}
+    z = max((now[f] - baseline[f"{f}_mean"]) / baseline[f"{f}_std"] for _, f in learned(baseline) if now[f] is not None)
     level = 0.8 if z > 2.5 else 0.5 if z > 1.5 else 0.1
     return level, room_limits(baseline, *STAGE1_LEVELS[level])
 
@@ -138,11 +156,17 @@ MIN_ADJUST_WINDOWS = 144
 
 
 def room_baseline(df: pd.DataFrame) -> dict:
-    """Mean and spread of each room reading over the training data (spread floored by MIN_STD)."""
+    """Mean and spread of each room reading over the training data (spread floored by MIN_STD).
+    Gas only with at least MIN_GAS_WINDOWS windows of gas readings."""
     baseline = {"windows": len(df)}
-    for col in ("pm25_level", "temperature", "humidity"):
-        baseline[f"{col}_mean"] = safe_val(df[col].mean())
-        baseline[f"{col}_std"] = max(safe_val(df[col].std(), 0.0), MIN_STD[col])
+    for col in ("pm25_level", "temperature", "humidity", "mq135_level"):
+        if col not in df:
+            continue
+        values = df[col].dropna()
+        if col == "mq135_level" and len(values) < MIN_GAS_WINDOWS:
+            continue
+        baseline[f"{col}_mean"] = safe_val(values.mean())
+        baseline[f"{col}_std"] = max(safe_val(values.std(), 0.0), MIN_STD[col])
     return baseline
 
 
@@ -210,8 +234,12 @@ def _frame(sql: str, params: dict) -> pd.DataFrame:
 
 
 def fetch_telemetry(device_id: int) -> pd.DataFrame:
-    return _frame("SELECT recorded_at, pm25_level, temperature, humidity FROM telemetry_logs WHERE device_id = :d",
-                  {"d": device_id})
+    df = _frame("SELECT recorded_at, pm25_level, temperature, humidity, mq135_level FROM telemetry_logs WHERE device_id = :d",
+                {"d": device_id})
+    # A column that is NULL in every row (e.g. no gas sensor) comes back as objects: make it numeric (NaN).
+    readings = ["pm25_level", "temperature", "humidity", "mq135_level"]
+    df[readings] = df[readings].apply(pd.to_numeric, errors="coerce")
+    return df
 
 
 def fetch_coughs(device_id: int) -> pd.DataFrame:
@@ -252,6 +280,10 @@ def build_dataset(telemetry, coughs, rescue, controller) -> pd.DataFrame:
     inh = (per_window(rescue, df.index) > 0).astype(int)
     # Was a controller dose logged in the last 24 h (this window included)?
     df["controller_24h"] = (per_window(controller, df.index).rolling(CONTROLLER_WINDOWS, min_periods=1).sum() > 0).astype(int)
+    # Rising fast vs stable: change since the previous window (NaN after a gap, so dropped below).
+    df["pm25_change"] = df["pm25_level"].diff()
+    df["humidity_change"] = df["humidity"].diff()
+    df["night"] = df.index.hour.isin(NIGHT_HOURS).astype(int)
 
     future_inhaler = forward_window(inh, HORIZON, "max")
     future_coughs = forward_window(df["cough_count"], HORIZON, "sum")
@@ -405,11 +437,17 @@ def predict_attack(device_id: int = Query(..., ge=1)):
     now = db_now()
     # Features must match training: the latest 10-minute window (readings averaged, coughs counted).
     since = now - timedelta(minutes=10)
-    recent = pd.read_sql(
-        text("SELECT AVG(pm25_level) AS pm25, AVG(temperature) AS temp, AVG(humidity) AS hum "
-             "FROM telemetry_logs WHERE device_id = :d AND recorded_at >= :since"),
-        engine, params={"d": device_id, "since": since},
-    )
+
+    def window(start, end):
+        return pd.read_sql(
+            text("SELECT AVG(pm25_level) AS pm25, AVG(temperature) AS temp, AVG(humidity) AS hum, AVG(mq135_level) AS gas "
+                 "FROM telemetry_logs WHERE device_id = :d AND recorded_at >= :start AND recorded_at < :end"),
+            engine, params={"d": device_id, "start": start, "end": end},
+        )
+
+    recent = window(since, now + timedelta(seconds=1))
+    # The window before: for "rising fast" (change since then). Missing (device was off): no change.
+    previous = window(since - timedelta(minutes=10), since)
 
     def count_coughs(start):
         return int(pd.read_sql(
@@ -433,7 +471,11 @@ def predict_attack(device_id: int = Query(..., ge=1)):
         )["c"][0] > 0)
 
     pm25, temp, hum = (float(recent[c][0]) for c in ("pm25", "temp", "hum"))
-    X_new = pd.DataFrame([[pm25, temp, hum, cough_count, controller_24h]], columns=FEATURES)
+    gas = None if pd.isnull(recent["gas"][0]) else float(recent["gas"][0])
+    pm25_change = 0.0 if pd.isnull(previous["pm25"][0]) else pm25 - float(previous["pm25"][0])
+    humidity_change = 0.0 if pd.isnull(previous["hum"][0]) else hum - float(previous["hum"][0])
+    night = int(now.hour in NIGHT_HOURS)
+    X_new = pd.DataFrame([[pm25, temp, hum, cough_count, controller_24h, pm25_change, humidity_change, night]], columns=FEATURES)
 
     # A model saved before the feature list changed cannot score the new inputs: fall back to
     # Stage 1 (or Learning mode) until the next training run replaces it.
@@ -456,7 +498,7 @@ def predict_attack(device_id: int = Query(..., ge=1)):
         thresholds["mq135_threshold"] -= thresholds["mq135_threshold"] * probability * 0.3
         stage = "Stage 2 (Personalised)"
     else:
-        probability, thresholds = stage1(room, pm25, temp, hum)
+        probability, thresholds = stage1(room, pm25, temp, hum, gas)
         stage = "Stage 1 (Anomaly Detection)"
 
     # Never inside the room's normal range, always within the safety range (both stages).
@@ -476,5 +518,7 @@ def predict_attack(device_id: int = Query(..., ge=1)):
             "pm25": round(pm25, 1), "temperature": round(temp, 1), "humidity": round(hum, 1),
             "coughs_last_10_min": cough_count, "coughs_last_hour": coughs_last_hour,
             "controller_dose_last_24h": bool(controller_24h),
+            "gas_ppm": None if gas is None else round(gas), "pm25_change": round(pm25_change, 1),
+            "humidity_change": round(humidity_change, 1), "night": bool(night),
         },
     }
