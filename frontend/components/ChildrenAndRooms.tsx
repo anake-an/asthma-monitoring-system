@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { authHeaders, useRooms, type Device } from "@/lib/rooms";
 import SharePanel from "@/components/SharePanel";
+import ThemedSelect from "@/components/ThemedSelect";
 
 type Confirm = { title: string; message: string; isDanger: boolean; onConfirm: () => void };
 
@@ -225,21 +226,23 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
                           <span className={`text-[11px] font-medium px-2 py-1 rounded-full shrink-0 ${status.className}`}>{status.text}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <select
-                            className={input}
-                            value={d.patient_id ?? ""}
+                          <ThemedSelect<number | "shared">
+                            ariaLabel={`Child of ${d.name}`}
+                            className="flex-1"
+                            value={d.patient_id ?? "shared"}
                             disabled={busy || !d.can_configure}
-                            onChange={e => act(
-                              () => send("PATCH", `/api/devices/${d.id}`, { patient_id: e.target.value === "" ? null : Number(e.target.value) }),
+                            onChange={v => act(
+                              () => send("PATCH", `/api/devices/${d.id}`, { patient_id: v === "shared" ? null : v }),
                               "Room moved",
                             )}
-                          >
-                            {owned.map(p => <option key={p.id} value={p.id}>{p.name}&apos;s room</option>)}
-                            {d.patient && !owned.some(p => p.id === d.patient_id) && (
-                              <option value={d.patient.id}>{d.patient.name}&apos;s room (shared with you)</option>
-                            )}
-                            <option value="">Shared room (not counted for a child)</option>
-                          </select>
+                            options={[
+                              ...owned.map(p => ({ value: p.id as number | "shared", label: `${p.name}'s room` })),
+                              ...(d.patient && !owned.some(p => p.id === d.patient_id)
+                                ? [{ value: d.patient.id as number | "shared", label: `${d.patient.name}'s room`, hint: "Shared with you" }]
+                                : []),
+                              { value: "shared", label: "Shared room", hint: "Not counted for any child" },
+                            ]}
+                          />
                           {d.can_configure && (
                             <button
                               disabled={busy}
@@ -264,9 +267,14 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
               {canPair ? (
               <div className="flex items-center gap-2">
                 {owned.length > 1 && (
-                  <select className={input} value={pairTarget ?? ""} onChange={e => setPairFor(Number(e.target.value))} disabled={busy}>
-                    {owned.map(p => <option key={p.id} value={p.id}>For {p.name}</option>)}
-                  </select>
+                  <ThemedSelect
+                    ariaLabel="Pair the new device for"
+                    className="shrink-0 min-w-[8rem]"
+                    value={pairTarget}
+                    onChange={id => setPairFor(id)}
+                    disabled={busy}
+                    options={owned.map(p => ({ value: p.id, label: `For ${p.name}` }))}
+                  />
                 )}
                 <button
                   onClick={pair}

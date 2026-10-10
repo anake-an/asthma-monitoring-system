@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Head from "next/head";
 import { APP_VERSION } from "@/lib/version";
+import ThemedSelect from "@/components/ThemedSelect";
 
 type DailyData = {
   date: string;
@@ -44,7 +45,18 @@ const EXPORTS: [string, string][] = [
   ["limits", "Alert limit changes"],
 ];
 
-const timesText =(n: number) => (n === 0 ? "0 times" : n === 1 ? "once" : `${n} times`);
+const timesText = (n: number) => (n === 0 ? "0 times" : n === 1 ? "once" : `${n} times`);
+
+/** The icon in the top-right corner of a summary card; shown on screen and in the printed PDF. */
+function KpiIcon({ children, className }: { children: ReactNode; className: string }) {
+  return (
+    <div className={`absolute top-5 right-5 opacity-50 print:opacity-70 ${className}`} aria-hidden="true">
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        {children}
+      </svg>
+    </div>
+  );
+}
 
 const LIMIT_LABELS:Record<LimitChange["limit_name"], { name: string; unit: string }> = {
   pm25: { name: "PM2.5 dust", unit: " µg/m³" },
@@ -242,45 +254,55 @@ export default function ReportPage() {
               <p className="text-sm text-zinc-600 dark:text-zinc-400 print:text-zinc-600 dark:text-zinc-400 uppercase tracking-widest mb-1 font-medium text-[10px]">Child</p>
               <p className="text-lg font-medium text-zinc-900 dark:text-zinc-100 print:text-black">{data.patient?.name ?? "My child"}</p>
               {patients.length > 1 && (
-                <select
-                  value={data.patient?.id ?? ""}
-                  onChange={e => setPatientId(Number(e.target.value))}
-                  className="print:hidden mt-2 bg-white dark:bg-black/40 border border-zinc-200 dark:border-white/10 rounded-lg px-2 py-1 text-xs text-zinc-900 dark:text-white"
-                  aria-label="Child"
-                >
-                  {patients.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
+                <div className="print:hidden mt-2 flex md:justify-end">
+                  <ThemedSelect
+                    ariaLabel="Child"
+                    value={data.patient?.id ?? null}
+                    options={patients.map(p => ({ value: p.id, label: p.name, hint: p.role === "owner" ? undefined : `Shared with you (${p.role})` }))}
+                    onChange={id => setPatientId(id)}
+                    className="text-xs min-w-[9rem]"
+                  />
+                </div>
               )}
               <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1 font-mono">{data.start_date} — {data.end_date}</p>
             </div>
           </div>
 
-          {/* KPI Summary Cards */}
+          {/* KPI Summary Cards: each with its icon, on screen and in the printed PDF */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-12 relative z-10 print:break-inside-avoid">
-            <div className="bg-zinc-100 dark:bg-white/5 print:bg-gray-50 border border-zinc-300 dark:border-white/10 print:border-gray-200 rounded-2xl p-6 relative overflow-hidden group">
-              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity print:hidden">
-                <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-              </div>
-              <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-400 print:text-gray-500 uppercase tracking-widest mb-2">Total Cough Events</p>
+            <div className="bg-zinc-100 dark:bg-white/5 print:bg-gray-50 border border-zinc-300 dark:border-white/10 print:border-gray-200 rounded-2xl p-6 relative overflow-hidden">
+              <KpiIcon className="text-zinc-500 dark:text-zinc-400 print:text-gray-500">
+                {/* sound waves: coughs are detected by sound */}
+                <path d="M2 10v3" /><path d="M6 6v11" /><path d="M10 3v18" /><path d="M14 8v7" /><path d="M18 5v13" /><path d="M22 10v3" />
+              </KpiIcon>
+              <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-400 print:text-gray-500 uppercase tracking-widest mb-2 pr-12">Total Cough Events</p>
               <div className="flex items-end gap-3">
                 <p className="text-5xl font-semibold text-zinc-900 dark:text-white print:text-black tracking-tighter">{data.total_events}</p>
                 <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-1">recorded</p>
               </div>
             </div>
-            
+
             <div className="bg-red-500/5 print:bg-red-50 border border-red-500/20 print:border-red-200 rounded-2xl p-6 relative overflow-hidden">
-              <p className="text-xs font-semibold text-red-400 print:text-red-600 uppercase tracking-widest mb-2">Cough Alerts</p>
+              <KpiIcon className="text-red-400 print:text-red-600">
+                {/* ringing bell: an alert went out */}
+                <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /><path d="M4 2C2.8 3.7 2 5.7 2 8" /><path d="M22 8c0-2.3-.8-4.3-2-6" />
+              </KpiIcon>
+              <p className="text-xs font-semibold text-red-400 print:text-red-600 uppercase tracking-widest mb-2 pr-12">Cough Alerts</p>
               <div className="flex items-end gap-3">
                 <p className="text-5xl font-semibold text-red-400 print:text-red-700 tracking-tighter">{data.high_severity_events}</p>
-                <p className="text-sm text-red-500/60 mb-1">met the alert rule</p>
+                <p className="text-sm text-red-500/60 print:text-red-600 mb-1">met the alert rule</p>
               </div>
             </div>
 
             <div className="bg-blue-500/5 print:bg-blue-50 border border-blue-500/20 print:border-blue-200 rounded-2xl p-6 relative overflow-hidden">
-              <p className="text-xs font-semibold text-blue-400 print:text-blue-600 uppercase tracking-widest mb-2">Inhaler Administered</p>
+              <KpiIcon className="text-blue-400 print:text-blue-600">
+                {/* inhaler: canister on top, L-shaped body with the mouthpiece */}
+                <rect x="10" y="2" width="5" height="7" rx="1" /><path d="M8 9h9v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z" />
+              </KpiIcon>
+              <p className="text-xs font-semibold text-blue-400 print:text-blue-600 uppercase tracking-widest mb-2 pr-12">Inhaler Administered</p>
               <div className="flex items-end gap-3">
                 <p className="text-5xl font-semibold text-blue-400 print:text-blue-700 tracking-tighter">{data.inhaler_doses}</p>
-                <p className="text-sm text-blue-500/60 mb-1">doses used</p>
+                <p className="text-sm text-blue-500/60 print:text-blue-600 mb-1">doses used</p>
               </div>
             </div>
           </div>
