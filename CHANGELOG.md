@@ -15,6 +15,9 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
   **Automatic publishing:** when a push to `main` changes the firmware, GitHub Actions builds it with the real broker settings (GitHub secrets) and uploads it to the server (`POST /api/firmware/upload`, key `FIRMWARE_UPLOAD_TOKEN`). Owners see the update without anyone exporting or copying files. The `.bin` holds the device password, so it is never kept in GitHub. A version the server already has is ignored.
 - **"Device offline" alert:** when a room's device has sent nothing for **30 minutes** (power cut, Wi-Fi down, unplugged), everyone who gets that child's alerts gets an email and a push. It is sent once per outage, and a "back online" push follows when the device reports again. Devices that never connected are ignored. `php artisan devices:offline-alerts` runs every 5 minutes. The "Send me alerts" switch now covers coughs, readings over a limit and offline devices.
 
+### Changed
+- **ESP32 start-up screens are slower, so they can be read** (firmware 6.2.1): the name slides in at a gentler speed, the firmware version shows for 1.5 s, "WiFi connected" for 2 s and "Ready" for 2.5 s.
+
 ### Fixed
 - **Reviewing coughs:** marking a cough as a false alarm now really takes it out:
     - out of the Activity Log's counts and chart (the report says how many were left out);

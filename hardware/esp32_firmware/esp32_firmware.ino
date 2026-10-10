@@ -38,7 +38,7 @@
 #include "secrets.h"            // MQTT_URI, MQTT_USERNAME, MQTT_PASSWORD
 
 // Raise this for every build you publish (php artisan firmware:publish reads it from the file).
-#define FIRMWARE_VERSION "6.2.0"
+#define FIRMWARE_VERSION "6.2.1"
 const char FIRMWARE_TAG[] = "RespiroSync-firmware:" FIRMWARE_VERSION;  // keep this format
 
 // Works with ArduinoJson 6.x and 7.x
@@ -580,7 +580,7 @@ void updateDisplay() {
   // Connection changes: "Ready" the first time, "Offline" when it drops.
   if (mqtt_connected && !everConnected) {
     everConnected = true;
-    readyUntil = now + 1500;
+    readyUntil = now + 2500;
   }
   if (wasConnected && !mqtt_connected) offlineUntil = now + 2500;
   wasConnected = mqtt_connected;
@@ -659,10 +659,10 @@ void bootAnimation() {
         shown[0][i] = l0[i];
       }
     }
-    delay(60);
+    delay(90);  // slide speed
   }
   showLine(1, "Firmware " FIRMWARE_VERSION);
-  delay(800);
+  delay(1500);  // time to read the version
 }
 
 /** WiFiManager opened its setup hotspot (no Wi-Fi saved, or the saved one is not found). */
@@ -889,7 +889,7 @@ void setup() {
 
   // Wi-Fi joined: show its name for a moment.
   showScreen("WiFi connected", WiFi.SSID().c_str());
-  delay(1500);
+  delay(2000);
 
   setClock();
 
