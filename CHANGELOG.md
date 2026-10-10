@@ -15,6 +15,7 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ### Changed
 - **ESP32 start-up screens are slower, so they can be read** (firmware 6.2.1): the name slides in at a gentler speed, the firmware version shows for 1.5 s, "WiFi connected" for 2 s and "Ready" for 2.5 s.
+
 ### Fixed
 - **Reviewing coughs:** marking a cough as a false alarm now really takes it out:
     - out of the Activity Log's counts and chart (the report says how many were left out);
