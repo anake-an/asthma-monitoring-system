@@ -30,11 +30,17 @@ class CoughAlertNotification extends Notification
 
     public function toWebPush($notifiable, $notification)
     {
+        // Which room and child, so someone who follows several children knows where to go.
+        $device = $this->event->device;
+        $where = $device ? ' in ' . $device->name . ($device->patient ? " ({$device->patient->name})" : '') : '';
+
         return (new WebPushMessage)
             ->title('RespiroSync cough alert')
             ->icon('/icon.jpg')
-            ->body("{$this->clusterCount} coughs detected in the last 10 minutes. Please check on the patient.")
+            ->body("{$this->clusterCount} coughs detected{$where} in the last 10 minutes. Please check on them.")
             ->action('View Dashboard', 'view_dashboard')
+            ->tag('cough-' . ($device->id ?? 'test')) // a newer alert for the same room replaces the older one
+            ->data(['url' => '/' . ($device ? "?device={$device->id}" : '')])
             ->vibrate([100, 50, 100]);
     }
 }

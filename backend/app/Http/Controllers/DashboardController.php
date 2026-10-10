@@ -113,6 +113,15 @@ class DashboardController extends Controller
         return response()->json(['message' => 'Subscription saved']);
     }
 
+    /** Stop pushes to one browser (switched off in the dashboard, or signing out there). */
+    public function deletePushSubscription(Request $request)
+    {
+        $request->validate(['endpoint' => 'required|url|max:1024']);
+        $request->user()->deletePushSubscription($request->endpoint);
+
+        return response()->json(['message' => 'Subscription removed']);
+    }
+
     /**
      * Most recent inhaler dose of one patient (?patient_id, default: the user's default patient).
      */

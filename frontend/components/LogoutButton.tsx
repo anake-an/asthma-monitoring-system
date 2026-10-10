@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { disablePush } from "@/lib/push";
 
 export default function LogoutButton({ className = "" }: { className?: string }) {
   const router = useRouter();
@@ -9,13 +10,8 @@ export default function LogoutButton({ className = "" }: { className?: string })
   const handleLogout = async () => {
     setLoading(true);
     try {
-      if ('serviceWorker' in navigator) {
-        const registration = await navigator.serviceWorker.ready;
-        const subscription = await registration.pushManager.getSubscription();
-        if (subscription) {
-          await subscription.unsubscribe();
-        }
-      }
+      // No more pushes to this browser for this account (server and browser), before the token goes.
+      await disablePush();
 
       const token = localStorage.getItem("auth_token");
       if (token) {
