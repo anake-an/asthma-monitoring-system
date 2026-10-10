@@ -1,13 +1,13 @@
 "use client";
-// Account Settings > Notifications on this device: cough-alert pushes for this browser/phone.
+// Account Settings > Notifications on this device: alert pushes (coughs, readings over a limit) for this browser/phone.
 // Each device you use has to be switched on separately; email alerts are unaffected.
 
 import { useEffect, useState } from "react";
 import { disablePush, enablePush, pushState, type PushState } from "@/lib/push";
 
 const TEXT: Record<PushState, string> = {
-  on: "On: cough alerts arrive on this device, even with the dashboard closed.",
-  off: "Off on this device. Switch it on to get cough alerts here, not only by email.",
+  on: "On: alerts (repeated coughing, a reading over its limit for 5 minutes) arrive on this device, even with the dashboard closed.",
+  off: "Off on this device. Switch it on to get alerts here, not only by email.",
   blocked: "Blocked in this browser's settings. Allow notifications for this site there, then come back.",
   "needs-home-screen": "On iPhone/iPad: tap Share, then \"Add to Home Screen\", open RespiroSync from the home screen and switch this on there (iOS 16.4 or newer).",
   unsupported: "This browser cannot receive push notifications. Alerts still come by email.",

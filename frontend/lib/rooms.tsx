@@ -21,7 +21,7 @@ export type Patient = {
   name: string;
   birth_year: number | null;
   role: "owner" | "caregiver" | "viewer"; // my role for this child
-  alerts: boolean; // whether I get its cough alerts
+  alerts: boolean; // whether I get its alerts (coughs, readings over a limit)
   devices: { id: number; name: string; status: string }[];
 };
 
@@ -58,7 +58,7 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
-      // A tapped cough-alert push opens /?device=<id>: show that room (and remember it).
+      // A tapped alert push opens /?device=<id>: show that room (and remember it).
       const params = new URLSearchParams(window.location.search);
       const fromLink = Number(params.get("device"));
       if (fromLink) {
