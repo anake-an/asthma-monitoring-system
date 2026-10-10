@@ -162,7 +162,7 @@ These commands are also in `docs/DEMO.md`, with the steps around them. Replace `
 
 ## 12. Publishing ESP32 firmware (cloud updates)
 
-Full steps are in `hardware/README.md`, "Updating the ESP32 from the cloud". In short: copy the exported `esp32_firmware.ino.bin` into `backend/storage/app/firmware/`, then:
+Normally GitHub Actions publishes each new build by itself (needs `FIRMWARE_UPLOAD_TOKEN` in `backend/.env` and the GitHub secrets; see `hardware/README.md`, "Updating the ESP32 from the cloud"). By hand: copy the exported `esp32_firmware.ino.bin` into `backend/storage/app/firmware/`, then:
 ```bash
 docker compose exec backend php artisan firmware:publish storage/app/firmware/esp32_firmware.ino.bin --notes="What changed"
 docker compose exec backend php artisan firmware:publish --list

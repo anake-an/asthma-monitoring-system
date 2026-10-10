@@ -223,3 +223,75 @@ jobs:
           python -c "import main; u = main.engine.url;
           assert (u.username, u.password, u.host, u.database) == ('respiro', 'p@ss:w/rd#1', 'db', 'asthma_db'), repr(u);
           print('ok', repr(u))"
+
+  # Cloud firmware updates: when a push to main changes the ESP32 firmware, build it with the real
+  # broker settings (GitHub secrets) and upload it to the server, where owners then see "Update".
+  # The .bin contains the device password, so it is never stored as an artifact or a release.
+  # Skipped (with a note) until the secrets are set; the server ignores a version it already has.
+  firmware-deploy:
+    name: Publish ESP32 firmware to the server
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: firmware-esp32
+    runs-on: ubuntu-latest
+    env:
+      FQBN: esp32:esp32:esp32:PartitionScheme=min_spiffs
+      ESP32_INDEX: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+      MQTT_URI: ${{ secrets.MQTT_URI }}
+      MQTT_USERNAME: ${{ secrets.MQTT_USERNAME }}
+      MQTT_PASSWORD: ${{ secrets.MQTT_PASSWORD }}
+      UPLOAD_URL: ${{ secrets.FIRMWARE_UPLOAD_URL }}
+      UPLOAD_TOKEN: ${{ secrets.FIRMWARE_UPLOAD_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+
+      - name: Firmware changed and secrets set?
+        id: check
+        run: |
+          if ! git diff --name-only HEAD~1 HEAD | grep -q '^hardware/esp32_firmware/'; then
+            echo "Firmware unchanged in this push: nothing to publish."
+          elif [ -z "$UPLOAD_TOKEN" ] || [ -z "$UPLOAD_URL" ] || [ -z "$MQTT_URI" ] || [ -z "$MQTT_PASSWORD" ]; then
+            echo "::notice::Firmware changed, but the GitHub secrets for publishing are not set (see hardware/README.md)."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: arduino/setup-arduino-cli@v2
+        if: steps.check.outputs.publish == 'true'
+
+      - name: Install the ESP32 core and libraries
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          arduino-cli core update-index --additional-urls "$ESP32_INDEX"
+          arduino-cli core install esp32:esp32 --additional-urls "$ESP32_INDEX"
+          arduino-cli lib install WiFiManager ArduinoJson "DHT sensor library" "Adafruit Unified Sensor" "LiquidCrystal I2C"
+
+      - name: Build with the real broker settings
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          umask 077
+          {
+            echo '#pragma once'
+            printf '#define MQTT_URI "%s"\n' "$MQTT_URI"
+            printf '#define MQTT_USERNAME "%s"\n' "${MQTT_USERNAME:-respirosync_device}"
+            printf '#define MQTT_PASSWORD "%s"\n' "$MQTT_PASSWORD"
+          } > hardware/esp32_firmware/secrets.h
+          arduino-cli compile --fqbn "$FQBN" --output-dir build hardware/esp32_firmware
+          rm hardware/esp32_firmware/secrets.h
+          ls -l build/esp32_firmware.ino.bin
+
+      - name: Upload to the server
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          # The PR title of a merge commit (its message body), else the commit subject.
+          NOTES=$(git log -1 --pretty=%b | head -n 1)
+          [ -n "$NOTES" ] || NOTES=$(git log -1 --pretty=%s)
+          curl --fail-with-body -sS -X POST "$UPLOAD_URL" \
+            -H "Authorization: Bearer $UPLOAD_TOKEN" \
+            -H "Content-Type: application/octet-stream" \
+            -H "X-Firmware-Notes: ${NOTES:0:200}" \
+            -A "RespiroSync-CI" \
+            --data-binary @build/esp32_firmware.ino.bin
+          echo
+          rm -rf build

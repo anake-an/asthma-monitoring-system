@@ -72,6 +72,29 @@ To upgrade the Pico from Phase 1 math-based logic to Phase 2 True AI (Distinguis
 
 Once a device runs firmware 6.2.0 or newer (flashed once over USB with the partition scheme above), new versions are installed over the internet. Nothing needs to be on the same Wi-Fi.
 
+**Automatic (recommended):**
+1.  Raise `FIRMWARE_VERSION` and push to `main`.
+2.  GitHub Actions builds the firmware with the real broker settings and uploads it to the server (job "Publish ESP32 firmware to the server").
+3.  Owners see the update in the dashboard.
+
+The `.bin` contains the device password, so it is never stored in GitHub (no artifact, no release).
+
+One-time setup:
+*   **NAS:** in `backend/.env`, add `FIRMWARE_UPLOAD_TOKEN=` followed by a long random value (`openssl rand -hex 32`), then `docker compose up -d --force-recreate backend`.
+*   **GitHub:** repository → Settings → Secrets and variables → Actions → New repository secret. Add these five:
+
+| Secret | Value |
+|---|---|
+| `MQTT_URI` | the same as in your `secrets.h` |
+| `MQTT_USERNAME` | the same as in your `secrets.h` |
+| `MQTT_PASSWORD` | the same as in your `secrets.h` (no `"` or `\` in it) |
+| `FIRMWARE_UPLOAD_URL` | `https://app.respirosync.online/api/firmware/upload` |
+| `FIRMWARE_UPLOAD_TOKEN` | the same value as on the NAS |
+
+If Cloudflare's "Bot Fight Mode" is on, it may block the upload; turn it off, or skip the challenge for `/api/firmware/upload`.
+
+**By hand (without GitHub):**
+
 **1. Build** (developer, on the PC):
 1.  In `esp32_firmware.ino`, raise `FIRMWARE_VERSION` (e.g. `"6.2.1"`).
 2.  In the Arduino IDE, keep the same board and partition scheme. Then **Sketch → Export Compiled Binary**.

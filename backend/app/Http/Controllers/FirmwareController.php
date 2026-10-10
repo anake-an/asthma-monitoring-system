@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\AuditLog;
 use App\Models\Device;
 use App\Models\FirmwareRelease;
+use App\Support\FirmwarePublisher;
 use App\Support\Mqtt;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\URL;
@@ -56,6 +57,36 @@ class FirmwareController extends Controller
             ['room' => $device->name, 'from' => $from ?? 'unknown', 'to' => $release->version]);
 
         return response()->json(['message' => "Updating {$device->name} to {$release->version}", 'device' => $device->fresh()]);
+    }
+
+    /**
+     * POST /api/firmware/upload: a firmware build from CI (GitHub Actions), as the raw .ino.bin body
+     * with "Authorization: Bearer <FIRMWARE_UPLOAD_TOKEN>" and an optional X-Firmware-Notes header.
+     * Off (404) while no token is set in backend/.env. Uploading a version that is already
+     * published changes nothing (200), so CI can send every build.
+     */
+    public function upload(Request $request)
+    {
+        $token = (string) config('services.firmware.upload_token');
+        if ($token === '') {
+            abort(404);
+        }
+        if (!hash_equals($token, (string) $request->bearerToken())) {
+            return response()->json(['message' => 'Invalid upload token.'], 401);
+        }
+
+        try {
+            ['release' => $release, 'created' => $created] = FirmwarePublisher::publish(
+                $request->getContent(), $request->header('X-Firmware-Notes'));
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'message' => $created ? "Published firmware {$release->version}" : "Firmware {$release->version} was already published",
+            'version' => $release->version,
+            'created' => $created,
+        ], $created ? 201 : 200);
     }
 
     /**
