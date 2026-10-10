@@ -20,13 +20,15 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ### Changed
 - **ESP32 LCD redesigned** (re-flash the ESP32 to get it):
-    - **Icons:** online/offline, thermometer, drop, dust, bell, heart.
-    - **Pages every 4 s:** air; a PM2.5 bar filling up to the limit; gas with a plain-words line about the air; clock and connection.
-    - **Over a limit:** a full alert screen (`!! DUST HIGH !!` / `38 > 35`) that blinks the backlight 3 times.
-    - **Cough:** an animation.
-    - **Start-up:** a boot animation.
-    - **Night mode:** the backlight is off 21:00-07:00 unless there is an alert, or the BOOT button is pressed.
+    - **Layout:** every line is centred, with icons (dust, gas, thermometer, drop, bell, heart, online/offline).
+    - **Start-up steps:** boot animation, then Connecting WiFi (or the setup hotspot), WiFi connected with the network name, Setting clock, Connecting cloud, then Ready.
+    - **Pages every 5 s,** title on top and values side by side below: **Air quality** (PM2.5 and gas), **Room climate** (temperature and humidity), and the **clock** with the connection icon.
+    - **Over a limit:** a full alert screen (`!! DUST HIGH !!` / `38 > limit 35`) that blinks the backlight 3 times. Several readings over their limits take turns.
+    - **Other screens:** cough animation, "Offline / Alarms still on" when the connection drops, "Check sensor" when the DHT22 fails.
+    - **Night mode:** the backlight is off 21:00-07:00 unless there is an alert or the BOOT button is pressed.
     - **No flicker:** only changed characters are redrawn; it used to clear the screen every 3 s.
+- **ESP32 gas warm-up:** the MQ-135 is not read for its first 3 minutes after power-on. The LCD counts down and gas is sent as empty, so a cold sensor neither sets off the gas alarm nor teaches the device a wrong clean-air reference (which made every later reading too high).
+- **ESP32 clock works where NTP is blocked:** the time comes from the internet time servers; where a network blocks those (UDP port 123), the device reads it from the `Date` header of an HTTPS request to the broker's own host.
 - **"Daily dose?" reminder on the LCD:** while a child who takes a daily inhaler has none logged for 26 h. The server sends it in the device's config (`dose_due`): it checks every 5 minutes and only sends changes (`devices:dose-reminders`). Logging a daily dose clears it at once.
 - **ESP32 firmware: built-in humidity limit 75 % (was 60 %),** the same as the server's default. It only applies until the device receives its limits from the server, i.e. after booting without internet, where 60 % alarmed all the time in indoor air of 65-70 %. Takes effect at the next flash; no need to re-flash just for this.
 

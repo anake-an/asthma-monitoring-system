@@ -7,9 +7,12 @@
  * - Subscribes to  respirosync/devices/<token>/config   (retained thresholds)
  *                  respirosync/devices/<token>/commands (factory_reset, buzzer_on, buzzer_off)
  * - Sounds the local alarm when a reading crosses its threshold, even while offline
- * - 16x2 LCD: icons, pages that change every 4 s (air, PM2.5 bar, gas and status, clock),
- *   a flashing alert screen, a cough animation, a daily-dose reminder, and night mode (backlight
- *   off 21:00-07:00 unless there is an alert or the BOOT button is pressed)
+ * - 16x2 LCD, every line centred: start-up steps (Wi-Fi, clock, cloud), pages every 5 s with the
+ *   title on top and values below (Air quality, Room climate, clock, "Daily dose?" while due), alerts
+ *   that blink the backlight, a cough animation, and night mode (backlight off 21:00-07:00
+ *   unless there is an alert or the BOOT button is pressed)
+ * - Gas sensor warm-up: not read for the first 3 minutes (sent as null)
+ * - Clock from NTP, or from the Date header of the broker's host where NTP is blocked
  *
  * Setup: copy secrets.example.h to secrets.h and fill it in. Pairing token is
  * entered on the "RespiroSync-Setup" Wi-Fi portal.
@@ -21,6 +24,8 @@
 #include <ArduinoJson.h>
 #include "mqtt_client.h"  // ESP-IDF MQTT client (WebSockets + TLS)
 #include "esp_crt_bundle.h"
+#include "esp_http_client.h"  // clock from the server when NTP is blocked
+#include <sys/time.h>
 #include <DHT.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>  // https://github.com/johnrickman/LiquidCrystal_I2C
@@ -249,12 +254,17 @@ struct Smoother {
 };
 Smoother pm25Smoother, gasSmoother;
 
+
+// The gas sensor heats up for its first minutes, and its clean-air reference is learned from the
+// readings: until then it is not read, and gas is sent as null (shown as "warm-up" on the LCD).
+const unsigned long GAS_WARMUP_MS = 180000;  // 3 minutes
+bool gasWarmingUp() { return millis() < GAS_WARMUP_MS; }
+
 // ===================== LCD =====================
-// Custom icons in the LCD's 8 user characters. Codes 8-15 show the same characters as 0-7, so
-// slot 0 is written as 8 (a 0 byte would end the C string).
+// Every line is centred. Custom icons use the LCD's 8 user characters; codes 8-15 show the same
+// characters as 0-7, so slot 0 is written as 8 (a 0 byte would end the C string).
 const char ICON_ONLINE = 8, ICON_OFFLINE = 1, ICON_THERMO = 2, ICON_DROP = 3, ICON_DUST = 4,
-           ICON_BELL = 5, ICON_HEART = 6, ICON_HALF = 7;
-const char ICON_FULL = (char)0xFF;  // built-in full block
+           ICON_BELL = 5, ICON_HEART = 6, ICON_GAS = 7;
 byte glyphOnline[8]  = {0b00000, 0b01110, 0b10001, 0b00100, 0b01010, 0b00000, 0b00100, 0b00000};
 byte glyphOffline[8] = {0b00000, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b00000, 0b00000};
 byte glyphThermo[8]  = {0b00100, 0b01010, 0b01010, 0b01110, 0b01110, 0b11111, 0b11111, 0b01110};
@@ -262,7 +272,7 @@ byte glyphDrop[8]    = {0b00100, 0b00100, 0b01010, 0b01010, 0b10001, 0b10001, 0b
 byte glyphDust[8]    = {0b00000, 0b10100, 0b00001, 0b01000, 0b00010, 0b10000, 0b00101, 0b00000};
 byte glyphBell[8]    = {0b00100, 0b01110, 0b01110, 0b01110, 0b11111, 0b00000, 0b00100, 0b00000};
 byte glyphHeart[8]   = {0b00000, 0b01010, 0b11111, 0b11111, 0b11111, 0b01110, 0b00100, 0b00000};
-byte glyphHalf[8]    = {0b11100, 0b11100, 0b11100, 0b11100, 0b11100, 0b11100, 0b11100, 0b11100};
+byte glyphGas[8]     = {0b00000, 0b00000, 0b01100, 0b10010, 0b10001, 0b11111, 0b00000, 0b00000};
 
 void createGlyphs() {
   lcd.createChar(0, glyphOnline);
@@ -272,17 +282,21 @@ void createGlyphs() {
   lcd.createChar(4, glyphDust);
   lcd.createChar(5, glyphBell);
   lcd.createChar(6, glyphHeart);
-  lcd.createChar(7, glyphHalf);
+  lcd.createChar(7, glyphGas);
 }
 
-// What is on the screen now. A line is only rewritten where it differs, so nothing flickers
+// What is on the screen now. Only characters that differ are rewritten, so nothing flickers
 // (lcd.clear() blanks the whole screen for a moment every time).
 char shown[2][17] = {"                ", "                "};
 
+/** Show text centred on a row (cut to 16 characters). */
 void showLine(int row, const char *text) {
   char want[17];
   int n = strlen(text);
-  for (int i = 0; i < 16; i++) want[i] = i < n ? text[i] : ' ';
+  if (n > 16) n = 16;
+  int pad = (16 - n) / 2;
+  memset(want, ' ', 16);
+  memcpy(want + pad, text, n);
   want[16] = '\0';
   int cursor = -1;
   for (int i = 0; i < 16; i++) {
@@ -299,14 +313,16 @@ void showScreen(const char *line0, const char *line1) {
   showLine(1, line1);
 }
 
-/** Text centred in 16 characters. */
-void centred(char *out, const char *text) {
-  int n = strlen(text);
-  if (n > 16) n = 16;
-  int pad = (16 - n) / 2;
-  memset(out, ' ', 16);
-  memcpy(out + pad, text, n);
-  out[16] = '\0';
+/** A spinner character that turns while something is loading. */
+char spinner() {
+  static const char frames[] = ".oOo";
+  return frames[(millis() / 250) % 4];
+}
+
+/** "Title" over a spinner, e.g. "Connecting cloud" / "o". */
+void showLoading(const char *title) {
+  char l1[2] = {spinner(), '\0'};
+  showScreen(title, l1);
 }
 
 // Latest readings for the screen (set every 3 s by readAndPublishTelemetry).
@@ -314,17 +330,25 @@ struct Reading {
   float pm25 = NAN, temp = NAN, hum = NAN, gas = NAN;
 } reading;
 
-const unsigned long PAGE_MS = 4000;            // each page stays 4 s
+// Readings over their limit (bits), set by readAndPublishTelemetry.
+const uint8_t ALARM_PM25 = 1, ALARM_GAS = 2, ALARM_TEMP = 4, ALARM_HUM = 8;
+uint8_t alarmMask = 0;
+
+const unsigned long PAGE_MS = 5000;            // each page stays 5 s
 const unsigned long WAKE_MS = 30000;           // screen stays lit 30 s at night after a wake-up
 const unsigned long COUGH_SCREEN_MS = 2000;
+const unsigned long ALARM_TURN_MS = 2000;      // several alarms take turns
 unsigned long pageStartedAt = 0;
 int page = 0;
 unsigned long wakeUntil = 0;                   // night mode: lit until then
 unsigned long alarmFlashUntil = 0;             // backlight blinks 3 times when an alarm starts
-char lastAlarmKey[17] = "";
+uint8_t lastAlarmMask = 0;
 unsigned long coughShownAt = 0;
+unsigned long cloudStartedAt = 0;              // when the MQTT client was started
 bool everConnected = false;
-unsigned long readyUntil = 0;                  // "Ready" screen after the first cloud connection
+bool wasConnected = false;
+unsigned long readyUntil = 0;                  // "Ready" after the first cloud connection
+unsigned long offlineUntil = 0;                // "Offline" note after the connection drops
 bool backlightOn = true;
 
 void setBacklight(bool on) {
@@ -334,7 +358,12 @@ void setBacklight(bool on) {
   else lcd.noBacklight();
 }
 
-/** Local time (Malaysia, from the internet clock), or false before it has been set. */
+// ===================== Clock =====================
+// Malaysia time (UTC+8, no daylight saving) from internet time servers (NTP, UDP port 123). Some
+// networks block that port, so the time is also read from the Date header of an HTTPS request to
+// the broker's own host, which is reachable whenever the device can connect at all.
+
+/** Local time, or false before it has been set. */
 bool localTime(struct tm *t) {
   time_t now;
   time(&now);  // getLocalTime() waits 10 ms each time until the clock is set; this never waits
@@ -342,77 +371,162 @@ bool localTime(struct tm *t) {
   return t->tm_year + 1900 >= 2024;
 }
 
+bool clockSet() {
+  struct tm t;
+  return localTime(&t);
+}
+
 bool isNight() {
   struct tm t;
   return localTime(&t) && (t.tm_hour >= 21 || t.tm_hour < 7);
 }
 
+char httpDate[40] = "";
+
+esp_err_t onHttpEvent(esp_http_client_event_t *evt) {
+  if (evt->event_id == HTTP_EVENT_ON_HEADER && strcasecmp(evt->header_key, "Date") == 0) {
+    strncpy(httpDate, evt->header_value, sizeof(httpDate) - 1);
+  }
+  return ESP_OK;
+}
+
+/** Days since 1970-01-01 for a calendar date (H. Hinnant's days_from_civil). */
+long daysFromCivil(int y, int m, int d) {
+  y -= m <= 2;
+  long era = (y >= 0 ? y : y - 399) / 400;
+  long yoe = y - era * 400;
+  long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+  long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return era * 146097 + doe - 719468;
+}
+
+/** Set the clock from the "Date:" header of https://<broker host>/. */
+bool clockFromServer() {
+  const char *host = strstr(MQTT_URI, "://");
+  host = host ? host + 3 : MQTT_URI;
+  int len = strcspn(host, ":/");
+  if (len <= 0 || len > 64) return false;
+  char url[80];
+  snprintf(url, sizeof(url), "https://%.*s/", len, host);
+
+  esp_http_client_config_t cfg = {};
+  cfg.url = url;
+  cfg.method = HTTP_METHOD_HEAD;
+  cfg.timeout_ms = 4000;
+  cfg.crt_bundle_attach = esp_crt_bundle_attach;  // a verified connection, like the broker's
+  cfg.event_handler = onHttpEvent;
+  httpDate[0] = '\0';
+  esp_http_client_handle_t client = esp_http_client_init(&cfg);
+  if (!client) return false;
+  esp_http_client_perform(client);
+  esp_http_client_cleanup(client);
+
+  // e.g. "Fri, 10 Oct 2026 13:45:12 GMT"
+  char mon[4] = "";
+  int d, y, hh, mm, ss;
+  if (sscanf(httpDate, "%*3s, %d %3s %d %d:%d:%d", &d, mon, &y, &hh, &mm, &ss) != 6) return false;
+  const char *months = "JanFebMarAprMayJunJulAugSepOctNovDec";
+  const char *at = strstr(months, mon);
+  if (!at || strlen(mon) != 3) return false;
+  int m = (at - months) / 3 + 1;
+  struct timeval tv;
+  tv.tv_sec = (time_t)(daysFromCivil(y, m, d) * 86400L + hh * 3600L + mm * 60L + ss);
+  tv.tv_usec = 0;
+  settimeofday(&tv, nullptr);
+  Serial.printf("Clock set from %s: %s\n", url, httpDate);
+  return true;
+}
+
+/** Start-up: wait up to 6 s for the time servers, else ask the broker's host. */
+void setClock() {
+  configTzTime("MYT-8", "pool.ntp.org", "time.cloudflare.com", "time.google.com");
+  unsigned long start = millis();
+  while (!clockSet() && millis() - start < 6000) {
+    showLoading("Setting clock");
+    delay(100);
+  }
+  if (!clockSet()) {
+    showScreen("Setting clock", "via server...");
+    clockFromServer();
+  }
+  Serial.println(clockSet() ? "Clock set" : "Clock not set yet (retrying later)");
+}
+
+/** While the clock is still not set, try the server again every 10 minutes. */
+void retryClock() {
+  static unsigned long lastTry = 0;
+  if (clockSet() || !mqtt_connected || millis() - lastTry < 600000) return;
+  lastTry = millis();
+  clockFromServer();
+}
+
+// ===================== Screens =====================
 void fmtValue(char *out, size_t size, float v, int decimals) {
   if (isnan(v)) snprintf(out, size, "--");
   else snprintf(out, size, "%.*f", decimals, v);
 }
 
-// --- Pages ---
-// The limits the pages compare with, copied by updateDisplay (a global: the Arduino builder
+// The limits the screens compare with, copied by updateDisplay (a global: the Arduino builder
 // declares functions above the Thresholds type, so they cannot take it as a parameter).
 Thresholds screenLimits;
-enum Page { PAGE_AIR, PAGE_BAR, PAGE_GAS, PAGE_CLOCK, PAGE_DOSE };
 
+enum Page { PAGE_AIR, PAGE_CLIMATE, PAGE_CLOCK, PAGE_DOSE };
+
+/** Two values side by side: two spaces between them when that fits in 16, else one. */
+void sideBySide(char *out, const char *left, const char *right) {
+  const char *gap = strlen(left) + strlen(right) + 2 <= 16 ? "  " : " ";
+  snprintf(out, 17, "%s%s%s", left, gap, right);
+}
+
+/** Air quality: the title stays on top; PM2.5 and gas side by side below. */
 void drawAir() {
-  const Thresholds &t = screenLimits;
-  char l0[17], l1[17], pm[8], tc[8], hu[8];
-  fmtValue(pm, sizeof(pm), reading.pm25, 1);
-  bool high = !isnan(reading.pm25) && reading.pm25 > t.pm25;
-  snprintf(l0, sizeof(l0), "%cPM2.5 %-6s%3s", ICON_DUST, pm, high ? "HI!" : "OK");
-  if (isnan(reading.temp)) {
-    snprintf(l1, sizeof(l1), "%c sensor error", ICON_THERMO);
+  char pm[12], gas[12], l1[17], v[8];
+  fmtValue(v, sizeof(v), reading.pm25, reading.pm25 < 100 ? 1 : 0);
+  snprintf(pm, sizeof(pm), "%c%sug", ICON_DUST, v);
+  if (gasWarmingUp()) {
+    unsigned long left = (GAS_WARMUP_MS - millis()) / 1000 + 1;
+    snprintf(gas, sizeof(gas), "Gas %lu:%02lu", left / 60, left % 60);  // warm-up countdown
+  } else if (isnan(reading.gas)) {
+    snprintf(gas, sizeof(gas), "Gas --");
   } else {
-    fmtValue(tc, sizeof(tc), reading.temp, 1);
-    fmtValue(hu, sizeof(hu), reading.hum, 0);
-    snprintf(l1, sizeof(l1), "%c%sC   %c%s%%", ICON_THERMO, tc, ICON_DROP, hu);
+    fmtValue(v, sizeof(v), reading.gas, 0);
+    snprintf(gas, sizeof(gas), "%c%sppm", ICON_GAS, v);
   }
-  showScreen(l0, l1);
+  sideBySide(l1, pm, gas);
+  showScreen("Air quality", l1);
 }
 
-void drawBar() {
-  const Thresholds &t = screenLimits;
-  char l0[17], l1[17];
-  float pm = isnan(reading.pm25) ? 0 : reading.pm25;
-  snprintf(l0, sizeof(l0), "PM2.5 %.0f / %.0f", pm, t.pm25);
-  // 16 cells of 2 halves: full at the limit.
-  int halves = t.pm25 > 0 ? (int)roundf(pm / t.pm25 * 32) : 0;
-  if (halves > 32) halves = 32;
-  if (halves < 0) halves = 0;
-  for (int i = 0; i < 16; i++) {
-    int left = halves - i * 2;
-    l1[i] = left >= 2 ? ICON_FULL : left == 1 ? ICON_HALF : ' ';
+/** Room climate: the title stays on top; temperature and humidity side by side below. */
+void drawClimate() {
+  if (isnan(reading.temp)) {
+    showScreen("Room climate", "Check sensor");
+    return;
   }
-  l1[16] = '\0';
-  showScreen(l0, l1);
+  char temp[10], hum[10], l1[17], v[8];
+  fmtValue(v, sizeof(v), reading.temp, 1);
+  snprintf(temp, sizeof(temp), "%c%sC", ICON_THERMO, v);
+  fmtValue(v, sizeof(v), reading.hum, 0);
+  snprintf(hum, sizeof(hum), "%c%s%%", ICON_DROP, v);
+  sideBySide(l1, temp, hum);
+  showScreen("Room climate", l1);
 }
 
-void drawGas() {
-  const Thresholds &t = screenLimits;
-  char l0[17], l1[17], gas[8];
-  fmtValue(gas, sizeof(gas), reading.gas, 0);
-  bool high = !isnan(reading.gas) && reading.gas > t.mq135;
-  snprintf(l0, sizeof(l0), "Gas %5sppm %3s", gas, isnan(reading.gas) ? "" : high ? "HI!" : "OK");
-  // The air in one friendly line.
-  bool dusty = !isnan(reading.pm25) && reading.pm25 > t.pm25 * 0.8f;
-  bool gassy = !isnan(reading.gas) && reading.gas > t.mq135 * 0.8f;
-  if (dusty) snprintf(l1, sizeof(l1), "Dust rising...");
-  else if (gassy) snprintf(l1, sizeof(l1), "Open a window?");
-  else snprintf(l1, sizeof(l1), "Air is good %c", ICON_HEART);
-  showScreen(l0, l1);
-}
-
+/** Clock, with the connection icon after the time. */
 void drawClock() {
   char l0[17], l1[17];
+  char icon = mqtt_connected ? ICON_ONLINE : ICON_OFFLINE;
   struct tm t;
-  if (localTime(&t)) strftime(l0, sizeof(l0), "%H:%M %a %d %b", &t);
-  else snprintf(l0, sizeof(l0), "Clock syncing...");
-  if (mqtt_connected) snprintf(l1, sizeof(l1), "%c Cloud online", ICON_ONLINE);
-  else snprintf(l1, sizeof(l1), "%c Offline: local", ICON_OFFLINE);
+  if (localTime(&t)) {
+    strftime(l0, sizeof(l0), "%H:%M", &t);
+    size_t n = strlen(l0);
+    l0[n] = ' ';
+    l0[n + 1] = icon;
+    l0[n + 2] = '\0';
+    strftime(l1, sizeof(l1), "%a %d %b", &t);
+  } else {
+    snprintf(l0, sizeof(l0), "Clock %c", icon);
+    snprintf(l1, sizeof(l1), "not set yet");
+  }
   showScreen(l0, l1);
 }
 
@@ -422,30 +536,43 @@ void drawDose() {
   showScreen(l0, "Log it in app");
 }
 
-/** Next page in the rotation; the dose page only while a dose is due. */
+/** The pages in turn: Air quality, Room climate, Clock, and "Daily dose?" while one is due. */
 int nextPage(int current, bool doseDue) {
   int last = doseDue ? PAGE_DOSE : PAGE_CLOCK;
   return current >= last ? PAGE_AIR : current + 1;
 }
 
-// --- Priority screens ---
-/** Alarm screen, e.g. "!! DUST HIGH !!" over "38 > 35" (the reading and its limit). */
+/** Alarm, e.g. "!! DUST HIGH !!" over "38 > limit 35" (or "38 > 35" when that does not fit). */
 void drawAlarm(const char *title, float value, float limit, int decimals, const char *unit) {
-  char l0[17], l1[17], text[17], v[8], lim[8];
-  snprintf(text, sizeof(text), "!! %s !!", title);
-  centred(l0, text);
+  char l0[17], l1[24], v[8], lim[8];
+  snprintf(l0, sizeof(l0), "!! %s !!", title);
   fmtValue(v, sizeof(v), value, decimals);
   fmtValue(lim, sizeof(lim), limit, decimals);
-  snprintf(text, sizeof(text), "%s%s > %s", v, unit, lim);
-  centred(l1, text);
+  snprintf(l1, sizeof(l1), "%s%s > limit %s", v, unit, lim);
+  if (strlen(l1) > 16) snprintf(l1, sizeof(l1), "%s%s > %s", v, unit, lim);
   showScreen(l0, l1);
+}
+
+void drawAlarms(uint8_t mask) {
+  const Thresholds &t = screenLimits;
+  uint8_t active[4];
+  int n = 0;
+  for (uint8_t bit = 1; bit <= ALARM_HUM; bit <<= 1) {
+    if (mask & bit) active[n++] = bit;
+  }
+  switch (active[(millis() / ALARM_TURN_MS) % n]) {
+    case ALARM_PM25: drawAlarm("DUST HIGH", reading.pm25, t.pm25, 0, ""); break;
+    case ALARM_GAS: drawAlarm("GAS HIGH", reading.gas, t.mq135, 0, ""); break;
+    case ALARM_TEMP: drawAlarm("TOO HOT", reading.temp, t.temperature, 1, "C"); break;
+    default: drawAlarm("TOO HUMID", reading.hum, t.humidity, 0, "%"); break;
+  }
 }
 
 void drawCough(unsigned long since) {
   // A heartbeat-like pulse moving across the bottom line.
   static const char pulse[] = "__-^v-__";
   char l0[17], l1[17];
-  snprintf(l0, sizeof(l0), "%c Cough detected", ICON_BELL);
+  snprintf(l0, sizeof(l0), "%c Cough heard", ICON_BELL);
   int offset = (since / 120) % 24;
   for (int i = 0; i < 16; i++) {
     int p = i - offset + 8;
@@ -455,77 +582,57 @@ void drawCough(unsigned long since) {
   showScreen(l0, l1);
 }
 
-void drawConnecting() {
-  static const char spin[] = ".oOo";
-  char l0[17], l1[17];
-  snprintf(l0, sizeof(l0), "RespiroSync %c", ICON_HEART);
-  snprintf(l1, sizeof(l1), "Connecting %c", spin[(millis() / 250) % 4]);
-  showScreen(l0, l1);
-}
-
 /** Draw whatever matters most right now. Called every loop; only changes reach the LCD. */
-void updateDisplay(bool envAlarmNow, const char *alarmKey) {
+void updateDisplay() {
   portENTER_CRITICAL(&thresholdsMux);
   screenLimits = thresholds;
   portEXIT_CRITICAL(&thresholdsMux);
-  const Thresholds &t = screenLimits;
   unsigned long now = millis();
 
+  // Connection changes: "Ready" the first time, "Offline" when it drops.
   if (mqtt_connected && !everConnected) {
     everConnected = true;
     readyUntil = now + 1500;
   }
+  if (wasConnected && !mqtt_connected) offlineUntil = now + 2500;
+  wasConnected = mqtt_connected;
 
-  // A new or different alarm: blink the backlight 3 times, and keep the screen lit a while.
-  if (strcmp(alarmKey, lastAlarmKey) != 0) {
-    if (alarmKey[0]) alarmFlashUntil = now + 1200;
-    strncpy(lastAlarmKey, alarmKey, sizeof(lastAlarmKey) - 1);
-  }
+  // A reading newly over its limit: blink the backlight 3 times.
+  if (alarmMask & ~lastAlarmMask) alarmFlashUntil = now + 1200;
+  lastAlarmMask = alarmMask;
   bool coughing = coughShownAt && now - coughShownAt < COUGH_SCREEN_MS;
-  bool urgent = envAlarmNow || cloudAlarm || coughing;
-  if (urgent) wakeUntil = now + WAKE_MS;
+  if (alarmMask || cloudAlarm || coughing) wakeUntil = now + WAKE_MS;
 
   // Backlight: blinking for a new alarm, else off at night unless woken.
   if (now < alarmFlashUntil) setBacklight(((alarmFlashUntil - now) / 200) % 2 == 0);
   else setBacklight(!isNight() || now < wakeUntil);
 
   if (coughing) { drawCough(now - coughShownAt); return; }
-  if (envAlarmNow) {
-    if (!strcmp(alarmKey, "PM25")) drawAlarm("DUST HIGH", reading.pm25, t.pm25, 0, "");
-    else if (!strcmp(alarmKey, "GAS")) drawAlarm("GAS HIGH", reading.gas, t.mq135, 0, "");
-    else if (!strcmp(alarmKey, "TEMP")) drawAlarm("TOO HOT", reading.temp, t.temperature, 1, "C");
-    else drawAlarm("TOO HUMID", reading.hum, t.humidity, 0, "%");
-    return;
-  }
-  if (cloudAlarm) {
-    char l0[17];
-    centred(l0, "!! ALERT !!");
-    showScreen(l0, "From the app");
-    return;
-  }
-  if (!everConnected && now < 20000) { drawConnecting(); return; }
+  if (alarmMask) { drawAlarms(alarmMask); return; }
+  if (cloudAlarm) { showScreen("!! ALERT !!", "From the app"); return; }
+  if (now < offlineUntil) { showScreen("Offline", "Alarms still on"); return; }
+  if (!everConnected && now - cloudStartedAt < 20000) { showLoading("Connecting cloud"); return; }
   if (now < readyUntil) {
     char l0[17];
     snprintf(l0, sizeof(l0), "Ready %c", ICON_HEART);
-    showScreen(l0, "RespiroSync");
+    showScreen(l0, "Monitoring room");
     return;
   }
 
   if (now - pageStartedAt >= PAGE_MS) {
-    page = nextPage(page, t.doseDue);
+    page = nextPage(page, screenLimits.doseDue);
     pageStartedAt = now;
   }
-  if (page == PAGE_DOSE && !t.doseDue) page = PAGE_AIR;
+  if (page == PAGE_DOSE && !screenLimits.doseDue) page = PAGE_AIR;
   switch (page) {
     case PAGE_AIR: drawAir(); break;
-    case PAGE_BAR: drawBar(); break;
-    case PAGE_GAS: drawGas(); break;
+    case PAGE_CLIMATE: drawClimate(); break;
     case PAGE_CLOCK: drawClock(); break;
     default: drawDose(); break;
   }
 }
 
-/** BOOT button: lights the screen (night mode) and shows the next page. */
+/** BOOT button: lights the screen (night mode); when lit, shows the next page. */
 void handleButton() {
   static bool wasDown = false;
   static unsigned long changedAt = 0;
@@ -545,24 +652,40 @@ void handleButton() {
   pageStartedAt = millis();
 }
 
-/** Start-up: "RespiroSync" slides in, with a heart. */
+/** Start-up: "RespiroSync" and a heart slide in to the middle. */
 void bootAnimation() {
-  const char *name = "RespiroSync";
-  for (int x = 16; x >= 2; x--) {
+  char text[14];
+  snprintf(text, sizeof(text), "RespiroSync %c", ICON_HEART);
+  int n = strlen(text);
+  int centre = (16 - n) / 2;
+  for (int x = 16; x >= centre; x--) {
     char l0[17];
     memset(l0, ' ', 16);
     l0[16] = '\0';
-    for (int i = 0; name[i] && x + i < 16; i++) l0[x + i] = name[i];
-    if (x == 2) l0[14] = ICON_HEART;
-    showLine(0, l0);
+    for (int i = 0; i < n && x + i < 16; i++) l0[x + i] = text[i];
+    // Written as is (already 16 wide), not centred again.
+    for (int i = 0; i < 16; i++) {
+      if (l0[i] != shown[0][i]) {
+        lcd.setCursor(i, 0);
+        lcd.write((uint8_t)l0[i]);
+        shown[0][i] = l0[i];
+      }
+    }
     delay(60);
   }
+  showLine(1, "Starting up");
+  delay(800);
+}
+
+/** WiFiManager opened its setup hotspot (no Wi-Fi saved, or the saved one is not found). */
+void onSetupPortal(WiFiManager *wm) {
+  showScreen("WiFi setup", "Join RespiroSync");  // the "RespiroSync-Setup" network
 }
 
 void factoryReset() {
   Serial.println("Factory reset: wiping token and Wi-Fi settings");
   setBacklight(true);
-  showScreen("Factory reset...", "");
+  showScreen("Resetting...", "Pair again");
   for (int i = 0; i < 7; i++) EEPROM.write(i, 0);
   EEPROM.commit();
   WiFiManager wm;
@@ -590,7 +713,7 @@ void setup() {
   lcd.backlight();
   createGlyphs();
   bootAnimation();
-  showLine(1, "Connecting WiFi");
+  showScreen("Connecting WiFi", "please wait");
 
   dht.begin();
   Serial2.begin(9600, SERIAL_8N1, PICO_RX_PIN, PICO_TX_PIN);
@@ -603,15 +726,16 @@ void setup() {
   WiFiManagerParameter custom_token("token", "Setup Token (from Web Dashboard)", isValidToken(device_token) ? device_token : "", 6);
   wm.addParameter(&custom_token);
   wm.setSaveConfigCallback(saveConfigCallback);
+  wm.setAPCallback(onSetupPortal);
 
   if (!isValidToken(device_token)) {
     Serial.println("No valid token stored: opening setup portal");
-    showScreen("WiFi setup mode", "Join RespiroSync");  // the "RespiroSync-Setup" network
     wm.resetSettings();
   }
 
   if (!wm.autoConnect("RespiroSync-Setup")) {
     Serial.println("Wi-Fi setup timed out, restarting");
+    showScreen("WiFi not found", "Restarting...");
     delay(3000);
     ESP.restart();
   }
@@ -629,10 +753,17 @@ void setup() {
   }
   if (!isValidToken(device_token)) {
     Serial.println("Invalid token entered: restarting into setup");
+    showScreen("Invalid token", "Restarting...");
     WiFiManager().resetSettings();
     delay(1000);
     ESP.restart();
   }
+
+  // Wi-Fi joined: show its name for a moment.
+  showScreen("WiFi connected", WiFi.SSID().c_str());
+  delay(1500);
+
+  setClock();
 
   buildTopics();
   Serial.printf("Device token %s\n", device_token);
@@ -655,21 +786,13 @@ void setup() {
   mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
   esp_mqtt_client_register_event(mqtt_client, (esp_mqtt_event_id_t)ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
   esp_mqtt_client_start(mqtt_client);
-
-  // Internet clock for the clock page and night mode (Malaysia, UTC+8, no daylight saving).
-  configTzTime("MYT-8", "pool.ntp.org", "time.google.com");
-
-  char l1[17];
-  snprintf(l1, sizeof(l1), "WiFi connected %c", ICON_HEART);
-  showLine(1, l1);
+  cloudStartedAt = millis();
   wakeUntil = millis() + WAKE_MS;  // lit for a while after a restart, also at night
 }
 
 unsigned long lastTelemetryMillis = 0;
 const unsigned long TELEMETRY_INTERVAL_MS = 3000;  // DHT22 needs >= 2 s between reads
 unsigned long coughDisplayUntil = 0;
-bool envAlarm = false;
-char alarmKey[8] = "";  // PM25, GAS, TEMP, HUM or empty
 
 void handlePicoMessage() {
   if (!Serial2.available()) return;
@@ -701,15 +824,17 @@ void readAndPublishTelemetry() {
   float hum = dht.readHumidity();
   float temp = dht.readTemperature();
   float pm25 = pm25Smoother.add(readDustSensor());
-  float gasPpm = readMq135Ppm();
+  // Not read while warming up, so its clean-air reference is not learned from a cold sensor.
+  float gasPpm = gasWarmingUp() ? NAN : readMq135Ppm();
   if (!isnan(gasPpm)) gasPpm = gasSmoother.add(gasPpm);
   // Raw values for wiring checks and calibration.
-  Serial.printf("Dust: %u mV at pin (%.2f V at sensor, clean-air baseline %.2f V) -> %.1f ug/m3 | MQ-135 raw %d -> %.0f ppm est.\n",
-                (unsigned)lastDustPinMv, lastDustPinMv / 1000.0f * DUST_DIVIDER_RATIO, dustBaselineV, pm25, lastMq135Raw, gasPpm);
+  Serial.printf("Dust: %u mV at pin (%.2f V at sensor, clean-air baseline %.2f V) -> %.1f ug/m3 | MQ-135 raw %d -> %.0f ppm est.%s\n",
+                (unsigned)lastDustPinMv, lastDustPinMv / 1000.0f * DUST_DIVIDER_RATIO, dustBaselineV, pm25, lastMq135Raw, gasPpm,
+                gasWarmingUp() ? " (warming up)" : "");
 
   Doc doc;
   doc["pm25_level"] = pm25;
-  if (isnan(gasPpm)) doc["mq135_level"] = (const char *)nullptr;  // JSON null: no gas signal
+  if (isnan(gasPpm)) doc["mq135_level"] = (const char *)nullptr;  // JSON null: warming up / no signal
   else doc["mq135_level"] = roundf(gasPpm);
   if (isnan(temp) || isnan(hum)) {
     Serial.println("DHT22 read failed: sending null");
@@ -731,13 +856,12 @@ void readAndPublishTelemetry() {
   reading.temp = temp;
   reading.hum = hum;
 
-  // The first reading over its limit, as a short key for the alarm screen (updateDisplay).
-  alarmKey[0] = '\0';
-  if (pm25 > t.pm25) strcpy(alarmKey, "PM25");
-  else if (!isnan(gasPpm) && gasPpm > t.mq135) strcpy(alarmKey, "GAS");
-  else if (!isnan(temp) && temp > t.temperature) strcpy(alarmKey, "TEMP");
-  else if (!isnan(hum) && hum > t.humidity) strcpy(alarmKey, "HUM");
-  envAlarm = alarmKey[0] != '\0';
+  uint8_t mask = 0;
+  if (pm25 > t.pm25) mask |= ALARM_PM25;
+  if (!isnan(gasPpm) && gasPpm > t.mq135) mask |= ALARM_GAS;
+  if (!isnan(temp) && temp > t.temperature) mask |= ALARM_TEMP;
+  if (!isnan(hum) && hum > t.humidity) mask |= ALARM_HUM;
+  alarmMask = mask;
 }
 
 void updateOutputs() {
@@ -746,7 +870,7 @@ void updateOutputs() {
   muted = thresholds.muted;
   portEXIT_CRITICAL(&thresholdsMux);
 
-  bool alarm = envAlarm || cloudAlarm;
+  bool alarm = alarmMask || cloudAlarm;
   digitalWrite(RED_LED_PIN, alarm || !mqtt_connected);
   digitalWrite(GREEN_LED_PIN, !alarm && mqtt_connected);
 
@@ -772,6 +896,7 @@ void loop() {
   }
 
   updateOutputs();
-  updateDisplay(envAlarm, alarmKey);
+  updateDisplay();
+  retryClock();
   delay(10);
 }
