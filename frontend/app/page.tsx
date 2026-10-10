@@ -41,7 +41,7 @@ export default function Home() {
     <main className="min-h-screen p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto transition-all duration-500">
 
       {/* Header */}
-      <header className="bg-white/80 dark:bg-[#12121e]/60 backdrop-blur-xl border border-zinc-200 dark:border-white/5 rounded-3xl px-4 sm:px-6 py-5 mb-6 sm:mb-8 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 shadow-xl">
+      <header className="relative z-30 bg-white/80 dark:bg-[#12121e]/60 backdrop-blur-xl border border-zinc-200 dark:border-white/5 rounded-3xl px-4 sm:px-6 py-5 mb-6 sm:mb-8 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 shadow-xl">
         <div className="flex items-center gap-4 w-full sm:w-auto">
           <div className="w-12 h-12 shrink-0 drop-shadow-lg">
             <img src="/logo.jpg?v=3" alt="Logo" className="w-full h-full object-contain rounded-xl" />

@@ -5,6 +5,7 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 ## [Unreleased]
 
 ### Fixed
+- **Room picker is a themed list** instead of the browser's own dropdown (white with a grey highlight on Windows, regardless of dark mode): rooms grouped by child, each with its status dot and "Online", "Offline" or "Waiting for setup" (was "(pending)"), a tick on the room on screen; arrow keys, Enter and Escape work, a tap outside closes it. The header now sits above the cards so the list is never covered.
 - **Amber "near the limit" bars were invisible** (and the icon lost its round background) since the bar colours moved to `lib/readingStatus.ts` in 6.0.0: Tailwind did not scan `lib/`, so the amber classes were never generated (green and red happened to be used elsewhere). `lib/` is scanned now, and CI checks that the built CSS has all three status colours.
 
 ### Changed
