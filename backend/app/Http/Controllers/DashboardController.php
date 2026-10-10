@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AuditLog;
 use App\Models\CoughEvent;
 use App\Models\InhalerLog;
 use App\Models\LimitChange;
@@ -58,9 +59,7 @@ class DashboardController extends Controller
     public function verifyCoughEvent(Request $request, $id)
     {
         $event = CoughEvent::with('device')->find($id);
-        if (!$event || !$event->device || $request->user()->cannot('logDose', $event->device)) {
-            abort(404);
-        }
+        $this->authorizeOr404($request, $event?->device, 'logDose');
 
         $request->validate([
             'is_verified' => 'required|boolean',
@@ -87,6 +86,12 @@ class DashboardController extends Controller
         } else {
             InhalerLog::where('cough_event_id', $event->id)->delete();
         }
+
+        AuditLog::record($request->user(), 'cough.marked', $event->device->patient_id, $event->device_id, [
+            'cough_event_id' => $event->id,
+            'verified' => $request->boolean('is_verified'),
+            'inhaler_used' => $request->boolean('inhaler_used'),
+        ]);
 
         return response()->json($event->makeHidden('device'));
     }
@@ -147,6 +152,7 @@ class DashboardController extends Controller
             'type' => $request->type,
             'administered_at' => now(), // app clock, matching the "last 4 hours" query above
         ])->refresh();
+        AuditLog::record($request->user(), 'dose.logged', $patient->id, null, ['type' => $request->type]);
 
         return response()->json([
             'message' => 'Manual inhaler usage logged',

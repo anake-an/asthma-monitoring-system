@@ -4,6 +4,10 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use App\Models\Device;
+use App\Models\HardwareConfig;
+use App\Models\LimitChange;
+use App\Models\Patient;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 
@@ -93,18 +97,38 @@ class AuthController extends Controller
     public function deleteAccount(Request $request)
     {
         $user = $request->user();
-        
-        // Revoke all tokens
-        $user->tokens()->delete();
-        
-        // PDPA right to erasure: delete the children this account alone has access to, with their
-        // dose history. Devices, telemetry, coughs, configs and limit changes go with the user
-        // (cascade). Patients shared with other accounts (phase 3) are left to them.
-        foreach ($user->ownedPatients()->withCount('users')->get() as $patient) {
-            if ($patient->users_count <= 1) {
-                $patient->delete();
-            }
+
+        // PDPA right to erasure for the children this account owns (DESIGN section 3, ownership):
+        //  - another owner exists: the child stays with them (only this membership goes);
+        //  - shared with caregivers/viewers only: deleting would remove the child for them too, so
+        //    it needs delete_shared_children=true (or make one of them owner first);
+        //  - not shared: deleted with their dose history.
+        $owned = $user->ownedPatients()->withCount('users')->get();
+        $sharedWithoutOtherOwner = $owned->filter(fn ($p) => $p->users_count > 1 && $p->ownerCount() <= 1);
+        if ($sharedWithoutOtherOwner->isNotEmpty() && !$request->boolean('delete_shared_children')) {
+            return response()->json([
+                'message' => 'These children are shared with others and have no other owner: '
+                    . $sharedWithoutOtherOwner->pluck('name')->join(', ')
+                    . '. Make someone else owner first, or confirm deleting them for everyone.',
+                'shared_children' => $sharedWithoutOtherOwner->pluck('name')->values(),
+            ], 409);
         }
+        foreach ($owned as $patient) {
+            if ($patient->ownerCount() <= 1) {
+                $patient->delete();
+                continue;
+            }
+            // The child stays with another owner, and so do the rooms this account paired for them.
+            $heir = $patient->users()->wherePivot('role', Patient::OWNER)->where('users.id', '!=', $user->id)->orderBy('users.id')->first();
+            $deviceIds = $user->devices()->where('patient_id', $patient->id)->pluck('id');
+            Device::whereIn('id', $deviceIds)->update(['user_id' => $heir->id]);
+            // Their limits and limit history too (both would otherwise go with this user, cascade).
+            HardwareConfig::whereIn('device_id', $deviceIds)->update(['user_id' => $heir->id]);
+            LimitChange::whereIn('device_id', $deviceIds)->update(['user_id' => $heir->id]);
+        }
+
+        // Devices, telemetry, coughs, configs and limit changes go with the user (cascade).
+        $user->tokens()->delete();
         $user->delete();
 
         return response()->json([

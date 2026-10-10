@@ -39,7 +39,7 @@ class User extends Authenticatable
     /** Patients this account can see, with its role in pivot->role. */
     public function patients()
     {
-        return $this->belongsToMany(Patient::class)->withPivot('role')->withTimestamps();
+        return $this->belongsToMany(Patient::class)->withPivot('role', 'alerts')->withTimestamps();
     }
 
     /** Patients this account owns. */

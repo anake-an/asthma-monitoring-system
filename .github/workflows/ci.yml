@@ -43,7 +43,9 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mysql:
-        image: mysql:8.0
+        # The official mysql image via AWS's public mirror: Docker Hub rate-limits pulls from the
+        # shared GitHub runner IPs ("toomanyrequests").
+        image: public.ecr.aws/docker/library/mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: ci-only
           MYSQL_DATABASE: asthma_db

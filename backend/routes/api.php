@@ -23,6 +23,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/patients/{id}', [\App\Http\Controllers\PatientController::class, 'update']);
     Route::delete('/patients/{id}', [\App\Http\Controllers\PatientController::class, 'destroy']);
 
+    // Sharing a child (DESIGN_MULTI_PATIENT.md section 3)
+    Route::get('/patients/{id}/members', [\App\Http\Controllers\SharingController::class, 'members']);
+    Route::post('/patients/{id}/invites', [\App\Http\Controllers\SharingController::class, 'invite'])->middleware('throttle:10,60');
+    Route::patch('/patients/{id}/members/{userId}', [\App\Http\Controllers\SharingController::class, 'updateMember']);
+    Route::delete('/patients/{id}/members/{userId}', [\App\Http\Controllers\SharingController::class, 'removeMember']);
+    Route::patch('/patients/{id}/alerts', [\App\Http\Controllers\SharingController::class, 'setAlerts']);
+    Route::get('/patients/{id}/audit', [\App\Http\Controllers\SharingController::class, 'audit']);
+    Route::delete('/invites/{inviteId}', [\App\Http\Controllers\SharingController::class, 'cancelInvite']);
+    Route::get('/invites/{token}', [\App\Http\Controllers\SharingController::class, 'showInvite'])->middleware('throttle:20,1');
+    Route::post('/invites/accept', [\App\Http\Controllers\SharingController::class, 'acceptInvite'])->middleware('throttle:10,1');
+
     Route::get('/devices', [\App\Http\Controllers\DeviceController::class, 'getDevices']);
     Route::patch('/devices/{id}', [\App\Http\Controllers\DeviceController::class, 'updateDevice']);
     Route::delete('/devices/{id}', [\App\Http\Controllers\DeviceController::class, 'deleteDevice']);
