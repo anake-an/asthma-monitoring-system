@@ -13,10 +13,13 @@
  *   unless there is an alert or the BOOT button is pressed)
  * - Gas sensor warm-up: not read for the first 3 minutes (sent as null)
  * - Clock from NTP, or asked from the server over MQTT where NTP is blocked
+ * - Firmware updates over Wi-Fi (ArduinoOTA, password OTA_PASSWORD in secrets.h)
  *
  * Setup: copy secrets.example.h to secrets.h and fill it in. Pairing token is
  * entered on the "RespiroSync-Setup" Wi-Fi portal.
  * Tested to compile on arduino-esp32 core 2.0.x (ESP-IDF 4.4); IDF 5 (core 3.x) branch included.
+ * Board: "ESP32 Dev Module", Partition Scheme "Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)":
+ * the default scheme (1.2 MB per app) is too small for this sketch with updates over Wi-Fi.
  */
 #include <WiFi.h>
 #include <WiFiManager.h>  // https://github.com/tzapu/WiFiManager
@@ -28,6 +31,7 @@
 #include <DHT.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>  // https://github.com/johnrickman/LiquidCrystal_I2C
+#include <ArduinoOTA.h>         // firmware updates over Wi-Fi (Arduino IDE network port)
 #include "secrets.h"            // MQTT_URI, MQTT_USERNAME, MQTT_PASSWORD
 
 // Works with ArduinoJson 6.x and 7.x
@@ -636,6 +640,40 @@ void onSetupPortal(WiFiManager *wm) {
   showScreen("WiFi setup", "Join RespiroSync");  // the "RespiroSync-Setup" network
 }
 
+/**
+ * Firmware updates over Wi-Fi: the Arduino IDE lists the device as a network port named
+ * "respirosync-<token>" (same Wi-Fi as the PC). Needs OTA_PASSWORD in secrets.h, and the
+ * "Minimal SPIFFS (1.9MB APP with OTA)" partition scheme (the default one has no room for it).
+ */
+void setupOta() {
+#ifdef OTA_PASSWORD
+  char host[24];
+  snprintf(host, sizeof(host), "respirosync-%s", device_token);
+  for (char *c = host; *c; c++) *c = tolower(*c);
+  ArduinoOTA.setHostname(host);
+  ArduinoOTA.setPassword(OTA_PASSWORD);
+  ArduinoOTA.onStart([]() {
+    setBuzzer(false);
+    setBacklight(true);
+    showScreen("Updating...", "Keep power on");
+  });
+  ArduinoOTA.onProgress([](unsigned int done, unsigned int total) {
+    char l1[17];
+    snprintf(l1, sizeof(l1), "%u%%", total ? done * 100 / total : 0);
+    showScreen("Updating...", l1);
+  });
+  ArduinoOTA.onEnd([]() { showScreen("Update done", "Restarting..."); });
+  ArduinoOTA.onError([](ota_error_t error) {
+    showScreen("Update failed", error == OTA_AUTH_ERROR ? "Wrong password" : "Try again");
+    Serial.printf("OTA error %u\n", error);
+  });
+  ArduinoOTA.begin();
+  Serial.printf("OTA ready: network port %s\n", host);
+#else
+  Serial.println("OTA off: add OTA_PASSWORD to secrets.h to update over Wi-Fi");
+#endif
+}
+
 void factoryReset() {
   Serial.println("Factory reset: wiping token and Wi-Fi settings");
   setBacklight(true);
@@ -718,6 +756,7 @@ void setup() {
   delay(1500);
 
   setClock();
+  setupOta();
 
   buildTopics();
   Serial.printf("Device token %s\n", device_token);
@@ -852,5 +891,8 @@ void loop() {
   updateOutputs();
   updateDisplay();
   retryClock();
+#ifdef OTA_PASSWORD
+  ArduinoOTA.handle();
+#endif
   delay(10);
 }

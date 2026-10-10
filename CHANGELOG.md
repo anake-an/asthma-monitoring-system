@@ -4,6 +4,9 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Added
+- **ESP32 firmware updates over Wi-Fi (ArduinoOTA):** upload from the Arduino IDE to the network port `respirosync-<token>`, with the password `OTA_PASSWORD` from `secrets.h`. The LCD shows the progress. **Needs the "Minimal SPIFFS (1.9MB APP with OTA)" partition scheme** (Tools → Partition Scheme), and one last upload over USB to switch to it. The token and Wi-Fi are kept. Without `OTA_PASSWORD`, updates over Wi-Fi are off.
+
 ## [6.1.0] - 2026-10-10
 
 Alerts when a reading stays over its limit, account photos and child badges, a PDF report that works in the iPhone app, and a redesigned device screen.
