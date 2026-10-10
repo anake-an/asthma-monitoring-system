@@ -100,6 +100,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Dashboard version matches /VERSION
+        run: |
+          shown=$(grep -o '"[0-9][0-9.]*"' lib/version.ts | tr -d '"')
+          test "$shown" = "$(tr -d '[:space:]' < ../VERSION)" || { echo "lib/version.ts says $shown, VERSION says $(cat ../VERSION)"; exit 1; }
+
       - uses: actions/setup-node@v5
         with:
           node-version: '20'

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Head from "next/head";
+import { APP_VERSION } from "@/lib/version";
 
 type DailyData = {
   date: string;
@@ -476,7 +477,7 @@ export default function ReportPage() {
           {/* Footer */}
           <div className="mt-16 pt-8 border-t border-zinc-300 dark:border-white/10 print:border-gray-200 flex flex-col md:flex-row justify-between items-center text-xs text-zinc-600 dark:text-zinc-400 print:text-gray-400 relative z-10">
             <p className="font-mono">Generated on {new Date().toLocaleString()}</p>
-            <p className="mt-2 md:mt-0 tracking-wider">RESPIROSYNC SYSTEM v{process.env.NEXT_PUBLIC_VERSION || '5.0.0'}</p>
+            <p className="mt-2 md:mt-0 tracking-wider">RESPIROSYNC SYSTEM v{APP_VERSION}</p>
           </div>
 
         </div>
