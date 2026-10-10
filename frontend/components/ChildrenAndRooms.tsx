@@ -110,12 +110,12 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
       {/* Children */}
       <div>
         <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-1 uppercase tracking-wider">Children</h4>
-        <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mb-3">Each child has their own rooms, doses and report. Only a name and a badge are stored, never a photo; tap the badge to change it.</p>
+        <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mb-3">Each child has their own rooms, doses and report. Only a name and a badge are stored, never a photo. Tap the badge to change it.</p>
         <div className="bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/5 rounded-xl p-4 space-y-3">
           {owned.length === 0 && (
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
               {sharedWithMe.length > 0
-                ? "You have no children of your own here; the ones shared with you are below. Add a child only to monitor your own child with your own device."
+                ? "You have no children of your own here. The ones shared with you are below. Add a child only to monitor your own child with your own device."
                 : "Add your child to start, or pair a device below (it creates one for you)."}
             </p>
           )}
