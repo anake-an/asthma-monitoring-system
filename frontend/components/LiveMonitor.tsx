@@ -112,17 +112,17 @@ export default function LiveMonitor() {
 
     const fetchSlow = async (headers: HeadersInit) => {
         // Fetch Cough Events to set AI Status
-        // The newest cough not marked as a false alarm.
-        const coughRes = await fetch(withDevice("/api/cough-events?per_page=1&exclude_false_alarms=1", deviceId), { headers });
+        // The newest cough nobody has reviewed yet: the banner shows for 2 h, or until it is reviewed.
+        const coughRes = await fetch(withDevice("/api/cough-events?per_page=1&unreviewed=1", deviceId), { headers });
         if (coughRes.ok) {
           const coughData = await coughRes.json();
           if (!active) return;
           if (coughData.data && coughData.data.length > 0) {
             const latestEvent = coughData.data[0];
             const diffHours = (new Date().getTime() - new Date(latestEvent.recorded_at).getTime()) / (1000 * 60 * 60);
-            setCoughDetected(diffHours < 12); // Alert if cough detected in last 12 hours
+            setCoughDetected(diffHours < 2);
           } else {
-            setCoughDetected(false); // none, or only false alarms
+            setCoughDetected(false); // none, or all reviewed
           }
         }
 
@@ -384,7 +384,7 @@ export default function LiveMonitor() {
               {isOffline
                 ? 'Connection lost. Please check power and WiFi on the ESP32 device.'
                 : coughDetected 
-                  ? 'The device heard a loud cough-like sound in the last 12 hours. Keep the inhaler nearby if symptoms appear.'
+                  ? 'The device heard a loud cough-like sound in the last 2 hours. Keep the inhaler nearby if symptoms appear. Review it in the cough history.'
                   : isEnvironmentUnsafe
                     ? 'A reading is above your alert limits. Consider ventilation or AC.'
                     : !data 
