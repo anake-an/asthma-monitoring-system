@@ -20,4 +20,4 @@ export function dustLevel(pm25: number): DustLevel {
 
 export const DUST_BANDS_NOTE =
   `Dust bands: Clean Air ≤ ${DUST_WHO_24H} (WHO 2021), Fair Air ≤ ${DUST_MAAQS_24H}, Dusty > ${DUST_MAAQS_24H} µg/m³ (MAAQS 2020). ` +
-  "Those limits are 24-hour averages; this is an instant, indicative reading.";
+  "Those limits are 24-hour averages. This is an instant, indicative reading.";

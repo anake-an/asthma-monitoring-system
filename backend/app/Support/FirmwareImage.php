@@ -38,7 +38,7 @@ class FirmwareImage
             throw new InvalidArgumentException('Not an ESP32 app image. Use the ".ino.bin" file, not ".merged.bin" or ".bootloader.bin".');
         }
         if ($size > FirmwareRelease::MAX_SIZE) {
-            throw new InvalidArgumentException("The image is {$size} bytes; the OTA app partition holds " . FirmwareRelease::MAX_SIZE
+            throw new InvalidArgumentException("The image is {$size} bytes, but the OTA app partition holds " . FirmwareRelease::MAX_SIZE
                 . '. Build with the "Minimal SPIFFS (1.9MB APP with OTA)" partition scheme.');
         }
         if (ord($bytes[self::HASH_APPENDED_OFFSET]) !== 1) {
@@ -61,7 +61,7 @@ class FirmwareImage
     private static function inspectEdgeAi(string $bytes, int $size, array $m): array
     {
         if ($size > FirmwareRelease::EDGE_AI_MAX_SIZE) {
-            throw new InvalidArgumentException("The Edge AI build is {$size} bytes; the module holds " . FirmwareRelease::EDGE_AI_MAX_SIZE
+            throw new InvalidArgumentException("The Edge AI build is {$size} bytes, but the module holds " . FirmwareRelease::EDGE_AI_MAX_SIZE
                 . '. Build with Flash Size "2MB (Sketch: 1MB, FS: 1MB)".');
         }
         if (str_starts_with($bytes, "UF2\n")) {

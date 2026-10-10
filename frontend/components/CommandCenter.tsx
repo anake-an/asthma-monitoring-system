@@ -381,7 +381,7 @@ export default function CommandCenter() {
                 <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Smart Alerts Configuration</h3>
                 <p className="text-xs text-zinc-600 dark:text-zinc-400 font-light mt-0.5">
                   {device
-                    ? <>Limits for <span className="font-medium text-zinc-800 dark:text-zinc-200">{roomLabel(device)}</span>. Each room has its own; pick another in the header.
+                    ? <>Limits for <span className="font-medium text-zinc-800 dark:text-zinc-200">{roomLabel(device)}</span>. Each room has its own. Pick another in the header.
                         {!canConfigure && <span className="block mt-1 text-amber-600 dark:text-amber-400">View only: an owner of {device.patient?.name ?? "this room"} changes these limits.</span>}</>
                     : "Pair a device first: limits are set per room."}
                 </p>
@@ -437,7 +437,7 @@ export default function CommandCenter() {
                     {config.mq135_threshold} <span className="text-xs text-zinc-600 dark:text-zinc-400 font-normal" title={GAS_NOTE}>ppm (est.)</span>
                   </span>
                 </div>
-                <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-4 font-light">Estimated CO2-equivalent; also reacts to smoke and household chemicals</p>
+                <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-4 font-light">Estimated CO2-equivalent. It also reacts to smoke and household chemicals.</p>
                 <input
                   type="range" min="450" max="3000" step="50"
                   value={config.mq135_threshold}

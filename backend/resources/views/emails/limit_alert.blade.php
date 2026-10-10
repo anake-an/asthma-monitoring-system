@@ -44,7 +44,7 @@
 
                 <a href="{{ $dashboardUrl }}" class="btn" style="color: #ffffff;">Open the dashboard</a>
 
-                <p style="margin-top: 30px; margin-bottom: 0; font-size: 13px;">While it stays above the limit you get a reminder at most every {{ $repeat }} minutes. Readings are estimates from low-cost sensors; the limits are the ones set for this room.</p>
+                <p style="margin-top: 30px; margin-bottom: 0; font-size: 13px;">While it stays above the limit you get a reminder at most every {{ $repeat }} minutes. Readings are estimates from low-cost sensors. The limits are the ones set for this room.</p>
             </div>
         </div>
         <div class="footer">

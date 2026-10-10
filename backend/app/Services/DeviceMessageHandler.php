@@ -232,7 +232,7 @@ class DeviceMessageHandler
             } elseif ($version === $device->ota_target_version) {
                 $changes += ['ota_status' => 'updated', 'ota_error' => null];
             } elseif (($data['boot'] ?? false) === true) {
-                $changes += ['ota_status' => 'failed', 'ota_error' => "The new firmware did not start; the device runs {$version} again."];
+                $changes += ['ota_status' => 'failed', 'ota_error' => "The new firmware did not start. The device runs {$version} again."];
             }
         }
         $device->forceFill($changes)->save();
