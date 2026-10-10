@@ -5,7 +5,12 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 ## [Unreleased]
 
 ### Added
-- **ESP32 firmware updates over Wi-Fi (ArduinoOTA):** upload from the Arduino IDE to the network port `respirosync-<token>`, with the password `OTA_PASSWORD` from `secrets.h`. The LCD shows the progress. **Needs the "Minimal SPIFFS (1.9MB APP with OTA)" partition scheme** (Tools → Partition Scheme), and one last upload over USB to switch to it. The token and Wi-Fi are kept. Without `OTA_PASSWORD`, updates over Wi-Fi are off.
+- **Cloud firmware updates (OTA) for the ESP32.** The developer publishes a build on the server (`php artisan firmware:publish <file>.ino.bin`). The server checks it is an ESP32 app image that fits, and reads the version from the file. Owners then see a blue dot on Account Settings, and **Update to x.y.z** for each room under Rooms. The device:
+    - downloads the firmware from the server over HTTPS, through a one-time link (10 minutes, that device only), with progress on the LCD;
+    - checks its SHA-256 and installs it into the spare slot;
+    - restarts, and keeps the new firmware only once it reaches the cloud. Otherwise (within 2 minutes) it goes back to the previous one.
+
+  Rooms shows each device's firmware version and Updating / Updated / Update failed (with the reason). A device answers with its version when it connects. **Needs** the "Minimal SPIFFS (1.9MB APP with OTA)" partition scheme and one USB flash of firmware 6.2.0. The firmware is not signed (no secure boot).
 - **"Device offline" alert:** when a room's device has sent nothing for **30 minutes** (power cut, Wi-Fi down, unplugged), everyone who gets that child's alerts gets an email and a push. It is sent once per outage, and a "back online" push follows when the device reports again. Devices that never connected are ignored. `php artisan devices:offline-alerts` runs every 5 minutes. The "Send me alerts" switch now covers coughs, readings over a limit and offline devices.
 
 ### Fixed

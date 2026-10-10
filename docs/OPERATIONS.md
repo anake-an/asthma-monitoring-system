@@ -157,3 +157,15 @@ These commands are also in `docs/DEMO.md`, with the steps around them. Replace `
   ```
   Plug it back in to get the "back online" push.
 - **Reading over its limit:** set the limit below the current reading in Smart Alerts. The device alarms at once; the email and push follow after 5 minutes.
+
+---
+
+## 12. Publishing ESP32 firmware (cloud updates)
+
+Full steps are in `hardware/README.md`, "Updating the ESP32 from the cloud". In short: copy the exported `esp32_firmware.ino.bin` into `backend/storage/app/firmware/`, then:
+```bash
+docker compose exec backend php artisan firmware:publish storage/app/firmware/esp32_firmware.ino.bin --notes="What changed"
+docker compose exec backend php artisan firmware:publish --list
+docker compose exec backend php artisan firmware:publish --remove=6.2.1
+```
+Owners then update each room from Account Settings → Rooms. Published files live in `backend/storage/app/firmware/` (not in git, kept across deploys). They are not in the database backup in section 2, but the project-folder backup includes them.

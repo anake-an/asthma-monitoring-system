@@ -150,6 +150,16 @@ class DeviceMessageHandler
 
             return;
         }
+        if (($data['event'] ?? null) === 'hello') {
+            $this->handleHello($device, $data);
+
+            return;
+        }
+        if (($data['event'] ?? null) === 'ota') {
+            $this->handleOtaReport($device, $data);
+
+            return;
+        }
         if (($data['event'] ?? null) !== 'cough') {
             return;
         }
@@ -190,6 +200,39 @@ class DeviceMessageHandler
                 }
             }
         }
+    }
+
+    /**
+     * Sent by the device each time it connects: its firmware version, and boot=true for the first
+     * connection after starting. During an update, that tells whether the new firmware runs: the
+     * target version means it worked; a fresh start with another version means the update was
+     * not installed or the device went back to the old firmware (rollback).
+     */
+    private function handleHello(Device $device, array $data): void
+    {
+        $version = $data['firmware'] ?? null;
+        if (!is_string($version) || !preg_match('/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/', $version)) {
+            return;
+        }
+        $changes = ['firmware_version' => $version];
+        if ($device->ota_status === 'updating') {
+            if ($version === $device->ota_target_version) {
+                $changes += ['ota_status' => 'updated', 'ota_error' => null];
+            } elseif (($data['boot'] ?? false) === true) {
+                $changes += ['ota_status' => 'failed', 'ota_error' => "The new firmware did not start; the device runs {$version} again."];
+            }
+        }
+        $device->forceFill($changes)->save();
+    }
+
+    /** {"event":"ota","status":"failed","error":"…"} when the device could not download or check the update. */
+    private function handleOtaReport(Device $device, array $data): void
+    {
+        if (($data['status'] ?? null) !== 'failed' || $device->ota_status !== 'updating') {
+            return;
+        }
+        $error = is_string($data['error'] ?? null) ? mb_substr($data['error'], 0, 160) : 'The device could not install the update.';
+        $device->forceFill(['ota_status' => 'failed', 'ota_error' => $error])->save();
     }
 
     /**

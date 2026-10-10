@@ -53,3 +53,7 @@ hardware/esp32_firmware/secrets.h
 .vscode/
 .idea/
 *.swp
+
+# Auto-deploy log on the server, and the file Next.js generates on every build
+deploy.log
+frontend/next-env.d.ts

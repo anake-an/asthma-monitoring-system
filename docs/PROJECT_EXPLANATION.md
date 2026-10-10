@@ -26,7 +26,7 @@ How the hardware, AI, backend and frontend fit together, what each part really d
         *   Alerts and coughs interrupt the pages; night mode switches the backlight off from 21:00 to 07:00.
         *   The gas sensor is not read for its first 3 minutes (warm-up).
         *   The clock comes from NTP, or from the server over MQTT where NTP is blocked.
-        *   The firmware can be updated over Wi-Fi (ArduinoOTA).
+        *   Cloud firmware updates: owners press Update in the dashboard; the device downloads the new build from the server over HTTPS, checks its SHA-256, installs it and rolls back if it does not reach the cloud.
 *   **Code:** `hardware/esp32_firmware/esp32_firmware.ino` (credentials in a gitignored `secrets.h`).
 
 ---

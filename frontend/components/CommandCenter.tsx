@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { GAS_NOTE, GAS_DEFAULT_LIMIT_PPM } from "@/lib/gas";
-import { authHeaders, roomLabel, useRooms, withDevice } from "@/lib/rooms";
+import { authHeaders, firmwareUpdateFor, roomLabel, useRooms, withDevice } from "@/lib/rooms";
 import ChildrenAndRooms from "@/components/ChildrenAndRooms";
 import PushSettings from "@/components/PushSettings";
 import { disablePush } from "@/lib/push";
@@ -46,7 +46,9 @@ export default function CommandCenter() {
     onConfirm: () => void
   }>({ isOpen: false, title: "", message: "", isDanger: false, onConfirm: () => {} });
   // Smart Alerts are per room: the one chosen in the header.
-  const { device, deviceId } = useRooms();
+  const { device, deviceId, devices, latestFirmware } = useRooms();
+  // Rooms this owner can update to newer firmware: a dot on "Account Settings" (updates are in Rooms).
+  const firmwareUpdates = devices.filter(d => firmwareUpdateFor(d, latestFirmware)).length;
   const canConfigure = !!device?.can_configure;
 
   // Lock switch under each limit, with a line saying what the AI may do with it.
@@ -335,6 +337,9 @@ export default function CommandCenter() {
               <circle cx="12" cy="7" r="4"></circle>
             </svg>
             Account Settings
+            {firmwareUpdates > 0 && (
+              <span className="w-2 h-2 rounded-full bg-blue-500" title={`Firmware update available for ${firmwareUpdates} room${firmwareUpdates === 1 ? "" : "s"} (Rooms)`} aria-label="Firmware update available" />
+            )}
           </button>
         </div>
       </section>
