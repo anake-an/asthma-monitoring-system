@@ -8,6 +8,7 @@ use App\Models\HardwareConfig;
 use App\Models\LimitAlert;
 use App\Models\TelemetryLog;
 use App\Notifications\CoughAlertNotification;
+use App\Notifications\DeviceBackOnlineNotification;
 use App\Notifications\LimitAlertNotification;
 use App\Support\Mqtt;
 use Illuminate\Support\Facades\Log;
@@ -54,7 +55,18 @@ class DeviceMessageHandler
         }
 
         // Online/offline is computed from last_seen_at (Device::OFFLINE_AFTER_SECONDS).
-        $device->forceFill(['last_seen_at' => now(), 'status' => 'online'])->save();
+        $wasReportedOffline = $device->offline_alerted_at !== null;
+        $device->forceFill(['last_seen_at' => now(), 'status' => 'online', 'offline_alerted_at' => null])->save();
+        if ($wasReportedOffline) {
+            // devices:offline-alerts told everyone it was offline: say it is back (push only).
+            foreach (self::alertRecipients($device) as $user) {
+                try {
+                    $user->notify(new DeviceBackOnlineNotification($device));
+                } catch (\Throwable $e) {
+                    Log::error('Failed to send back-online push', ['device_id' => $device->id, 'user_id' => $user->id, 'error' => $e->getMessage()]);
+                }
+            }
+        }
 
         match ($channel) {
             'telemetry' => $this->storeTelemetry($device, $data),
