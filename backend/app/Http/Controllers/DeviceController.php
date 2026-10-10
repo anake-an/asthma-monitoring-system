@@ -22,7 +22,11 @@ class DeviceController extends Controller
     {
         $request->validate(['patient_id' => 'nullable|integer']);
         $user = $request->user();
-        // The new room belongs to the chosen child (one the user owns), by default the first one.
+        // The new room belongs to the chosen child (one the user owns). Without one: the user's own
+        // first child, created as "My child" if they have none yet (never a child shared with them).
+        if (!$request->filled('patient_id')) {
+            $request->merge(['patient_id' => $user->defaultPatient()->id]);
+        }
         $patient = $this->patient($request, 'manage');
 
         // 6-character uppercase token, also used as the device's MQTT client id

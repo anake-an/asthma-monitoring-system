@@ -58,6 +58,7 @@ export default function ReportPage() {
   const [loading, setLoading] = useState(true);
   // One report per child; the picker is hidden when printing.
   const [patients, setPatients] = useState<PatientOption[]>([]);
+  const [patientsLoaded, setPatientsLoaded] = useState(false);
   const [patientId, setPatientId] = useState<number | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
 
@@ -89,7 +90,7 @@ export default function ReportPage() {
   useEffect(() => {
     fetch("/api/patients", { headers: { "Authorization": `Bearer ${localStorage.getItem("auth_token")}`, "Accept": "application/json" } })
       .then(res => (res.ok ? res.json() : { patients: [] }))
-      .then(d => setPatients(d.patients ?? []))
+      .then(d => { setPatients(d.patients ?? []); setPatientsLoaded(true); })
       .catch(() => {});
   }, []);
 
@@ -133,6 +134,15 @@ export default function ReportPage() {
   }
 
   if (!data) {
+    // No child yet (e.g. a new account, or one waiting to accept an invitation): nothing to report.
+    if (patientsLoaded && patients.length === 0) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-6 text-center bg-gray-50 dark:bg-[#09090b] text-zinc-600 dark:text-zinc-400">
+          <p>No child to report on yet. Add one in Account Settings → Children &amp; rooms, or accept an invitation.</p>
+          <a href="/" className="text-blue-500 hover:underline text-sm">Back to the dashboard</a>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-[#09090b] text-red-500">
         Failed to load report data. Please check your connection.

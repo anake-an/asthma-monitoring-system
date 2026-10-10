@@ -30,12 +30,16 @@ abstract class Controller
 
     /**
      * The patient named by ?patient_id if this user may do $ability with it (404 / 403 as above).
-     * Without an id: the user's default patient. Abilities: App\Policies\PatientPolicy.
+     * Without an id: the first child this user can see, their own first, else shared with them
+     * (404 when there is none; nothing is created here). Abilities: App\Policies\PatientPolicy.
      */
     protected function patient(Request $request, string $ability = 'view'): Patient
     {
         $id = $request->input('patient_id');
-        $patient = ($id === null || $id === '') ? $request->user()->defaultPatient() : Patient::find((int) $id);
+        $patient = ($id === null || $id === '')
+            ? $request->user()->patients()
+                ->orderByRaw("CASE WHEN patient_user.role = 'owner' THEN 0 ELSE 1 END")->orderBy('patients.id')->first()
+            : Patient::find((int) $id);
 
         return $this->authorizeOr404($request, $patient, $ability);
     }

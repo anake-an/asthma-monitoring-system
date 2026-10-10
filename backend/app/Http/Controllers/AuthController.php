@@ -28,8 +28,9 @@ class AuthController extends Controller
             'password' => Hash::make($request->password),
         ]);
 
-        // Every account starts with one patient ("My child", renamed in the dashboard).
-        $user->defaultPatient();
+        // No child is created here: someone who only signs up to accept an invitation must not get
+        // an empty child of their own. A parent's first child is created when they pair a device or
+        // add one (Children & rooms).
 
         $token = $user->createToken('auth_token')->plainTextToken;
 

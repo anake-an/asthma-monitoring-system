@@ -39,6 +39,9 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
   const [busy, setBusy] = useState(false);
   const [openShare, setOpenShare] = useState<number | null>(null); // child whose sharing panel is open
   const sharedWithMe = patients.filter(p => p.role !== "owner");
+  // Pairing is for your own children: shown when you own one, or have no children at all yet
+  // (pairing then creates "My child"). Someone who only sees shared children cannot pair for them.
+  const canPair = owned.length > 0 || patients.length === 0;
   // New devices go to a child I own: the chosen one, the room on screen's child, or the first.
   const pairTarget = pairFor ?? (owned.some(p => p.id === patientId) ? patientId : owned[0]?.id ?? null);
 
@@ -105,6 +108,13 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
         <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-1 uppercase tracking-wider">Children</h4>
         <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mb-3">Each child has their own rooms, doses and report. Only a name is stored.</p>
         <div className="bg-zinc-50 dark:bg-black/40 border border-zinc-200 dark:border-white/5 rounded-xl p-4 space-y-3">
+          {owned.length === 0 && (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              {sharedWithMe.length > 0
+                ? "You have no children of your own here; the ones shared with you are below. Add a child only to monitor your own child with your own device."
+                : "Add your child to start, or pair a device below (it creates one for you)."}
+            </p>
+          )}
           {owned.map(p => (
             <div key={p.id}>
               <div className="flex items-center gap-2">
@@ -251,6 +261,7 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
                   })}
                 </div>
               )}
+              {canPair ? (
               <div className="flex items-center gap-2">
                 {owned.length > 1 && (
                   <select className={input} value={pairTarget ?? ""} onChange={e => setPairFor(Number(e.target.value))} disabled={busy}>
@@ -265,6 +276,11 @@ export default function ChildrenAndRooms({ onToast, onConfirm }: {
                   {busy ? "Working..." : "+ Pair New ESP32 Device"}
                 </button>
               </div>
+              ) : (
+                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                  Devices are paired by a child&apos;s owner. To use a device of your own for your own child, add that child under Children first.
+                </p>
+              )}
             </>
           )}
         </div>

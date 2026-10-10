@@ -49,14 +49,58 @@ class PatientsAndDevicesTest extends TestCase
             'mq135_level' => 450, 'recorded_at' => now()->subSeconds($secondsAgo)]);
     }
 
-    public function test_registering_creates_a_first_patient(): void
+    public function test_a_first_child_is_created_by_pairing_not_by_registering(): void
     {
         $this->postJson('/api/register', ['name' => 'New', 'email' => 'new@example.test', 'password' => 'password123', 'password_confirmation' => 'password123'])
             ->assertCreated();
-
         $user = User::where('email', 'new@example.test')->sole();
+        $this->assertSame(0, $user->patients()->count(), 'an invitee must not get an empty child of their own');
+
+        Sanctum::actingAs($user);
+        $this->getJson('/api/patients')->assertOk()->assertJsonCount(0, 'patients');
+        $this->getJson('/api/report')->assertNotFound(); // no child to report on, nothing created
+        $this->assertSame(0, $user->patients()->count());
+
+        $this->postJson('/api/devices/generate-token')->assertOk();
         $this->assertSame([Patient::DEFAULT_NAME], $user->patients()->pluck('name')->all());
         $this->assertSame(Patient::OWNER, $user->patients()->first()->pivot->role);
+    }
+
+    public function test_the_cleanup_removes_only_empty_auto_children_of_people_with_another_child(): void
+    {
+        $make = function (User $u, string $name = 'My child'): Patient {
+            $p = Patient::create(['name' => $name]);
+            $p->users()->attach($u->id, ['role' => Patient::OWNER]);
+
+            return $p;
+        };
+        $invitee = User::factory()->create();
+        $leftover = $make($invitee);                               // empty, and the invitee sees Aiman
+        $this->aiman->users()->attach($invitee->id, ['role' => Patient::VIEWER]);
+        $onlyChild = $make(User::factory()->create());             // someone's only child: keep
+        $withRoom = $make($invitee);                               // has a room: keep
+        Device::create(['user_id' => $invitee->id, 'patient_id' => $withRoom->id, 'device_token' => 'INV001']);
+        $renamed = $make($invitee, 'Adam');                        // renamed: keep
+
+        $migration = require database_path('migrations/2026_10_10_000009_remove_unused_auto_children.php');
+        $this->assertSame(1, $migration->cleanup());
+
+        $this->assertNull(Patient::find($leftover->id));
+        $this->assertNotNull(Patient::find($onlyChild->id));
+        $this->assertNotNull(Patient::find($withRoom->id));
+        $this->assertNotNull(Patient::find($renamed->id));
+        $this->assertNotNull(Patient::find($this->aiman->id));
+    }
+
+    public function test_someone_a_child_is_shared_with_sees_it_by_default_and_cannot_pair_for_it(): void
+    {
+        $viewer = User::factory()->create();
+        $this->aiman->users()->attach($viewer->id, ['role' => Patient::VIEWER]);
+        Sanctum::actingAs($viewer);
+
+        $this->getJson('/api/report')->assertOk()->assertJsonPath('patient.name', 'Aiman');
+        $this->postJson('/api/devices/generate-token', ['patient_id' => $this->aiman->id])->assertForbidden();
+        $this->assertSame(['Aiman'], $viewer->patients()->pluck('name')->all());
     }
 
     public function test_telemetry_is_per_device_and_defaults_to_the_most_recently_seen(): void
