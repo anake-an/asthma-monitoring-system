@@ -16,7 +16,7 @@ Raise `FIRMWARE_VERSION` and write `WHATS_NEW.txt` (what owners read in the upda
 
 | Firmware | Build | What changed |
 |---|---|---|
-| **3.3.0** | set by CI | Passes Edge AI updates on to the Pico; faster link to it (115200). **Needs Edge AI 2.0.0** (older Pico builds talk at 9600) |
+| **3.3.0** | 261010.9 | Passes Edge AI updates on to the Pico; faster link to it (115200). **Needs Edge AI 2.0.0** (older Pico builds talk at 9600) |
 | 3.2.0 | 261010.8 | Night mode can be switched off per room in Smart Alerts |
 | 3.1.0 | 261010.7 | Start-up shows the firmware version and build; clearer update screens ("Updating 45%", "Don't unplug"); reports its build stamp |
 | 3.0.1 | 261010.6 | Start-up screens slower, so they can be read *(first update installed from the cloud; it called itself "6.2.1")* |
@@ -38,7 +38,8 @@ The module that listens for coughs. Same version style (`2.0.0 Build 261011`): `
 
 | Edge AI | Build | What changed |
 |---|---|---|
-| **2.0.0** | set by CI | Updates from the dashboard (through the ESP32); faster link (115200); reports its version. **One USB flash needed**, with Flash Size "2MB (Sketch: 1MB, FS: 1MB)" |
+| 2.0.1 | set by CI | Repeats its version to the ESP32 every 10 minutes |
+| **2.0.0** | 261010.4 | Updates from the dashboard (through the ESP32); faster link (115200); reports its version. **One USB flash needed**, with Flash Size "2MB (Sketch: 1MB, FS: 1MB)" |
 | 1.3.0 | 261010.3 | Test mode removed |
 | 1.2.1 | 261010.2 | No false coughs from electrical noise (data line pulled down, 3 s settle, 32 ms minimum) |
 | 1.2.0 | 261010 | Test button / serial test mode |

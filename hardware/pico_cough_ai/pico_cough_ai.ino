@@ -46,7 +46,7 @@
 #include <math.h>
 
 // Raise for every build you publish; CI adds the build stamp (build_info.h). See FIRMWARE_HISTORY.md.
-#define EDGE_AI_VERSION "2.0.0"
+#define EDGE_AI_VERSION "2.0.1"
 #if __has_include("build_info.h")
 #include "build_info.h"
 #endif
@@ -215,8 +215,17 @@ void setup() {
   sayHello();
 }
 
+/** Repeat the version every 10 minutes, so the ESP32 knows it even if one of them restarted alone. */
+void helloNowAndThen() {
+  static unsigned long last = 0;
+  if (millis() - last < 600000UL) return;
+  last = millis();
+  sayHello();
+}
+
 void loop() {
   handleLink();
+  helloNowAndThen();
   if (!micReady) {
     delay(10);
     return;
