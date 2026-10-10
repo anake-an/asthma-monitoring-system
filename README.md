@@ -24,13 +24,12 @@
 
 Responsive, dark-mode dashboard for parents and other caregivers: live readings per room, cough history, medication log, alarm limits, a printable weekly Activity Log per child.
 
-> The screenshots below are from v5.0.0. Since v6.0.0 the header also has the room picker, Account Settings has *Children & rooms*, *Sharing* and *Notifications on this device*, and the Activity Log has the alert-limit history and data downloads.
+<img width="1320" height="865" alt="1" src="https://github.com/user-attachments/assets/b1079812-6ac1-4f53-9ffa-f18e144bbd03" />
+<img width="1308" height="871" alt="2" src="https://github.com/user-attachments/assets/6df0d8d4-fa30-4291-8001-37554e5905f7" />
+<img width="1293" height="859" alt="3" src="https://github.com/user-attachments/assets/3d67424e-d1e5-4fc3-8531-4a14da795332" />
+<img width="1308" height="866" alt="4" src="https://github.com/user-attachments/assets/54e7e9e9-f0a5-4f41-925f-d63bb8f88207" />
+<img width="1854" height="897" alt="5" src="https://github.com/user-attachments/assets/0103eb3f-a1cf-432d-88ef-44b477c7299f" />
 
-<img width="2510" height="1329" alt="login" src="https://github.com/user-attachments/assets/c05da708-7403-420b-8265-ca30d19c0dac" />
-<img width="2508" height="1342" alt="register" src="https://github.com/user-attachments/assets/6bc92046-76df-4275-b249-7b788199a0ea" />
-<img width="2077" height="1348" alt="main dashboard" src="https://github.com/user-attachments/assets/610ccbf8-072c-4790-be39-d8ad41405e05" />
-<img width="2061" height="1315" alt="smart alert configurations" src="https://github.com/user-attachments/assets/9af0be4d-0764-4590-b0d7-145ab1ace8ca" />
-<img width="2054" height="1293" alt="account settings" src="https://github.com/user-attachments/assets/2c9c8d2a-6f86-46d5-97dc-0b9d8c88dd63" />
 
 ---
 
