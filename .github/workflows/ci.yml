@@ -120,6 +120,14 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The bar and headline colours come from lib/readingStatus.ts; Tailwind only generates classes
+      # it finds in its content paths, and amber once went missing (invisible "near the limit" bars).
+      - name: Status colours are in the built CSS
+        run: |
+          for c in bg-emerald-400 bg-amber-400 bg-red-400; do
+            grep -rqF ".$c{" .next/static/css || { echo "missing CSS class $c"; exit 1; }
+          done
+
   firmware-esp32:
     name: ESP32 firmware compiles (core ${{ matrix.core }})
     runs-on: ubuntu-latest

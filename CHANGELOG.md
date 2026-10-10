@@ -4,6 +4,9 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Fixed
+- **Amber "near the limit" bars were invisible** (and the icon lost its round background) since the bar colours moved to `lib/readingStatus.ts` in 6.0.0: Tailwind did not scan `lib/`, so the amber classes were never generated (green and red happened to be used elsewhere). `lib/` is scanned now, and CI checks that the built CSS has all three status colours.
+
 ### Changed
 - **ESP32 firmware: built-in humidity limit 75 % (was 60 %),** the same as the server's default. It only applies until the device receives its limits from the server, i.e. after booting without internet, where 60 % alarmed all the time in indoor air of 65-70 %. Takes effect at the next flash; no need to re-flash just for this.
 
