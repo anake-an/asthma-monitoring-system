@@ -9,6 +9,7 @@ import StandByMode from "@/components/StandByMode";
 import AiRiskAssessment from "@/components/AiRiskAssessment";
 import RoomPicker from "@/components/RoomPicker";
 import { RoomsProvider } from "@/lib/rooms";
+import { APP_VERSION } from "@/lib/version";
 
 export default function Home() {
   const [sleepMode, setSleepMode] = useState(false);
@@ -105,7 +106,7 @@ export default function Home() {
       <footer className="mt-8 pt-4 border-t border-zinc-200 dark:border-[#1a1a2e] flex flex-col md:flex-row justify-between items-center text-[11px] text-zinc-600">
         <p>© 2026 RespiroSync</p>
         <p className="mt-1 md:mt-0 font-mono">
-          Build {process.env.NEXT_PUBLIC_VERSION || '5.0.0'}
+          Build {APP_VERSION}
         </p>
       </footer>
     </main>

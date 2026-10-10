@@ -4,6 +4,16 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-10-10
+
+Children, rooms and sharing; an AI that learns per room and per child; push notifications, data export and data retention.
+
+### Upgrading from 5.0.0
+- **Database:** migrations run by themselves on start. Existing data is linked: each account gets a child "My child" (rename it in Account Settings → Children & rooms) that owns its devices and doses, and every device gets a copy of the account's limits.
+- **`backend/.env` on the server:** `FRONTEND_URL` must be the address the dashboard is really served at (e.g. `https://app.respirosync.online`), or links in invite, password-reset and alert emails do not open; add `VAPID_SUBJECT=mailto:<an address you read>`, without which iPhones reject push notifications. Recreate `backend`, `mqtt-worker` and `scheduler` afterwards.
+- **AI:** models are now per room and per child; the old per-account files are not read. Run `php artisan ai:train` once (it then runs every 4 h); each room starts in Learning mode.
+- **ESP32:** re-flash with this release's firmware if your device still runs the 5.0.0 build (gas in ppm, self-calibrating dust sensor, passive buzzer, 3 s updates). Nothing else needs flashing.
+
 ### Added
 - **Smarter AI inputs:** the risk model also learns from **how fast** dust and humidity are rising (change since the previous 10 minutes) and from **night-time** (22:00-05:59), next to the window averages, coughs and the daily-dose input. The **gas limit is now learned per room** too (mean + 3 spreads of that room's gas, floor 700 ppm), once a room has 6 h of gas readings, and an unusual gas reading alone can make Stage 1 "unusual". Old risk models (5 inputs) are not used and are replaced on the next training run; older room baselines without gas keep the 1000 ppm gas default until retrained.
 - **Data export (PDPA right of access):** the Activity Log has "Download <child>'s data" with four spreadsheet files (CSV): sensor readings (with how many readings each average replaced), coughs (alert rule, review, inhaler used), inhaler doses (type, who logged it, by hand or from a cough) and alert limit changes (by AI, user or rule, with the reason). Only that child's rooms and doses, for anyone who can see the child; streamed, so a large file never sits in memory; cells that look like spreadsheet formulas are kept as text; each export is in the audit log. `GET /api/patients/{id}/export/{readings|coughs|doses|limits}`.
@@ -38,6 +48,7 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 - `WIRING_GUIDE.md` rewritten for the reference kit: MB-102 split power, BSS138 level shifter on the LCD, GP2Y1010AU0F (150 Ω from 220 ∥ 470 Ω), DHT22 module, passive buzzer through 220 Ω, pin summary, bring-up order, power-on order.
 
 ### Fixed
+- The dashboard footer and the Activity Log showed version 5.0.0 whatever was deployed (a hard-coded fallback); they read `frontend/lib/version.ts` now, and CI checks it equals `VERSION`. `backend/.env.example` had the wrong dashboard address and no `VAPID_SUBJECT`.
 - **AI engine could never reach the database** when the DB password contains `@` (and other URL characters): the connection string was assembled by text, so MySQL saw a host like `…@db`. Prediction hid it (it checks for a model file first); training failed with a 500, so the AI could not leave Learning mode. The URL is now built from parts (`URL.create`), with a CI regression check.
 - **AI reported plain accuracy and trained a Random Forest on any amount of data:** about 95% of windows are "safe", so even a useless model scored about 95%. Training now stays on Stage 1 below 12 episode windows (about 2 episodes), uses logistic regression up to 19 and a Random Forest from 20, and reports recall and precision on the most recent 25% of windows (or no score when fewer than 2 later episode windows exist). The AI panel shows the model type and those scores. CI trains on synthetic episodes to check all three cases.
 - **AI treated daily doses as attacks:** every inhaler dose, including controller (daily, preventive) doses, was an "episode" label, so a child who takes the daily inhaler looked like one with daily attacks. Only rescue doses (and cough clusters) are episodes now; "controller dose in the last 24 h" is a model input instead. A model trained on the old inputs is not used and is replaced on the next training run. CI checks the labels with synthetic data.
@@ -117,5 +128,7 @@ Initial public release.
 
 > **Superseded.** 4.3.0 runs an open MQTT broker and has the cross-account data access fixed in 5.0.0. Do not deploy it.
 
+[Unreleased]: https://github.com/anake-an/asthma-monitoring-system/compare/v6.0.0...HEAD
+[6.0.0]: https://github.com/anake-an/asthma-monitoring-system/compare/v5.0.0...v6.0.0
 [5.0.0]: https://github.com/anake-an/asthma-monitoring-system/compare/v4.3.0...v5.0.0
 [4.3.0]: https://github.com/anake-an/asthma-monitoring-system/releases/tag/v4.3.0
