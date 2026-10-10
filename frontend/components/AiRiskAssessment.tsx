@@ -132,13 +132,6 @@ export default function AiRiskAssessment() {
                   ? "Room compared with its usual readings"
                   : "Risk of an asthma flare-up in the next hour (model estimate)"}
             </div>
-            {(isLearning || isStage1) && (
-              <p className="text-[11px] text-zinc-500 dark:text-zinc-500 mt-2 font-light leading-relaxed">
-                {isLearning
-                  ? "The AI first learns what is usual for this room (it trains every 4 hours)."
-                  : "Stage 2, a risk model for this child, starts after about 2 flare-ups (an emergency dose, or 2+ coughs within an hour) with readings before them."}
-              </p>
-            )}
             {!isLearning && !isStage1 && activePrediction.model && (
               <div className="text-[11px] text-zinc-500 dark:text-zinc-500 mt-1 font-light">
                 {MODEL_NAME[activePrediction.model.model_type]} · learned from about {Math.max(1, Math.round(activePrediction.model.episode_windows / 6))} flare-ups ·{" "}
