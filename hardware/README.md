@@ -56,10 +56,31 @@ To upgrade the Pico from Phase 1 math-based logic to Phase 2 True AI (Distinguis
 ## Setup Instructions
 
 1.  Open `WIRING_GUIDE.md` and wire all hardware exactly as specified.
-2.  Copy `esp32_firmware/secrets.example.h` to `esp32_firmware/secrets.h` and fill in the broker URL and device password. Delete `esp32_firmware.example.ino` if it is still in the folder (the IDE compiles every `.ino` in a sketch folder together).
-    Open `esp32_firmware/esp32_firmware.ino` in the Arduino IDE (libraries: WiFiManager, ArduinoJson 6 or 7, DHT sensor library, LiquidCrystal_I2C).
-3.  Connect your ESP32 via USB and click **Upload**.
-4.  Once booted, use your phone to connect to the **RespiroSync-Setup** WiFi network to configure your WiFi password and enter your Dashboard Device Token!
-5.  Open `pico_cough_ai/pico_cough_ai.ino` in the Arduino IDE with the arduino-pico core selected.
-6.  Connect your Raspberry Pi Pico via USB and click **Upload**.
-7.  Mount the hardware in the bedroom and monitor the dashboard!
+2.  Copy `esp32_firmware/secrets.example.h` to `esp32_firmware/secrets.h` and fill in:
+    *   the broker URL and the device password;
+    *   an `OTA_PASSWORD` of your own (for updates over Wi-Fi).
+
+    Delete `esp32_firmware.example.ino` if it is still in the folder: the IDE compiles every `.ino` in a sketch folder together.
+3.  Open `esp32_firmware/esp32_firmware.ino` in the Arduino IDE. It needs these libraries: WiFiManager, ArduinoJson 6 or 7, DHT sensor library, LiquidCrystal_I2C.
+4.  Under **Tools**, choose:
+    *   **Board:** "ESP32 Dev Module".
+    *   **Partition Scheme:** "**Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)**". The default scheme leaves too little room for this sketch with updates over Wi-Fi.
+5.  Connect your ESP32 via USB and click **Upload**.
+6.  Once it has started, use your phone to connect to the **RespiroSync-Setup** Wi-Fi network, then enter your Wi-Fi password and the token from the dashboard.
+7.  Open `pico_cough_ai/pico_cough_ai.ino` in the Arduino IDE with the arduino-pico core selected.
+8.  Connect your Raspberry Pi Pico via USB and click **Upload**. Without the microphone it runs in test mode (see `WIRING_GUIDE.md`, "Test button").
+9.  Mount the hardware in the bedroom and monitor the dashboard!
+
+## Updating the ESP32 over Wi-Fi
+
+Once the board runs this firmware (with `OTA_PASSWORD` set), it does not need the USB cable for updates:
+1.  Keep the PC on the **same Wi-Fi** as the device.
+2.  In the Arduino IDE, open **Tools → Port**. Under "Network ports", choose **respirosync-xxxxxx** (your token in small letters).
+3.  Click **Upload** and enter the `OTA_PASSWORD` when asked.
+4.  The LCD shows **Updating... 0-100%**, then "Update done", and the device restarts. The token and Wi-Fi are kept.
+
+If the port does not appear:
+*   Check that the PC and device are on the same network. Some routers and campus Wi-Fi block devices from seeing each other; on those, use USB.
+*   Restart the IDE.
+
+The first upload with the new partition scheme must be over USB. Do **not** tick "Erase All Flash Before Sketch Upload" for normal updates: it also erases the token and Wi-Fi, so the device would need pairing again.
