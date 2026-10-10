@@ -127,3 +127,33 @@ Replace `YOUR_TOKEN` with the device's 6-character token and `BACKEND_PASSWORD` 
 docker run --rm --network none -v "$PWD/backend:/app" -w /app webdevops/php:8.2-alpine php artisan test
 ```
 GitHub Actions runs the same tests on every push (`.github/workflows/ci.yml`).
+
+---
+
+## 10. Scheduled tasks
+
+The `scheduler` container runs these by itself (`backend/routes/console.php`). Run any of them by hand with `docker compose exec backend php artisan <command>`.
+
+| Command | When | What it does |
+|---|---|---|
+| `ai:train` | every 4 h | Trains each room's model, then each child's risk model. Run it by hand after an AI reset. |
+| `ai:optimize` | every 5 min | Applies the AI's limit suggestions per room, and the missed-dose rule, then sends changed limits to the devices. |
+| `devices:dose-reminders` | every 5 min | Tells each device whether its child's daily dose is overdue (the LCD's "Daily dose?"). Only devices whose answer changed are sent anything. |
+| `devices:offline-alerts` | every 5 min | Emails and pushes a room's alert recipients when its device has been silent for 30 minutes, once per outage. |
+| `telemetry:prune` | daily 03:30 | Thins out old readings (section 3). |
+
+The MQTT worker also answers a device's `time_request` event with the current time (`set_time` command). Devices use it when their network blocks the internet time servers.
+
+---
+
+## 11. Testing alerts without waiting
+
+These commands are also in `docs/DEMO.md`, with the steps around them. Replace `ABC123` with the device token.
+- **Cough:** use the Pico's test button (GP2) or type `c` / `s` in its Serial Monitor (`hardware/WIRING_GUIDE.md`, "Test button").
+- **Device offline:** unplug the device, then:
+  ```bash
+  docker compose exec backend php artisan tinker --execute='App\Models\Device::where("device_token","ABC123")->update(["last_seen_at" => now()->subMinutes(31)]);'
+  docker compose exec backend php artisan devices:offline-alerts
+  ```
+  Plug it back in to get the "back online" push.
+- **Reading over its limit:** set the limit below the current reading in Smart Alerts. The device alarms at once; the email and push follow after 5 minutes.
