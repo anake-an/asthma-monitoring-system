@@ -4,6 +4,9 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Changed
+- **ESP32 firmware: built-in humidity limit 75 % (was 60 %),** the same as the server's default. It only applies until the device receives its limits from the server, i.e. after booting without internet, where 60 % alarmed all the time in indoor air of 65-70 %. Takes effect at the next flash; no need to re-flash just for this.
+
 ## [6.0.0] - 2026-10-10
 
 Children, rooms and sharing; an AI that learns per room and per child; push notifications, data export and data retention.

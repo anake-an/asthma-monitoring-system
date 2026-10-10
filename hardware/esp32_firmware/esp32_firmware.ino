@@ -74,10 +74,12 @@ volatile bool mqtt_connected = false;
 bool shouldSaveConfig = false;
 
 // --- Thresholds (defaults until the retained config arrives) ---
+// Same as the server's defaults (HardwareConfig::DEFAULTS), so a device that boots without
+// internet alarms on the same limits as a new room on the dashboard.
 struct Thresholds {
   float pm25 = 35.0f;
   float temperature = 35.0f;
-  float humidity = 60.0f;
+  float humidity = 75.0f;  // 60 % alarmed all the time in Malaysian indoor air (often 65-70 %)
   float mq135 = 1000.0f;  // estimated ppm (CO2-equivalent)
   bool muted = false;
 };
