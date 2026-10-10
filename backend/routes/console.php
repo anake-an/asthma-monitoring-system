@@ -10,3 +10,7 @@ Schedule::command('ai:train')->everyFourHours()->withoutOverlapping();
 // with "AI optimization" enabled; the AI may tighten a limit below the user's own value (cap) but
 // never raise it above, never touches locked limits, and changes each limit at most once a day.
 Schedule::command('ai:optimize')->everyFiveMinutes()->withoutOverlapping();
+
+// Nightly, thin out old sensor readings: every reading for 7 days, then one 10-minute average per
+// device, deleted after a year (App\Console\Commands\TelemetryPrune).
+Schedule::command('telemetry:prune')->dailyAt('03:30')->withoutOverlapping();
