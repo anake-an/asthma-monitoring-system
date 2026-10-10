@@ -33,12 +33,13 @@ Wiring for the dual-processor build: an **ESP32** (sensors, display, alarm, Wi-F
 9 V adapter ──► MB-102 (rail jumper on 5 V) ──► 5 V rail: MQ-135, Sharp sensor, LCD, level shifter HV
 USB (PC, or a 5 V phone charger) ──► ESP32 ── its 3V3 pin ──► DHT22, level shifter LV
 USB (PC, or a 5 V phone charger) ──► Pico  ── its 3V3 pin ──► INMP441
+   (or, instead of its own USB: ESP32 5V/VIN pin ──► Pico VSYS, see section 2 "Powering the Pico from the ESP32")
 GND: MB-102 GND, ESP32 GND and Pico GND all tied together
 ```
 
 Rules:
 1. **One common ground.** Every GND (MB-102, ESP32, Pico, every sensor) must be connected, or the UART link and the analog readings fail.
-2. **Never connect the MB-102's 5 V to the ESP32's 5 V/VIN pin or to the Pico's VSYS/VBUS.** The boards run from their own USB supply; two 5 V sources fighting each other can damage either. Only the grounds are shared.
+2. **Never connect the MB-102's 5 V to the ESP32's 5 V/VIN pin or to the Pico's VSYS/VBUS.** The boards run from USB; two 5 V sources fighting each other can damage either. Only the grounds are shared. (The ESP32's own 5V/VIN pin may feed the Pico's VSYS: section 2.)
 3. **MB-102 jumper:** the rail that feeds the sensors must be set to **5 V**, not 3.3 V. Leave the other rail off or unused.
 4. **Why split:** the MB-102 uses linear regulators. At 9 V in, every 100 mA it supplies turns into ~0.4 W of heat. The sensors and LCD (~200 mA) are fine; adding the ESP32's Wi-Fi peaks and the Pico overheats it.
 5. **Bulk capacitor:** 1000 µF across the MB-102's 5 V rail and GND, close to the module (`+` to 5 V).
@@ -106,7 +107,18 @@ The Pico's pin numbers count down its left side from the USB end (pin 1 = GP0), 
                           │
    Pico pin 4 (GP2) ──────┘
 ```
-Power the Pico from its own USB, as in section 1. Never connect it to the MB-102's 5 V or to the ESP32's 5 V.
+Power the Pico from its own USB, or from the ESP32 as below. Never connect it to the MB-102's 5 V.
+
+### Powering the Pico from the ESP32 (one USB cable for both)
+| ESP32 | Pico |
+|---|---|
+| **5V** (some boards: **VIN**) | **VSYS** (pin 39: right-hand side, second pin from the USB end) |
+| GND | GND (already connected for the UART) |
+
+The Pico needs about 25 mA (about 27 mA with the microphone), which the ESP32's USB supply easily gives. Rules:
+- **VSYS only.** Not VBUS (pin 40), and never the Pico's **3V3** (pin 36): that pin is an output.
+- **Never both supplies at once.** Pull the VSYS wire off before plugging the Pico's own USB into the PC (to flash it or open its Serial Monitor), so two 5 V supplies never meet. Optional: a 1N5817/1N5819 Schottky diode in the VSYS wire (stripe towards the Pico) makes it safe to keep both connected.
+- **A good supply for the ESP32:** a PC port, or a 5 V 1-2 A charger. A weak one makes the ESP32 restart when Wi-Fi peaks.
 
 When the INMP441 arrives, add it as in the table above (GP13, GP14, GP15, 3V3 (OUT) on pin 36, GND). The test button keeps working.
 
