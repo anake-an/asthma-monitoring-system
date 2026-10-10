@@ -261,4 +261,63 @@ class FirmwareOtaTest extends TestCase
             ->assertJsonPath('devices.0.update_available', false)
             ->assertJsonPath('devices.0.firmware_label', '3.1.0 Build 261011');
     }
+
+    /** A Pico (Edge AI) build: arduino-pico's .bin with the Edge AI marker. */
+    private function edgeAiImage(string $version, string $build = '261011'): string
+    {
+        return str_repeat("\x11", 300) . FirmwareRelease::EDGE_AI_TAG . "{$version} build {$build}\0" . str_repeat("\x22", 300);
+    }
+
+    public function test_an_edge_ai_build_is_recognised_and_checked_by_its_whole_file_hash(): void
+    {
+        $bytes = $this->edgeAiImage('2.1.0');
+        $info = FirmwareImage::inspect($bytes);
+
+        $this->assertSame(['pico', '2.1.0', '261011'], [$info['target'], $info['version'], $info['build']]);
+        $this->assertSame(hash('sha256', $bytes), $info['image_sha256']);
+
+        $this->expectException(\InvalidArgumentException::class);
+        FirmwareImage::inspect($this->edgeAiImage('2.1.0') . str_repeat("\0", FirmwareRelease::EDGE_AI_MAX_SIZE));
+    }
+
+    public function test_the_owner_updates_the_edge_ai_module_through_the_device(): void
+    {
+        config(['services.firmware.upload_token' => 'ci-key']);
+        $this->upload($this->edgeAiImage('2.1.0'), 'ci-key')->assertCreated();
+        $release = FirmwareRelease::where('target', 'pico')->sole();
+        Sanctum::actingAs($this->owner);
+
+        // Not connected yet (or the device firmware is too old to report it): no update.
+        $this->getJson('/api/devices')->assertJsonPath('devices.0.edge_ai_update_available', false);
+        $this->postJson("/api/devices/{$this->bedroom->id}/firmware-update", ['target' => 'pico'])->assertStatus(422);
+
+        $this->hello(['firmware' => '3.3.0', 'build' => '261011', 'edge_ai' => '2.0.0', 'edge_ai_build' => '261010.8']);
+        $this->getJson('/api/devices')
+            ->assertJsonPath('devices.0.edge_ai_label', '2.0.0 Build 261010.8')
+            ->assertJsonPath('devices.0.edge_ai_update_available', true)
+            ->assertJsonPath('latest_edge_ai.label', '2.1.0 Build 261011');
+
+        $this->postJson("/api/devices/{$this->bedroom->id}/firmware-update", ['target' => 'pico'])->assertOk();
+        $command = json_decode(collect($this->published)->last()[1], true);
+        $this->assertSame(['ota', 'pico', '2.1.0'], [$command['command'], $command['target'], $command['version']]);
+        $this->assertSame($release->image_sha256, $command['sha256']);
+        $this->get(substr($command['url'], strpos($command['url'], '/api/')))->assertOk();
+
+        // The module restarts with the new build; the device reports it.
+        $this->hello(['firmware' => '3.3.0', 'build' => '261011', 'edge_ai' => '2.1.0', 'edge_ai_build' => '261011']);
+        $device = $this->bedroom->fresh();
+        $this->assertSame(['updated', '2.1.0'], [$device->ota_status, $device->edge_ai_version]);
+    }
+
+    public function test_an_edge_ai_link_does_not_download_device_firmware(): void
+    {
+        config(['services.firmware.upload_token' => 'ci-key']);
+        $this->upload($this->image('3.4.0'), 'ci-key')->assertCreated();
+        $esp32 = FirmwareRelease::where('target', 'esp32')->sole();
+        $this->bedroom->forceFill(['ota_status' => 'updating', 'ota_target' => 'pico', 'ota_target_version' => '3.4.0', 'ota_started_at' => now()])->save();
+
+        $link = \Illuminate\Support\Facades\URL::temporarySignedRoute('firmware.download', now()->addMinutes(10),
+            ['release' => $esp32->id, 'device' => $this->bedroom->id], absolute: false);
+        $this->get($link)->assertNotFound();
+    }
 }

@@ -119,3 +119,19 @@ If Cloudflare's "Bot Fight Mode" is on, it may block the upload; turn it off, or
 *   **The checksum:** after writing the image, the device compares its SHA-256 with the published one. On a mismatch it keeps the old firmware.
 *   **Rollback:** the new firmware must reach the cloud within 2 minutes, or the ESP32 starts the previous firmware again. Rooms then shows "Update failed" with the reason. A failed download also leaves the old firmware running.
 *   **Not done here:** the image is not cryptographically signed. Commercial devices also use secure boot / signed images. That burns keys into the chip permanently, so it is left out of this prototype.
+
+## Updating the Edge AI module (Pico) from the cloud
+
+The Pico has no internet of its own: the ESP32 downloads its update from the server, checks it (SHA-256), and sends it over the UART link. The Pico stores it in its file-system area and installs it on restart. It needs **ESP32 firmware 3.3.0+** and **Edge AI 2.0.0+**.
+
+**One-time setup** (in this order):
+1.  Update the ESP32 to **3.3.0** from the dashboard. It now talks to the Pico at 115200 baud, so coughs pause until step 2.
+2.  Flash the Pico once over USB:
+    *   pull the VSYS wire off first, if the Pico is powered from the ESP32;
+    *   select Board "Raspberry Pi Pico" and **Tools → Flash Size → "2MB (Sketch: 1MB, FS: 1MB)"**;
+    *   upload `pico_cough_ai/pico_cough_ai.ino`, then put the VSYS wire back.
+3.  Within 30 seconds, Rooms in the dashboard shows **Edge AI 2.0.0**.
+
+**After that:** raise `EDGE_AI_VERSION`, write `pico_cough_ai/WHATS_NEW.txt`, and push to `main`. GitHub Actions builds the Edge AI firmware and uploads it. Owners see **Edge AI · ● Update available** under Rooms and press **Update**; the LCD shows `Updating 45%` / `Edge AI`. A new Edge Impulse model ships the same way, inside the Pico firmware.
+
+By hand: export the Pico build (Sketch → Export Compiled Binary, with the same Flash Size), copy `pico_cough_ai.ino.bin` (not the `.uf2`) into `backend/storage/app/firmware/`, and run `php artisan firmware:publish storage/app/firmware/pico_cough_ai.ino.bin`.

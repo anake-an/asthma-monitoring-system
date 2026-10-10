@@ -2,7 +2,8 @@
  * RespiroSync - ESP32 gateway firmware
  *
  * - Reads DHT22, Sharp GP2Y1010AU0F / GP2Y1014AU0F (dust) and MQ-135 (estimated ppm) every 3 s
- * - Receives cough detections from the Raspberry Pi Pico over UART2
+ * - Receives cough detections from the Edge AI module (Raspberry Pi Pico) over UART2 at 115200,
+ *   and passes cloud updates on to it
  * - Publishes to   respirosync/devices/<token>/telemetry and /events
  * - Subscribes to  respirosync/devices/<token>/config   (retained thresholds)
  *                  respirosync/devices/<token>/commands (factory_reset, buzzer_on, buzzer_off, set_time, ota)
@@ -35,13 +36,24 @@
 #include <LiquidCrystal_I2C.h>  // https://github.com/johnrickman/LiquidCrystal_I2C
 #include "esp_https_ota.h"      // cloud firmware updates
 #include "esp_ota_ops.h"
+#include "mbedtls/sha256.h"     // checks Edge AI updates before they are installed
+#include "mbedtls/version.h"
+#if MBEDTLS_VERSION_MAJOR < 3  // core 2.x (ESP-IDF 4.4): the *_ret functions
+#define SHA256_STARTS(c) mbedtls_sha256_starts_ret(c, 0)
+#define SHA256_UPDATE(c, d, n) mbedtls_sha256_update_ret(c, d, n)
+#define SHA256_FINISH(c, out) mbedtls_sha256_finish_ret(c, out)
+#else
+#define SHA256_STARTS(c) mbedtls_sha256_starts(c, 0)
+#define SHA256_UPDATE(c, d, n) mbedtls_sha256_update(c, d, n)
+#define SHA256_FINISH(c, out) mbedtls_sha256_finish(c, out)
+#endif
 #include "secrets.h"            // MQTT_URI, MQTT_USERNAME, MQTT_PASSWORD
 
 // Raise this for every build you publish (php artisan firmware:publish reads it from the file).
 // Firmware "3.1.0 Build 261011": the version is set here (major.feature.fix, history in
 // hardware/FIRMWARE_HISTORY.md); the build stamp (build date YYMMDD, ".2" for a second build that
 // day) is written by CI into build_info.h. A build made in the Arduino IDE says "dev".
-#define FIRMWARE_VERSION "3.2.0"
+#define FIRMWARE_VERSION "3.3.0"
 #if __has_include("build_info.h")
 #include "build_info.h"
 #endif
@@ -128,10 +140,17 @@ struct OtaJob {
   char url[256];
   char version[33];
   char sha256[65];
+  char target[8];  // "esp32" (this firmware) or "pico" (the Edge AI module, sent on over UART)
   uint32_t size;
 };
 OtaJob otaJob;
 volatile bool otaPending = false;
+
+// The Edge AI module (Raspberry Pi Pico) on UART2: its version from its "HELLO" line.
+const unsigned long EDGE_AI_BAUD = 115200;  // Edge AI 2.0.0 and newer (older builds used 9600)
+char edgeAiVersion[16] = "";
+char edgeAiBuild[16] = "";
+bool helloAgain = false;  // send "hello" again (the Edge AI version became known or changed)
 
 void saveConfigCallback() { shouldSaveConfig = true; }
 
@@ -204,6 +223,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             strcpy(otaJob.version, version);
             strcpy(otaJob.sha256, sha);
             otaJob.size = doc["size"] | 0UL;
+            strncpy(otaJob.target, doc["target"] | "esp32", sizeof(otaJob.target) - 1);
             otaPending = true;  // last: loop() starts the update
           }
         }
@@ -710,11 +730,161 @@ void otaFail(const char *lcdLine, const char *error) {
   delay(3000);  // long enough to read; the pages come back afterwards
 }
 
+// ---------- Edge AI (Pico) updates: download here, send on over UART2 ----------
+// CRC-16/CCITT; start with crc = 0xFFFF (no default argument: the Arduino builder repeats it).
+uint16_t crc16(const uint8_t *data, size_t len, uint16_t crc) {
+  for (size_t i = 0; i < len; i++) {
+    crc ^= (uint16_t)data[i] << 8;
+    for (int b = 0; b < 8; b++) crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : crc << 1;
+  }
+  return crc;
+}
+
+/** The next line from the Edge AI module (skipping cough reports), or "" after timeoutMs. */
+String edgeAiLine(unsigned long timeoutMs) {
+  unsigned long start = millis();
+  while (millis() - start < timeoutMs) {
+    Serial2.setTimeout(timeoutMs - (millis() - start) + 1);
+    String line = Serial2.readStringUntil('\n');
+    line.trim();
+    if (line.length() && !line.startsWith("COUGH:")) return line;
+  }
+  return "";
+}
+
+/** One frame of the update, sent until the module confirms it (up to 5 tries). */
+bool sendEdgeAiFrame(uint16_t seq, const uint8_t *data, uint16_t len) {
+  uint8_t head[5] = {0xA5, (uint8_t)(seq >> 8), (uint8_t)seq, (uint8_t)(len >> 8), (uint8_t)len};
+  uint16_t crc = crc16(data, len, crc16(head + 1, 4, 0xFFFF));
+  uint8_t tail[2] = {(uint8_t)(crc >> 8), (uint8_t)crc};
+  for (int attempt = 0; attempt < 5; attempt++) {
+    Serial2.write(head, sizeof(head));
+    Serial2.write(data, len);
+    Serial2.write(tail, sizeof(tail));
+    String reply = edgeAiLine(3000);
+    if (reply == "K") return true;
+    if (reply.startsWith("ERR")) return false;
+  }
+  return false;
+}
+
+/**
+ * Edge AI update: download the build from the server, send it to the module frame by frame
+ * while computing its SHA-256, and let the module install it only when the checksum matches.
+ * A failed or interrupted update leaves the module's current build running.
+ */
+void runEdgeAiOta() {
+  otaPending = false;
+  if (!edgeAiVersion[0]) {
+    otaFail("Edge AI missing", "The Edge AI module did not answer. Check its cable and power.");
+    return;
+  }
+  setBuzzer(false);
+  setBacklight(true);
+  showScreen("Updating 0%", "Edge AI");
+  Serial.printf("Updating Edge AI to %s from %s\n", otaJob.version, otaJob.url);
+
+  esp_http_client_config_t http = {};
+  http.url = otaJob.url;
+  http.crt_bundle_attach = esp_crt_bundle_attach;
+  http.timeout_ms = 20000;
+  esp_http_client_handle_t client = esp_http_client_init(&http);
+  if (!client || esp_http_client_open(client, 0) != ESP_OK) {
+    if (client) esp_http_client_cleanup(client);
+    otaFail("Download error", "The download did not start (link expired, or the server is unreachable).");
+    return;
+  }
+  int64_t length = esp_http_client_fetch_headers(client);
+  if (esp_http_client_get_status_code(client) != 200 || length != (int64_t)otaJob.size) {
+    esp_http_client_cleanup(client);
+    otaFail("Download error", "The server did not send the expected file.");
+    return;
+  }
+
+  while (Serial2.available()) Serial2.read();  // start clean
+  Serial2.printf("UPD:%u\n", (unsigned)otaJob.size);
+  String reply = edgeAiLine(5000);
+  if (reply != "READY") {
+    esp_http_client_cleanup(client);
+    otaFail("Edge AI busy", reply.startsWith("ERR:") ? "The Edge AI module has no room for the update (Flash Size must be 2MB with 1MB FS)."
+                                                     : "The Edge AI module did not start the update.");
+    return;
+  }
+
+  mbedtls_sha256_context sha;
+  mbedtls_sha256_init(&sha);
+  SHA256_STARTS(&sha);
+  uint8_t chunk[256];
+  uint32_t sent = 0;
+  uint16_t seq = 0;
+  int shownPct = -1;
+  bool ok = true;
+  while (sent < otaJob.size) {
+    size_t want = otaJob.size - sent < sizeof(chunk) ? otaJob.size - sent : sizeof(chunk);
+    size_t filled = 0;
+    while (filled < want) {
+      int n = esp_http_client_read(client, (char *)chunk + filled, want - filled);
+      if (n <= 0) break;
+      filled += n;
+    }
+    if (filled != want || !sendEdgeAiFrame(seq, chunk, filled)) {
+      ok = false;
+      break;
+    }
+    SHA256_UPDATE(&sha, chunk, filled);
+    sent += filled;
+    seq++;
+    int pct = (int)((int64_t)sent * 100 / otaJob.size);
+    if (pct != shownPct) {
+      char l0[17];
+      snprintf(l0, sizeof(l0), "Updating %d%%", pct);
+      showLine(0, l0);
+      shownPct = pct;
+    }
+  }
+  esp_http_client_cleanup(client);
+
+  uint8_t digest[32];
+  SHA256_FINISH(&sha, digest);
+  mbedtls_sha256_free(&sha);
+  char hex[65];
+  for (int i = 0; i < 32; i++) snprintf(hex + i * 2, 3, "%02x", digest[i]);
+  if (!ok || strcasecmp(hex, otaJob.sha256) != 0) {
+    Serial2.println("ABORT");
+    otaFail(ok ? "Bad checksum" : "Update stopped",
+            ok ? "The checksum does not match: the update was not installed."
+               : "The update to the Edge AI module was interrupted. It keeps its current version.");
+    return;
+  }
+
+  Serial2.println("END");
+  if (edgeAiLine(10000) != "DONE") {
+    otaFail("Not installed", "The Edge AI module could not install the update.");
+    return;
+  }
+  reportOta("installed", nullptr);
+  edgeAiVersion[0] = '\0';  // it restarts and says hello with its new version
+  showScreen("Update done", "Edge AI restarts");
+  delay(1500);
+}
+
+/** "VER?" to the Edge AI module until it has answered (at start-up, then every 30 s). */
+void askEdgeAi() {
+  static unsigned long lastAsk = 0;
+  if (edgeAiVersion[0] || (lastAsk && millis() - lastAsk < 30000)) return;
+  lastAsk = millis();
+  Serial2.println("VER?");
+}
+
 /** Download, check and install the firmware the server announced, then restart into it. */
 void runOta() {
   if (alarmMask || cloudAlarm) {
     reportOta("failed", "An alarm is active on the device. Try again when it is over.");
     otaPending = false;
+    return;
+  }
+  if (strcmp(otaJob.target, "pico") == 0) {
+    runEdgeAiOta();
     return;
   }
   setBuzzer(false);
@@ -807,11 +977,16 @@ void confirmFirmware() {
 void sayHello() {
   static bool connectedBefore = false;
   static bool firstSinceBoot = true;
-  if (mqtt_connected && !connectedBefore) {
+  if (mqtt_connected && (!connectedBefore || helloAgain)) {
+    helloAgain = false;
     Doc doc;
     doc["event"] = "hello";
     doc["firmware"] = FIRMWARE_VERSION;
     doc["build"] = FIRMWARE_BUILD;
+    if (edgeAiVersion[0]) {
+      doc["edge_ai"] = edgeAiVersion;
+      doc["edge_ai_build"] = edgeAiBuild;
+    }
     if (firstSinceBoot) doc["boot"] = true;
     publishJson(topicEvents, doc);
     firstSinceBoot = false;
@@ -854,7 +1029,8 @@ void setup() {
   showScreen("Connecting WiFi", "please wait");
 
   dht.begin();
-  Serial2.begin(9600, SERIAL_8N1, PICO_RX_PIN, PICO_TX_PIN);
+  Serial2.setRxBufferSize(1024);
+  Serial2.begin(EDGE_AI_BAUD, SERIAL_8N1, PICO_RX_PIN, PICO_TX_PIN);
   Serial2.setTimeout(50);
 
   for (int i = 0; i < 6; i++) device_token[i] = (char)EEPROM.read(i);
@@ -939,8 +1115,22 @@ unsigned long coughDisplayUntil = 0;
 
 void handlePicoMessage() {
   if (!Serial2.available()) return;
+  Serial2.setTimeout(50);  // an Edge AI update may have changed it
   String msg = Serial2.readStringUntil('\n');
   msg.trim();
+  if (msg.startsWith("HELLO:")) {  // "HELLO:2.0.0 build 261011"
+    String rest = msg.substring(6);
+    int sep = rest.indexOf(" build ");
+    String version = sep > 0 ? rest.substring(0, sep) : rest;
+    String build = sep > 0 ? rest.substring(sep + 7) : "";
+    if (version != edgeAiVersion || build != edgeAiBuild) {
+      strncpy(edgeAiVersion, version.c_str(), sizeof(edgeAiVersion) - 1);
+      strncpy(edgeAiBuild, build.c_str(), sizeof(edgeAiBuild) - 1);
+      helloAgain = true;  // tell the server
+      Serial.printf("Edge AI %s build %s\n", edgeAiVersion, edgeAiBuild);
+    }
+    return;
+  }
   if (!msg.startsWith("COUGH:")) return;
 
   // Format: COUGH:<level>,<strength>
@@ -1043,6 +1233,7 @@ void loop() {
   retryClock();
   sayHello();
   confirmFirmware();
+  askEdgeAi();
   if (otaPending) runOta();
   delay(10);
 }

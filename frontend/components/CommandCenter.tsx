@@ -47,9 +47,10 @@ export default function CommandCenter() {
     onConfirm: () => void
   }>({ isOpen: false, title: "", message: "", isDanger: false, onConfirm: () => {} });
   // Smart Alerts are per room: the one chosen in the header.
-  const { device, deviceId, devices, latestFirmware } = useRooms();
+  const { device, deviceId, devices, latestFirmware, latestEdgeAi } = useRooms();
   // Rooms this owner can update to newer firmware: a dot on "Account Settings" (updates are in Rooms).
-  const updateRooms = devices.filter(d => firmwareUpdateFor(d, latestFirmware));
+  const updateRooms = devices.filter(d => firmwareUpdateFor(d, latestFirmware) || firmwareUpdateFor(d, latestEdgeAi, "pico"));
+  const updateKey = `${latestFirmware?.label ?? ""}|${latestEdgeAi?.label ?? ""}`; // the banner comes back for newer versions
   const firmwareUpdates = updateRooms.length;
   const [bannerDismissedFor, setBannerDismissedFor] = useState<string | null>(null);
   useEffect(() => {
@@ -324,7 +325,7 @@ export default function CommandCenter() {
         </div>
 
         {/* Firmware update available: like a phone app's update banner; hidden once dismissed for that version */}
-        {updateRooms.length > 0 && latestFirmware && bannerDismissedFor !== latestFirmware.label && (
+        {updateRooms.length > 0 && bannerDismissedFor !== updateKey && (
           <div className="mb-3 flex items-center gap-3 rounded-xl border border-blue-500/20 bg-blue-50 dark:bg-blue-500/10 px-3 py-2.5 text-sm">
             <span className="flex-1 text-blue-800 dark:text-blue-200">
               An update is available for {updateRooms.length === 1 ? updateRooms[0].name : `${updateRooms.length} rooms`}.
@@ -332,8 +333,8 @@ export default function CommandCenter() {
             <button onClick={() => setShowAccountModal(true)} className="text-xs font-semibold text-blue-600 dark:text-blue-300 hover:underline shrink-0">View</button>
             <button
               onClick={() => {
-                setBannerDismissedFor(latestFirmware.label);
-                try { localStorage.setItem("respirosync_fw_banner", latestFirmware.label); } catch {}
+                setBannerDismissedFor(updateKey);
+                try { localStorage.setItem("respirosync_fw_banner", updateKey); } catch {}
               }}
               aria-label="Dismiss"
               className="text-blue-400 hover:text-blue-600 shrink-0"

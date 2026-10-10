@@ -212,20 +212,40 @@ class DeviceMessageHandler
     private function handleHello(Device $device, array $data): void
     {
         $version = $data['firmware'] ?? null;
-        if (!is_string($version) || !preg_match('/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/', $version)) {
+        if (!is_string($version) || !self::isVersion($version)) {
             return;
         }
-        $build = is_string($data['build'] ?? null) && preg_match('/^([0-9.]{1,32}|dev)$/', $data['build']) ? $data['build'] : null;
-        [$version, $build] = FirmwareRelease::normalize($version, $build); // the first builds said "6.2.x"
+        [$version, $build] = FirmwareRelease::normalize($version, self::build($data['build'] ?? null)); // the first builds said "6.2.x"
         $changes = ['firmware_version' => $version, 'firmware_build' => $build];
+
+        // The Edge AI module, as the ESP32 learned it from the module's own "HELLO" (3.3.0 and newer).
+        $edgeAi = is_string($data['edge_ai'] ?? null) && self::isVersion($data['edge_ai']) ? $data['edge_ai'] : null;
+        if ($edgeAi !== null) {
+            $changes += ['edge_ai_version' => $edgeAi, 'edge_ai_build' => self::build($data['edge_ai_build'] ?? null)];
+        }
+
         if ($device->ota_status === 'updating') {
-            if ($version === $device->ota_target_version) {
+            if (($device->ota_target ?? 'esp32') === 'pico') {
+                if ($edgeAi !== null && $edgeAi === $device->ota_target_version) {
+                    $changes += ['ota_status' => 'updated', 'ota_error' => null];
+                }
+            } elseif ($version === $device->ota_target_version) {
                 $changes += ['ota_status' => 'updated', 'ota_error' => null];
             } elseif (($data['boot'] ?? false) === true) {
                 $changes += ['ota_status' => 'failed', 'ota_error' => "The new firmware did not start; the device runs {$version} again."];
             }
         }
         $device->forceFill($changes)->save();
+    }
+
+    private static function isVersion(string $version): bool
+    {
+        return preg_match('/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/', $version) === 1;
+    }
+
+    private static function build(mixed $build): ?string
+    {
+        return is_string($build) && preg_match('/^([0-9.]{1,32}|dev)$/', $build) ? $build : null;
     }
 
     /** {"event":"ota","status":"failed","error":"…"} when the device could not download or check the update. */

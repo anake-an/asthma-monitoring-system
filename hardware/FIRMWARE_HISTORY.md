@@ -1,5 +1,7 @@
 # RespiroSync Room Monitor: firmware history
 
+Two parts have their own versions: the **device firmware** (ESP32) and the **Edge AI** module (Raspberry Pi Pico, cough detection). Both are updated from the dashboard.
+
 Product **RespiroSync Room Monitor**, model **RS-100**, hardware **rev A** (ESP32 gateway + Raspberry Pi Pico cough sensor).
 
 Firmware versions read like **`3.1.0 Build 261011`**, in the style of other connected devices:
@@ -14,7 +16,8 @@ Raise `FIRMWARE_VERSION` and write `WHATS_NEW.txt` (what owners read in the upda
 
 | Firmware | Build | What changed |
 |---|---|---|
-| **3.2.0** | set by CI | Night mode can be switched off per room in Smart Alerts |
+| **3.3.0** | set by CI | Passes Edge AI updates on to the Pico; faster link to it (115200). **Needs Edge AI 2.0.0** (older Pico builds talk at 9600) |
+| 3.2.0 | 261010.8 | Night mode can be switched off per room in Smart Alerts |
 | 3.1.0 | 261010.7 | Start-up shows the firmware version and build; clearer update screens ("Updating 45%", "Don't unplug"); reports its build stamp |
 | 3.0.1 | 261010.6 | Start-up screens slower, so they can be read *(first update installed from the cloud; it called itself "6.2.1")* |
 | **3.0.0** | 261010.5 | Cloud updates from the dashboard, with checksum and rollback; new memory layout (two app slots), **one USB re-flash needed** *(called itself "6.2.0")* |
@@ -28,3 +31,18 @@ Raise `FIRMWARE_VERSION` and write `WHATS_NEW.txt` (what owners read in the upda
 | 1.0.0 | 261008 | First firmware: sensors, MQTT, setup hotspot |
 
 The builds before 3.1.0 were numbered afterwards from the Git history of `hardware/esp32_firmware/`. The server shows a device that still reports "6.2.0" / "6.2.1" as 3.0.0 / 3.0.1.
+
+## Edge AI (Raspberry Pi Pico)
+
+The module that listens for coughs. Same version style (`2.0.0 Build 261011`): `EDGE_AI_VERSION` in `pico_cough_ai/pico_cough_ai.ino`, and `pico_cough_ai/WHATS_NEW.txt` for owners. Its updates come from the server through the ESP32 (firmware 3.3.0 or newer).
+
+| Edge AI | Build | What changed |
+|---|---|---|
+| **2.0.0** | set by CI | Updates from the dashboard (through the ESP32); faster link (115200); reports its version. **One USB flash needed**, with Flash Size "2MB (Sketch: 1MB, FS: 1MB)" |
+| 1.3.0 | 261010.3 | Test mode removed |
+| 1.2.1 | 261010.2 | No false coughs from electrical noise (data line pulled down, 3 s settle, 32 ms minimum) |
+| 1.2.0 | 261010 | Test button / serial test mode |
+| 1.1.0 | 261009 | Detection strength (0-1) and the correct microphone pins |
+| 1.0.0 | 261008 | First version: reports loud bursts to the ESP32 |
+
+The builds before 2.0.0 were numbered afterwards from the Git history of `hardware/pico_cough_ai/`. An Edge Impulse model, built into this firmware, will be a later Edge AI version.
