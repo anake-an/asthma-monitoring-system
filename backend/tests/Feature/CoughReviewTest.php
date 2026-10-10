@@ -116,4 +116,14 @@ class CoughReviewTest extends TestCase
         Notification::assertNothingSent();
         $this->assertSame(CoughEvent::SEVERITY_LOGGED, (int) CoughEvent::latest('id')->first()->severity);
     }
+
+    public function test_the_banner_only_sees_coughs_nobody_has_reviewed(): void
+    {
+        $reviewed = $this->cough(10);
+        $this->review($reviewed, true, false)->assertOk(); // a real cough, already seen
+        $this->getJson("/api/cough-events?per_page=1&unreviewed=1&device_id={$this->bedroom->id}")->assertJsonCount(0, 'data');
+
+        $new = $this->cough(1);
+        $this->getJson("/api/cough-events?per_page=1&unreviewed=1&device_id={$this->bedroom->id}")->assertJsonPath('data.0.id', $new->id);
+    }
 }

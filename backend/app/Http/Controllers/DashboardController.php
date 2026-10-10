@@ -49,8 +49,10 @@ class DashboardController extends Controller
 
         $events = CoughEvent::with('device:id,name')
             ->whereIn('device_id', $deviceIds)
-            // ?exclude_false_alarms=1: only coughs not marked as false alarm (the dashboard's banner)
+            // ?exclude_false_alarms=1: only coughs not marked as false alarm
             ->when($request->boolean('exclude_false_alarms'), fn ($q) => $q->notFalseAlarm())
+            // ?unreviewed=1: only coughs nobody has reviewed yet (the dashboard's banner)
+            ->when($request->boolean('unreviewed'), fn ($q) => $q->whereNull('is_verified'))
             ->orderBy('recorded_at', 'desc')
             ->paginate($perPage);
 
