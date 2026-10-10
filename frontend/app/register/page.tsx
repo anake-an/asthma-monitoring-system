@@ -98,7 +98,7 @@ export default function RegisterPage() {
             <img src="/logo.jpg?v=3" alt="RespiroSync Logo" className="w-full h-full object-contain rounded-[20px] border border-zinc-200 dark:border-white/10" />
           </div>
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-zinc-900 dark:text-white mb-2">Create Account</h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 font-light">Join the RespiroSync medical network</p>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400 font-light">Monitor your child's room and coughing</p>
         </div>
 
         {/* Error Alert */}
@@ -210,7 +210,7 @@ export default function RegisterPage() {
                 </svg>
               </div>
               <span className="text-[12px] sm:text-[13px] text-zinc-500 dark:text-zinc-400 font-medium leading-snug group-hover:text-zinc-700 dark:group-hover:text-zinc-300 transition-colors select-none">
-                I agree to the <Link href="/privacy" className="text-blue-500 dark:text-blue-400 hover:underline relative z-20">Privacy Policy (PDPA)</Link> and consent to my telemetry and medical data being processed by RespiroSync AI.
+                I agree to the <Link href="/privacy" className="text-blue-500 dark:text-blue-400 hover:underline relative z-20">Privacy Policy (PDPA)</Link> and consent to my sensor and health data being processed by RespiroSync, including its AI.
               </span>
             </label>
           </div>

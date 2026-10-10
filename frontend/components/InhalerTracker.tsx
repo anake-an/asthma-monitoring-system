@@ -146,7 +146,7 @@ export default function InhalerTracker() {
           <div>
             <p className="text-[12px] font-medium text-yellow-500 mb-1">{info.aiNotice}</p>
             <p className="text-[11px] text-zinc-600 dark:text-zinc-400">
-              <span className="text-yellow-500/70 font-medium">Suggestion:</span> Frequent use of the rescue inhaler may indicate worsening asthma control. Consider consulting your physician.
+              If rescue doses keep being needed this often, talk to your doctor. This app only counts doses; it does not assess asthma.
             </p>
           </div>
         </div>

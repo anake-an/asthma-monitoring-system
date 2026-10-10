@@ -39,5 +39,9 @@ class PushSubscriptionTest extends TestCase
         $this->assertStringContainsString('3 coughs detected in Bedroom (Aiman)', $message['body']);
         $this->assertSame("/?device={$device->id}", $message['data']['url']);
         $this->assertSame("cough-{$device->id}", $message['tag']);
+
+        $email = (new \App\Mail\CoughAlertMail($event, 3))->render();
+        $this->assertStringContainsString('Bedroom (Aiman)', $email);
+        $this->assertStringNotContainsString('Medical Dashboard', $email);
     }
 }

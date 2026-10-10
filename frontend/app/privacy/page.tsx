@@ -32,10 +32,10 @@ export default function PrivacyPolicyPage() {
               Pengenalan (Introduction)
             </h2>
             <p className="mb-4">
-              Welcome to RespiroSync. We take your privacy and the security of your medical telemetry data seriously. This Privacy Notice is issued pursuant to the requirements of the <strong>Personal Data Protection Act 2010 (PDPA)</strong> and the <strong>2024 Amendments (Act A1727)</strong> of Malaysia.
+              Welcome to RespiroSync. We take your privacy and the security of your health and sensor data seriously. This Privacy Notice is issued pursuant to the requirements of the <strong>Personal Data Protection Act 2010 (PDPA)</strong> and the <strong>2024 Amendments (Act A1727)</strong> of Malaysia.
             </p>
             <p>
-              By registering an account and using the RespiroSync hardware devices, you explicitly consent to the collection, processing, and storage of your Personal and Sensitive Medical Data as outlined in this document.
+              By registering an account and using the RespiroSync hardware devices, you explicitly consent to the collection, processing, and storage of your personal data and sensitive health data as outlined in this document.
             </p>
           </section>
 
@@ -47,7 +47,7 @@ export default function PrivacyPolicyPage() {
             <p className="mb-3">Under the PDPA, health-related information is classified as <strong>Sensitive Personal Data</strong>. RespiroSync collects and processes the following:</p>
             <ul className="list-disc pl-5 space-y-2 text-zinc-600 dark:text-zinc-400">
               <li><strong>Environmental Telemetry:</strong> PM2.5 (Dust), VOC (Gas), Temperature, and Humidity readings collected via your local IoT device.</li>
-              <li><strong>Medical Events:</strong> Logs of inhaler usage and automated microphone-based cough detection frequencies.</li>
+              <li><strong>Health events:</strong> Logs of inhaler usage and automated microphone-based cough detection frequencies.</li>
               <li><strong>Account Data:</strong> Name, Email Address, and hashed authentication tokens.</li>
             </ul>
           </section>
@@ -64,7 +64,7 @@ export default function PrivacyPolicyPage() {
               <li>To provide you with a historical dashboard of your respiratory health.</li>
             </ul>
             <p className="mt-4 font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 p-3 rounded-xl border border-amber-200 dark:border-amber-500/20">
-              Your medical data is NEVER sold to third parties, advertising agencies, or external brokers.
+              Your health data is never sold to third parties, advertising agencies, or external brokers.
             </p>
           </section>
 
@@ -91,7 +91,7 @@ export default function PrivacyPolicyPage() {
               Hak Akses & Padam (Right to Access & Erasure)
             </h2>
             <p>
-              You maintain full ownership of your medical data. At any time you can download a child&apos;s data yourself (Activity Log → Download: sensor readings, coughs, inhaler doses and alert limit changes, as spreadsheet files), and you can permanently delete a child or your whole account (Account Settings) together with their records (the &quot;Right to be Forgotten&quot;). Sensor readings older than 7 days are kept as 10-minute averages and deleted after a year.
+              You maintain full ownership of your health data. At any time you can download a child&apos;s data yourself (Activity Log → Download: sensor readings, coughs, inhaler doses and alert limit changes, as spreadsheet files), and you can permanently delete a child or your whole account (Account Settings) together with their records (the &quot;Right to be Forgotten&quot;). Sensor readings older than 7 days are kept as 10-minute averages and deleted after a year.
             </p>
           </section>
 

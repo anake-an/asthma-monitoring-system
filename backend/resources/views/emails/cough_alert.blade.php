@@ -30,7 +30,7 @@
             </div>
             
             <div class="body-content">
-                <p>The RespiroSync device in the patient's room detected repeated coughing. This is an automated sound-level alert, not a medical diagnosis. Please check on the patient.</p>
+                <p>The RespiroSync device in <strong>{{ $where }}</strong> detected repeated coughing. This is an automated sound-level alert, not a diagnosis. Please check on them.</p>
 
                 <div class="data-box">
                     <div class="data-row">
@@ -53,7 +53,7 @@
             </div>
         </div>
         <div class="footer">
-            &copy; {{ date('Y') }} RespiroSync Medical Dashboard.<br>This is an automated alert from a prototype monitoring system. It is not a medical device.
+            &copy; {{ date('Y') }} RespiroSync.<br>This is an automated alert from a prototype monitoring system. It is not a medical device.
         </div>
     </div>
 </body>
