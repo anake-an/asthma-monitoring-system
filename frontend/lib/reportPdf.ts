@@ -139,7 +139,7 @@ class Pages {
     ctx.closePath();
   }
 
-  box(x: number, y: number, w: number, h: number, r: number, fill: string | null, stroke: string | null) {
+  box(x: number, y: number, w: number, h: number, r: number | [number, number, number, number], fill: string | null, stroke: string | null) {
     this.roundRect(x, y, w, h, r);
     if (fill) { this.ctx.fillStyle = fill; this.ctx.fill(); }
     if (stroke) { this.ctx.strokeStyle = stroke; this.ctx.lineWidth = 0.75; this.ctx.stroke(); }
