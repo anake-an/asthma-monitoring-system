@@ -81,9 +81,16 @@ export default function RoomPicker() {
         className={`flex items-center gap-2 w-full sm:w-auto sm:max-w-[18rem] h-10 bg-zinc-100 dark:bg-white/5 border border-zinc-200 dark:border-white/10 rounded-full pl-3 pr-3 text-xs font-medium text-zinc-700 dark:text-zinc-300 transition-colors ${several ? "hover:bg-zinc-200 dark:hover:bg-white/10 cursor-pointer" : "cursor-default"}`}
       >
         <span className={`w-2 h-2 rounded-full shrink-0 ${statusOf(device).dot}`} title={statusOf(device).text} />
-        <span className="flex-1 min-w-0 truncate text-left">
-          {device.name}
-          {device.patient && <span className="text-zinc-500 dark:text-zinc-400"> · <ChildBadge child={device.patient} size="xs" className="align-[-3px] mr-1" />{device.patient.name}</span>}
+        {/* Room · badge child, on one centred line; long names end in "…" (each keeps a part). */}
+        <span className="flex-1 min-w-0 flex items-center gap-1.5 text-left">
+          <span className="min-w-0 truncate">{device.name}</span>
+          {device.patient && (
+            <>
+              <span className="shrink-0 text-zinc-400 dark:text-zinc-500" aria-hidden="true">·</span>
+              <ChildBadge child={device.patient} size="xs" />
+              <span className="min-w-0 truncate text-zinc-500 dark:text-zinc-400">{device.patient.name}</span>
+            </>
+          )}
         </span>
         {several && (
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 opacity-60 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true">
@@ -107,7 +114,7 @@ export default function RoomPicker() {
               {childNames && (
                 <p className="flex items-center gap-1.5 px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                   {g.patient && <ChildBadge child={g.patient} size="xs" />}
-                  {g.child}
+                  <span className="min-w-0 truncate">{g.child}</span>
                 </p>
               )}
               <ul role="presentation">
@@ -130,7 +137,7 @@ export default function RoomPicker() {
                       <span className={`w-2 h-2 rounded-full shrink-0 ${status.dot}`} />
                       <span className="flex-1 min-w-0">
                         <span className="block truncate">{d.name}</span>
-                        <span className="block text-[11px] text-zinc-500 dark:text-zinc-400">
+                        <span className="block truncate text-[11px] text-zinc-500 dark:text-zinc-400">
                           {status.text}{!childNames && d.patient ? ` · ${d.patient.name}` : ""}
                         </span>
                       </span>
