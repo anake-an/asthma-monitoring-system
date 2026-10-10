@@ -7,13 +7,24 @@
 ![Docker](https://img.shields.io/badge/Docker-Compose-blue.svg)
 ![License](https://img.shields.io/badge/license-GPLv3-green.svg)
 
-**RespiroSync** is a professional, full-stack IoT medical telemetry platform. It uses a dual-processor device (ESP32 + Raspberry Pi Pico) for sound-based cough detection and environmental monitoring, and sends data over authenticated, encrypted MQTT to a Next.js / Laravel dashboard.
+**RespiroSync** is a full-stack IoT asthma-monitoring platform. A small device in each child's room (ESP32 + Raspberry Pi Pico) measures dust, gas, temperature and humidity and listens for coughing; it sends everything over authenticated, encrypted MQTT to a Next.js / Laravel dashboard, where parents, grandparents or a doctor can follow the children they have been given access to. An AI learns what is normal for each room and what tends to precede each child's flare-ups, and may tighten the room's alarm limits, never loosen them past what the parent set.
+
+---
+
+## 👪 How it is organised
+
+- **Children** (patients): only a display name is stored. An account starts with one child, renamed in *Account Settings → Children & rooms*; add more there.
+- **Rooms**: one RespiroSync device per room. A room belongs to one child, or is a **shared room** (coughs there are shown and alerted, but never counted for any child). Each room has its own alarm limits.
+- **Sharing**: an owner invites someone by email to one child as **owner** (everything), **caregiver** (sees everything, gets alerts, logs doses, reviews coughs) or **viewer** (sees only). The invitation link works once, for that email, for 7 days. Removing someone takes effect immediately.
+- **Room picker**: the dashboard shows one room at a time; live values, Sleep Mode, cough history, Smart Alerts and the AI panel all follow it.
 
 ---
 
 ## 📸 Dashboard Interface
 
-The cloud platform features a responsive, dark-mode native dashboard designed for guardians and medical professionals to monitor patient vitals, configure hardware thresholds, and generate PDF analytics reports.
+Responsive, dark-mode dashboard for parents and other caregivers: live readings per room, cough history, medication log, alarm limits, a printable weekly Activity Log per child.
+
+> The screenshots below are from v5.0.0. Since v6.0.0 the header also has the room picker, Account Settings has *Children & rooms*, *Sharing* and *Notifications on this device*, and the Activity Log has the alert-limit history and data downloads.
 
 <img width="2510" height="1329" alt="login" src="https://github.com/user-attachments/assets/c05da708-7403-420b-8265-ca30d19c0dac" />
 <img width="2508" height="1342" alt="register" src="https://github.com/user-attachments/assets/6bc92046-76df-4275-b249-7b788199a0ea" />
@@ -28,13 +39,15 @@ The cloud platform features a responsive, dark-mode native dashboard designed fo
 | Feature | Technology Used | Description |
 |---|---|---|
 | **Acoustic cough detection** | `Raspberry Pi Pico` | INMP441 I2S microphone. A sound-level heuristic flags short loud bursts and reports a 0–1 *detection strength*. It cannot yet tell a cough from other loud sounds (see `hardware/README.md`, Phase 2). |
-| **Environmental Telemetry** | `ESP32` | DHT22 (temp/humidity), MQ-135 (gas, estimated CO₂-equivalent ppm, self-calibrated), Sharp GP2Y1010AU0F (dust, self-calibrated estimate). Sent every 3 s, smoothed over ~12 s. Local passive-buzzer/LED alarm when a reading crosses its threshold, even offline. |
-| **Secure IoT Transport** | `Mosquitto + Cloudflare Tunnel` | MQTT over WSS. No anonymous access; each device can only publish/subscribe under its own token (broker ACL). |
-| **Predictive AI Engine** | `Python / scikit-learn` | One model per account. Stage 1: anomaly check against the room's own baseline. Stage 2 (once enough episodes are logged): logistic regression, then Random Forest, predicting an asthma-like event (rescue dose or cough cluster) in the next hour, evaluated by recall and precision on later data. Controller doses are an input, not an episode. Caregiver "false alarm" labels are excluded from training. |
-| **REST API & Workers** | `Laravel 12 / PHP 8.2` | API, MQTT worker, scheduler. All data is scoped to the signed-in account. |
-| **Interactive UI** | `Next.js / Tailwind CSS` | Live monitor, Sleep Mode, Command Center (thresholds sync to the device), weekly report. |
-| **Alerts** | `Brevo SMTP` | Email when coughs cluster (3 in 10 min, or 2 strong detections), at most one per device per 10 minutes. Web Push is implemented server-side; the browser subscription UI is not wired yet. |
-| **Identity Management** | `Laravel Sanctum` | Token auth, forgot/reset password (links expire after 60 minutes). |
+| **Environmental telemetry** | `ESP32` | DHT22 (temperature/humidity), MQ-135 (gas, estimated CO₂-equivalent ppm, self-calibrated), Sharp GP2Y1010AU0F (dust, self-calibrated estimate). Sent every 3 s, smoothed over ~12 s. Local passive-buzzer/LED alarm when a reading crosses its limit, even offline. |
+| **Secure IoT transport** | `Mosquitto + Cloudflare Tunnel` | MQTT over WSS. No anonymous access; each device can only publish/subscribe under its own token (broker ACL). |
+| **AI, two levels** | `Python / scikit-learn` | A **room model per device** learns what is normal for that room (dust, temperature, humidity, gas) and flags readings that are unusual for it (Stage 1). A **risk model per child**, once about two flare-ups are recorded, learns from that child's rooms what precedes a rescue dose or a cough cluster in the next hour (Stage 2: logistic regression, then Random Forest), using window averages, how fast dust and humidity are rising, night-time, coughs and the daily-dose input; it is evaluated by recall and precision on later data. Caregiver "false alarm" marks are excluded from training. |
+| **Alarm limits** | `Laravel scheduler` | The value a parent sets is a **cap**: the AI may lower a room's limit toward what is usual for that room, never raise it above the cap, at most once a day by up to 10 %, and only after 24 h of readings. Any limit can be **locked**. A documented rule (not AI) lowers limits 15 % while a child's daily inhaler dose is missed. Every change is logged with its reason. |
+| **Alerts** | `Brevo SMTP + Web Push` | Email and phone/browser push when coughs cluster (3 in 10 min, or 2 strong detections), at most one per room per 10 minutes, to every member of the child with alerts on. The push names the room and child and opens that room. iPhone: add the dashboard to the Home Screen first (iOS 16.4+). |
+| **Privacy (PDPA)** | `Laravel` | One central access check (policies per role); a stranger gets 404 for any id. Each child's data downloads as CSV. Deleting a room, a child or an account deletes their records and the AI models trained on them. Sensor readings: every reading for 7 days, then 10-minute averages, deleted after a year. Audit log of sharing and changes. |
+| **REST API & workers** | `Laravel 12 / PHP 8.2` | API, MQTT worker, scheduler (`ai:optimize` every 5 min, `ai:train` every 4 h, `telemetry:prune` nightly). |
+| **Interactive UI** | `Next.js / Tailwind CSS` | Room picker, live monitor, Sleep Mode, Smart Alerts per room, Children & rooms, sharing, a weekly Activity Log per child (printable, with data downloads). |
+| **Identity** | `Laravel Sanctum` | Token auth, forgot/reset password (links expire after 60 minutes). |
 
 ---
 
@@ -49,8 +62,13 @@ graph LR
     API[Laravel API] -- respirosync/devices/token/config, commands --> Mosquitto
     NextJS[Next.js Dashboard] -- REST /api --> API
     API -- HTTP ?device_id= / ?patient_id= --> Python[Python AI Engine]
+    Scheduler[Laravel Scheduler\nai:optimize, ai:train,\ntelemetry:prune] --> Python
+    Scheduler -- new limits --> Mosquitto
     Worker -- SMTP --> Brevo[Brevo Email Alerts]
+    Worker -- Web Push / VAPID --> Push[Phones and browsers]
 ```
+
+The AI engine keeps a room model per device and a risk model per child; the backend checks access before every call, and the engine is only reachable inside the Docker network.
 
 ### MQTT topics
 
@@ -58,7 +76,7 @@ graph LR
 |---|---|---|
 | `respirosync/devices/<token>/telemetry` | device → cloud | `{"pm25_level":12.3,"temperature":29.1,"humidity":70,"mq135_level":410}` (`null` for a failed sensor) |
 | `respirosync/devices/<token>/events` | device → cloud | `{"event":"cough","level":2,"confidence":0.42}` (`confidence` = Pico detection strength) |
-| `respirosync/devices/<token>/config` | cloud → device (retained) | `{"pm25_threshold":35,"temperature_threshold":35,"humidity_threshold":60,"mq135_threshold":1000,"is_buzzer_muted":false}` |
+| `respirosync/devices/<token>/config` | cloud → device (retained) | `{"pm25_threshold":35,"temperature_threshold":35,"humidity_threshold":75,"mq135_threshold":1000,"is_buzzer_muted":false}` (that room's limits) |
 | `respirosync/devices/<token>/commands` | cloud → device | `{"command":"factory_reset"}`, `buzzer_on`, `buzzer_off` |
 
 The device connects with **client id = its 6-character token**; `mosquitto/config/acl` restricts it to its own four topics.
@@ -76,7 +94,7 @@ asthma-monitoring-system/
 ├── hardware/               # ESP32 and Pico firmware (Arduino), wiring guide
 ├── mosquitto/config/       # mosquitto.conf + acl (passwd is created on the server, never committed)
 ├── docs/                   # project explanation and operations guide
-├── .github/workflows/      # CI: backend tests, frontend build, AI engine check
+├── .github/workflows/      # CI: backend tests, MySQL migrations, frontend build, AI checks, firmware compiles
 ├── .env.example            # docker-compose variables
 └── docker-compose.yaml
 ```
@@ -107,6 +125,7 @@ asthma-monitoring-system/
    cp .env.example .env                 # fill in DB, mail, MQTT and Cloudflare values
    cp backend/.env.example backend/.env
    ```
+   In `backend/.env`, set **`FRONTEND_URL`** to the exact address the dashboard is served at (the links in invitation, password-reset and alert emails use it), and **`VAPID_SUBJECT`** to a `mailto:` address you read (iPhones reject pushes without it).
 
 2. **Broker credentials** (once per server; the broker will not start without them)
    ```bash
@@ -123,8 +142,9 @@ asthma-monitoring-system/
    ```bash
    docker compose up -d --build
    docker compose exec backend php artisan key:generate   # first install only
+   docker compose exec backend php artisan webpush:vapid  # first install only: push notification keys
    ```
-   The backend runs `php artisan migrate --force` on every start, so schema changes apply automatically on deploy.
+   The backend runs `php artisan migrate --force` on every start, so schema changes apply automatically on deploy. The AI trains every 4 hours; to train right away (e.g. after an hour of readings from a new device, or after resetting the AI), run `docker compose exec backend php artisan ai:train`. Upgrading from an older release: read its *Upgrading* notes in [`CHANGELOG.md`](CHANGELOG.md).
 
 4. **Run the tests** (in-memory SQLite). **Never run them inside the running `backend` container.**
    Docker sets `DB_CONNECTION=mysql` there, which overrides `phpunit.xml`, and `RefreshDatabase` would drop every table in the live database. `tests/TestCase.php` refuses to start unless the connection is in-memory SQLite, but don't rely on that alone.
@@ -144,7 +164,7 @@ The dashboard is served on `127.0.0.1:3005` and published through the Cloudflare
 1. Wire everything as described in `hardware/WIRING_GUIDE.md` (note the voltage dividers on the two 5 V analog sensors).
 2. Flash `hardware/pico_cough_ai/pico_cough_ai.ino` to the Pico using the **arduino-pico** core ("Raspberry Pi Pico/RP2040" by Earle Philhower).
 3. Copy `hardware/esp32_firmware/secrets.example.h` to `secrets.h`, fill in the broker URL and device password, then flash `esp32_firmware.ino` to the ESP32.
-4. In the dashboard, generate a pairing token, connect your phone to the **RespiroSync-Setup** Wi-Fi hotspot, and enter Wi-Fi details and the token.
+4. In the dashboard, open *Account Settings → Children & rooms*, choose the child the room is for and click **Pair New ESP32 Device**; connect your phone to the **RespiroSync-Setup** Wi-Fi hotspot and enter the Wi-Fi details and the token. Then give the room a name (e.g. "Bedroom") in the same place.
 
 > [!WARNING]
 > **Hardware Liability Disclaimer:** 
