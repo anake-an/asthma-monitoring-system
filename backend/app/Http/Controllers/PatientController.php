@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
 use App\Models\Patient;
+use App\Support\AiEngine;
 use Illuminate\Http\Request;
 
 /**
@@ -66,6 +67,7 @@ class PatientController extends Controller
         }
         AuditLog::record($request->user(), 'patient.deleted', $patient->id, null, ['name' => $patient->name]);
         $patient->delete();
+        app(AiEngine::class)->forget([], [$patient->id]); // their risk model too (the rooms stay, shared)
 
         return response()->json(['message' => 'Patient and their dose history deleted']);
     }

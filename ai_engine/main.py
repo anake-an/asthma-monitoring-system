@@ -371,6 +371,25 @@ def train_risk(patient_id: int = Query(..., ge=1)):
     return train_risk_from_frames(risk_key(patient_id), rooms, *fetch_doses(patient_id))
 
 
+def forget(keys: list) -> int:
+    """Delete every model file of these keys ("device_<id>", "patient_<id>"); returns how many."""
+    removed = 0
+    for key in keys:
+        for path in (model_path(key), baseline_path(key), meta_path(key)):
+            if os.path.exists(path):
+                os.remove(path)
+                removed += 1
+    return removed
+
+
+@app.delete("/models")
+def delete_models(device_id: list[int] = Query(default=[]), patient_id: list[int] = Query(default=[])):
+    """Right to erasure: called by the backend when a room, a child or an account is deleted, so no
+    model trained on their data stays behind."""
+    keys = [room_key(d) for d in device_id] + [risk_key(p) for p in patient_id]
+    return {"removed_files": forget(keys)}
+
+
 @app.get("/predict")
 def predict_attack(device_id: int = Query(..., ge=1)):
     """Prediction for one room: its own baseline (Stage 1), or its patient's risk model (Stage 2)

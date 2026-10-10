@@ -30,6 +30,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/patients/{id}/members/{userId}', [\App\Http\Controllers\SharingController::class, 'removeMember']);
     Route::patch('/patients/{id}/alerts', [\App\Http\Controllers\SharingController::class, 'setAlerts']);
     Route::get('/patients/{id}/audit', [\App\Http\Controllers\SharingController::class, 'audit']);
+    Route::get('/patients/{id}/export/{kind}', [\App\Http\Controllers\ExportController::class, 'export'])->middleware('throttle:20,1');
     Route::delete('/invites/{inviteId}', [\App\Http\Controllers\SharingController::class, 'cancelInvite']);
     Route::get('/invites/{token}', [\App\Http\Controllers\SharingController::class, 'showInvite'])->middleware('throttle:20,1');
     Route::post('/invites/accept', [\App\Http\Controllers\SharingController::class, 'acceptInvite'])->middleware('throttle:10,1');

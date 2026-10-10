@@ -9,6 +9,7 @@ use App\Models\HardwareConfig;
 use App\Models\LimitChange;
 use App\Models\Patient;
 use App\Models\User;
+use App\Support\AiEngine;
 use Illuminate\Support\Facades\Hash;
 
 class AuthController extends Controller
@@ -113,8 +114,10 @@ class AuthController extends Controller
                 'shared_children' => $sharedWithoutOtherOwner->pluck('name')->values(),
             ], 409);
         }
+        $deletedPatients = [];
         foreach ($owned as $patient) {
             if ($patient->ownerCount() <= 1) {
+                $deletedPatients[] = $patient->id;
                 $patient->delete();
                 continue;
             }
@@ -127,9 +130,12 @@ class AuthController extends Controller
             LimitChange::whereIn('device_id', $deviceIds)->update(['user_id' => $heir->id]);
         }
 
-        // Devices, telemetry, coughs, configs and limit changes go with the user (cascade).
+        // Devices, telemetry, coughs, configs and limit changes go with the user (cascade), and the
+        // AI's model files of those rooms and children too.
+        $deletedDevices = $user->devices()->pluck('id');
         $user->tokens()->delete();
         $user->delete();
+        app(AiEngine::class)->forget($deletedDevices, $deletedPatients);
 
         return response()->json([
             'message' => 'Account permanently deleted in compliance with PDPA'

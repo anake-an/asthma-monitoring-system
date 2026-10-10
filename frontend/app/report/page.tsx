@@ -35,7 +35,15 @@ type LimitChange = {
 
 type PatientOption = { id: number; name: string; role: string };
 
-const timesText = (n: number) => (n === 0 ? "0 times" : n === 1 ? "once" : `${n} times`);
+// Data export files (backend ExportController::KINDS)
+const EXPORTS: [string, string][] = [
+  ["readings", "Sensor readings"],
+  ["coughs", "Coughs"],
+  ["doses", "Inhaler doses"],
+  ["limits", "Alert limit changes"],
+];
+
+const timesText =(n: number) => (n === 0 ? "0 times" : n === 1 ? "once" : `${n} times`);
 
 const LIMIT_LABELS:Record<LimitChange["limit_name"], { name: string; unit: string }> = {
   pm25: { name: "PM2.5 dust", unit: " µg/m³" },
@@ -50,6 +58,32 @@ export default function ReportPage() {
   // One report per child; the picker is hidden when printing.
   const [patients, setPatients] = useState<PatientOption[]>([]);
   const [patientId, setPatientId] = useState<number | null>(null);
+  const [downloading, setDownloading] = useState<string | null>(null);
+
+  // The API needs the bearer token, which a plain link cannot send: fetch the file, then save it.
+  const download = async (kind: string) => {
+    if (!data?.patient) return;
+    setDownloading(kind);
+    try {
+      const res = await fetch(`/api/patients/${data.patient.id}/export/${kind}`, {
+        headers: { "Authorization": `Bearer ${localStorage.getItem("auth_token")}` },
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const name = /filename="?([^";]+)"?/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? `respirosync-${kind}.csv`;
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      alert("The download failed. Please try again.");
+    } finally {
+      setDownloading(null);
+    }
+  };
 
   useEffect(() => {
     fetch("/api/patients", { headers: { "Authorization": `Bearer ${localStorage.getItem("auth_token")}`, "Accept": "application/json" } })
@@ -418,6 +452,26 @@ export default function ReportPage() {
             </div>
 
           </div>
+
+          {/* Data export (PDPA right of access): CSV files of this child's data. Not printed. */}
+          {data.patient && (
+            <div className="print:hidden mt-10 bg-zinc-100 dark:bg-white/5 border border-zinc-300 dark:border-white/10 rounded-2xl p-6 relative z-10">
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-white uppercase tracking-widest mb-1">Download {data.patient.name}&apos;s data</h2>
+              <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-4">Everything stored for this child, as spreadsheet files (CSV), not only this week. Readings older than 7 days are 10-minute averages.</p>
+              <div className="flex flex-wrap gap-2">
+                {EXPORTS.map(([kind, label]) => (
+                  <button
+                    key={kind}
+                    onClick={() => download(kind)}
+                    disabled={downloading !== null}
+                    className="px-4 py-2 rounded-lg text-sm font-medium bg-white dark:bg-black/40 border border-zinc-200 dark:border-white/10 hover:border-blue-500 text-zinc-800 dark:text-zinc-200 disabled:opacity-50"
+                  >
+                    {downloading === kind ? "Preparing..." : label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Footer */}
           <div className="mt-16 pt-8 border-t border-zinc-300 dark:border-white/10 print:border-gray-200 flex flex-col md:flex-row justify-between items-center text-xs text-zinc-600 dark:text-zinc-400 print:text-gray-400 relative z-10">

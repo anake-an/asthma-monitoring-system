@@ -65,4 +65,8 @@ one_room = risk("patient_906", bedroom, coughs, rescue, controller)
 assert r["rooms"] == 2 and r["windows_used"] == 2 * one_room["windows_used"], (r, one_room)
 assert r["evaluation"]["test_episode_windows"] == 2 * one_room["evaluation"]["test_episode_windows"], r
 
+# Right to erasure: deleting a child and a room removes their model files.
+assert main.forget(["patient_902", "device_900", "patient_does_not_exist"]) == 3  # model + meta + baseline
+assert not os.path.exists(main.model_path("patient_902")) and not os.path.exists(main.baseline_path("device_900"))
+
 print("training: all checks passed")
