@@ -4,6 +4,15 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+## [6.1.0] - 2026-10-10
+
+Alerts when a reading stays over its limit, account photos and child badges, a PDF report that works in the iPhone app, and a redesigned device screen.
+
+### Upgrading from 6.0.0
+- **Database:** two migrations: the account photo and the child badge columns, and the removal of the unused automatic children. Run `php artisan migrate --force` if your backend does not run migrations on start.
+- **ESP32:** re-flash with this release's firmware. You get the new LCD, the gas warm-up, the clock that also works where NTP is blocked, and the daily-dose reminder. Older firmware keeps working, and ignores the new `dose_due` config field.
+- **Scheduler:** a new 5-minute task, `devices:dose-reminders`. The scheduler container picks it up by itself.
+
 ### Added
 - **Alerts for readings over a limit:** when dust, gas, temperature or humidity stays above its room's limit for **5 minutes** (every reading in that time over it; a dip or a failed sensor starts the wait again), everyone with alerts on gets an **email and a push** naming the reading, the room and child, the value and the limit; tapping it opens that room. At most one per room and reading per hour while it stays high. Same smoothed values and limits as the device's buzzer, same recipients as cough alerts (the "Send me alerts" switch per child now covers both). Before, only the buzzer and the dashboard showed it.
 - **Account photo:** tap the circle in Account Settings to add, change or remove one. The browser crops it to a square and shrinks it to 256 × 256 before sending (which also drops hidden data such as the photo's GPS location); the server accepts only real JPEG, PNG or WebP images up to 512 px (no SVG). Stored with the account, so it is in database backups and goes when the account is deleted. People you share a child with see it in the Share list.
@@ -156,7 +165,8 @@ Initial public release.
 
 > **Superseded.** 4.3.0 runs an open MQTT broker and has the cross-account data access fixed in 5.0.0. Do not deploy it.
 
-[Unreleased]: https://github.com/anake-an/asthma-monitoring-system/compare/v6.0.0...HEAD
+[Unreleased]: https://github.com/anake-an/asthma-monitoring-system/compare/v6.1.0...HEAD
+[6.1.0]: https://github.com/anake-an/asthma-monitoring-system/compare/v6.0.0...v6.1.0
 [6.0.0]: https://github.com/anake-an/asthma-monitoring-system/compare/v5.0.0...v6.0.0
 [5.0.0]: https://github.com/anake-an/asthma-monitoring-system/compare/v4.3.0...v5.0.0
 [4.3.0]: https://github.com/anake-an/asthma-monitoring-system/releases/tag/v4.3.0
