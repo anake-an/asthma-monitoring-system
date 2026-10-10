@@ -1,10 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useRooms } from "@/lib/rooms";
+import { useRooms, withDevice } from "@/lib/rooms";
 
 export default function InhalerTracker() {
   // Doses belong to the child of the room on screen.
-  const { patientId, patients, canLogDose } = useRooms();
+  const { patientId, patients, canLogDose, deviceId } = useRooms();
   const patientName = patients.find(p => p.id === patientId)?.name;
   const [lastUsed, setLastUsed] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -54,7 +54,7 @@ export default function InhalerTracker() {
 
       // Option 1: Trigger-Based AI Training
       // Asynchronously trigger the AI to re-evaluate the room conditions immediately
-      fetch("/api/ai/train", {
+      fetch(withDevice("/api/ai/train", deviceId), {
         headers: { "Authorization": `Bearer ${token}` }
       }).catch(e => console.error("AI Training Trigger Failed", e));
     } catch (e) { }

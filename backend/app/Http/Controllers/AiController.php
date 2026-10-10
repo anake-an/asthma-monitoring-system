@@ -2,35 +2,34 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\AiEngine;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
 
 /**
- * Proxies the Python AI engine. Every call is scoped to the authenticated user:
- * the engine only reads that user's devices and keeps one model per user.
+ * Proxies the Python AI engine for one room (?device_id, default: the user's most recently seen
+ * device). Access is checked here (Controller::device); the engine keeps a room model per device
+ * and a risk model per patient (DESIGN_MULTI_PATIENT.md section 5).
  */
 class AiController extends Controller
 {
-    public function getPrediction(Request $request)
+    public function getPrediction(Request $request, AiEngine $ai)
     {
+        $device = $this->device($request);
+        if (!$device) {
+            return response()->json(self::learning('No device paired yet.'));
+        }
+
         try {
-            $response = Http::timeout(5)->get(config('services.ai_engine.url') . '/predict', [
-                'user_id' => $request->user()->id,
-            ]);
+            $response = $ai->predict($device->id);
 
             if ($response->successful()) {
-                return response()->json($response->json());
+                return response()->json($response->json() + ['device_id' => $device->id]);
             }
 
-            // 400 = no model yet / no recent telemetry, 404 = no paired device: a normal
-            // state while the account collects data, not an error for the dashboard.
+            // 400 = no model yet / no recent telemetry, 404 = unknown device: a normal state while
+            // the room collects data, not an error for the dashboard.
             if (in_array($response->status(), [400, 404], true)) {
-                return response()->json([
-                    'learning' => true,
-                    'model_stage' => 'Learning mode',
-                    'probability_of_attack' => null,
-                    'reason' => $response->json('detail') ?? 'Not enough data yet.',
-                ]);
+                return response()->json(self::learning($response->json('detail') ?? 'Not enough data yet.') + ['device_id' => $device->id]);
             }
 
             return response()->json([
@@ -42,16 +41,34 @@ class AiController extends Controller
         }
     }
 
-    public function trainModel(Request $request)
+    /** Retrain the room's model and its child's risk model (e.g. right after a cough was confirmed). */
+    public function trainModel(Request $request, AiEngine $ai)
     {
-        try {
-            $response = Http::timeout(30)->get(config('services.ai_engine.url') . '/train', [
-                'user_id' => $request->user()->id,
-            ]);
+        $device = $this->device($request);
+        if (!$device) {
+            return response()->json(['message' => 'No device paired yet.'], 404);
+        }
 
-            return response()->json($response->json(), $response->status());
+        try {
+            $room = $ai->trainRoom($device->id);
+            $risk = $device->patient_id ? $ai->trainRisk($device->patient_id) : null;
+
+            return response()->json([
+                'room' => $room->json(),
+                'risk' => $risk?->json(),
+            ]);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to reach AI engine.'], 503);
         }
+    }
+
+    private static function learning(string $reason): array
+    {
+        return [
+            'learning' => true,
+            'model_stage' => 'Learning mode',
+            'probability_of_attack' => null,
+            'reason' => $reason,
+        ];
     }
 }

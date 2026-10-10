@@ -82,7 +82,7 @@ export default function EventTimeline() {
         // Option 1: Trigger-Based AI Training
         // If a cough is verified, tell AI to instantly re-evaluate thresholds
         if (isVerified) {
-          fetch("/api/ai/train", {
+          fetch(withDevice("/api/ai/train", deviceId), {
             headers: { "Authorization": `Bearer ${token}` }
           }).catch(e => console.error("AI Training Trigger Failed", e));
         }

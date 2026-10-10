@@ -3,10 +3,10 @@
 namespace App\Console\Commands;
 
 use App\Models\HardwareConfig;
+use App\Support\AiEngine;
 use App\Support\Mqtt;
 use Illuminate\Console\Command;
 use Illuminate\Http\Client\Response;
-use Illuminate\Support\Facades\Http;
 
 /**
  * Applies the AI engine's suggested thresholds to each device (room) whose config has
@@ -23,7 +23,7 @@ class AiOptimize extends Command
 
     protected $description = 'Apply AI threshold suggestions per device and sync them to the devices';
 
-    public function handle(Mqtt $mqtt)
+    public function handle(Mqtt $mqtt, AiEngine $ai)
     {
         $configs = HardwareConfig::with('device')
             ->whereNotNull('device_id')
@@ -31,13 +31,8 @@ class AiOptimize extends Command
             ->when($this->option('user'), fn ($q, $id) => $q->where('user_id', $id))
             ->get();
 
-        // The AI model is still per account (phase 4 makes it per device/patient): ask once per
-        // account, then apply the answer to each of its rooms with that room's own caps and locks.
-        $responses = [];
-
         foreach ($configs as $config) {
             $device = $config->device;
-            $userId = $config->user_id;
             if (!$device) {
                 continue;
             }
@@ -45,10 +40,8 @@ class AiOptimize extends Command
             // The AI works on the limits without the rule; the rule is applied on top afterwards.
             $ruleWasOn = $config->missed_dose_base !== null;
             $config->withoutMissedDoseRule();
-            if (!array_key_exists($userId, $responses)) {
-                $responses[$userId] = $this->predictionFor($userId);
-            }
-            $aiReason = $this->applySuggestion($config, $responses[$userId], $userId);
+            // One answer per room: its own baseline, or its child's risk model (DESIGN 5).
+            $aiReason = $this->applySuggestion($config, $this->predictionFor($ai, $device->id), $device->id);
             $ruleOn = HardwareConfig::missedDailyDose($device->patient_id, now());
             $config->applyMissedDoseRule($ruleOn);
 
@@ -76,13 +69,13 @@ class AiOptimize extends Command
         return self::SUCCESS;
     }
 
-    /** The AI engine's answer for an account, or null when it could not be reached. */
-    private function predictionFor(int $userId): ?Response
+    /** The AI engine's answer for a room, or null when it could not be reached. */
+    private function predictionFor(AiEngine $ai, int $deviceId): ?Response
     {
         try {
-            return Http::timeout(10)->get(config('services.ai_engine.url') . '/predict', ['user_id' => $userId]);
+            return $ai->predict($deviceId);
         } catch (\Throwable $e) {
-            $this->error("User {$userId}: AI engine unreachable: " . $e->getMessage());
+            $this->error("Device {$deviceId}: AI engine unreachable: " . $e->getMessage());
 
             return null;
         }
@@ -92,7 +85,7 @@ class AiOptimize extends Command
      * Set the limits the AI allows, in memory. Returns the reason for the log, or null when the
      * engine failed (the limits are then left as they are).
      */
-    private function applySuggestion(HardwareConfig $config, ?Response $response, int $userId): ?string
+    private function applySuggestion(HardwareConfig $config, ?Response $response, int $deviceId): ?string
     {
         if (!$response) {
             return null;
@@ -102,7 +95,7 @@ class AiOptimize extends Command
         $learning = in_array($response->status(), [400, 404], true);
         $thresholds = $response->successful() ? $response->json('suggested_thresholds') : null;
         if (!$thresholds && !$learning) {
-            $this->warn("User {$userId}: no suggestion ({$response->status()}).");
+            $this->warn("Device {$deviceId}: no suggestion ({$response->status()}).");
 
             return null; // engine error: leave the limits as they are
         }

@@ -40,7 +40,7 @@ export default function LiveMonitor() {
     const fetchAiStage = async () => {
       try {
         const token = localStorage.getItem("auth_token");
-        const res = await fetch("/api/ai/predict", {
+        const res = await fetch(withDevice("/api/ai/predict", deviceId), {
           headers: { "Authorization": `Bearer ${token}`, "Accept": "application/json" }
         });
         if (!res.ok) { setAiStage(null); setRoomNormal(null); return; }
@@ -55,7 +55,7 @@ export default function LiveMonitor() {
     fetchAiStage();
     const interval = setInterval(fetchAiStage, 60000);
     return () => clearInterval(interval);
-  }, []);
+  }, [deviceId]);
 
   useEffect(() => {
     let inFlight = false;

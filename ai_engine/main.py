@@ -1,11 +1,16 @@
 """
 RespiroSync AI engine.
 
-Every endpoint is scoped to one account (?user_id=). The engine only reads that
-user's devices and inhaler logs, and keeps one model per user under MODEL_DIR.
+Two levels (DESIGN_MULTI_PATIENT.md section 5), kept under MODEL_DIR:
+  room model per device   (/train/room?device_id=)   what is normal for that room
+  risk model per patient  (/train/risk?patient_id=)  what preceded that child's episodes, from
+                                                      their own rooms (never a shared room)
+/predict?device_id= answers for one room. Access control is done by the backend, which only
+calls with ids the signed-in user may see; the engine is not reachable from outside.
 
 Stage 1 (no asthma events yet): z-score anomaly check against the room's own baseline.
-Stage 2 (events recorded):      Random Forest predicting "attack-like event in the next hour".
+Stage 2 (events recorded):      logistic regression / Random Forest predicting
+                                "attack-like event in the next hour" for the room's child.
 
 These are prototype models trained on small, self-reported data. The reported
 accuracy is measured on a held-out, later slice of the data when there is
@@ -141,17 +146,29 @@ def room_baseline(df: pd.DataFrame) -> dict:
     return baseline
 
 
-def model_path(user_id: int) -> str:
-    return os.path.join(MODEL_DIR, f"user_{user_id}_model.pkl")
+# Model files (DESIGN_MULTI_PATIENT.md section 5): a room model per device ("device_<id>": what is
+# normal for that room) and a risk model per patient ("patient_<id>": what triggers that child).
+def room_key(device_id: int) -> str:
+    return f"device_{int(device_id)}"
 
 
-def baseline_path(user_id: int) -> str:
-    return os.path.join(MODEL_DIR, f"user_{user_id}_baseline.pkl")
+def risk_key(patient_id: int) -> str:
+    return f"patient_{int(patient_id)}"
 
 
-def meta_path(user_id: int) -> str:
-    """Model type and evaluation of the Stage 2 model, returned by /predict."""
-    return os.path.join(MODEL_DIR, f"user_{user_id}_meta.pkl")
+def model_path(key: str) -> str:
+    """Stage 2 risk model of a patient."""
+    return os.path.join(MODEL_DIR, f"{key}_model.pkl")
+
+
+def baseline_path(key: str) -> str:
+    """Room baseline (mean and spread of each reading) of a device."""
+    return os.path.join(MODEL_DIR, f"{key}_baseline.pkl")
+
+
+def meta_path(key: str) -> str:
+    """Model type and evaluation of a patient's Stage 2 model, returned by /predict."""
+    return os.path.join(MODEL_DIR, f"{key}_meta.pkl")
 
 
 def safe_val(val, default=0.0):
@@ -162,15 +179,20 @@ def safe_val(val, default=0.0):
         return default
 
 
-def device_ids(user_id: int) -> list:
+def device_patient(device_id: int):
+    """The device's patient id, or None for a shared room. 404 when the device does not exist."""
     with engine.connect() as conn:
-        rows = conn.execute(text("SELECT id FROM devices WHERE user_id = :u"), {"u": user_id}).fetchall()
+        row = conn.execute(text("SELECT patient_id FROM devices WHERE id = :d"), {"d": device_id}).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Unknown device.")
+    return row[0]
+
+
+def patient_device_ids(patient_id: int) -> list:
+    """The patient's own rooms. Shared rooms have no patient, so they never train a child's model."""
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT id FROM devices WHERE patient_id = :p ORDER BY id"), {"p": patient_id}).fetchall()
     return [r[0] for r in rows]
-
-
-def in_clause(ids: list) -> str:
-    # ids come from the database as integers; never from the request.
-    return ",".join(str(int(i)) for i in ids)
 
 
 def db_now() -> datetime:
@@ -181,30 +203,29 @@ def db_now() -> datetime:
         return conn.execute(text("SELECT NOW()")).scalar()
 
 
-def fetch_user_data(user_id: int):
-    ids = device_ids(user_id)
-    if not ids:
-        raise HTTPException(status_code=404, detail="This account has no paired devices.")
-    dev = in_clause(ids)
-    telemetry = pd.read_sql(
-        f"SELECT recorded_at, pm25_level, temperature, humidity FROM telemetry_logs WHERE device_id IN ({dev})", engine
-    )
+def _frame(sql: str, params: dict) -> pd.DataFrame:
+    df = pd.read_sql(text(sql), engine, params=params)
+    df["recorded_at"] = pd.to_datetime(df["recorded_at"])
+    return df
+
+
+def fetch_telemetry(device_id: int) -> pd.DataFrame:
+    return _frame("SELECT recorded_at, pm25_level, temperature, humidity FROM telemetry_logs WHERE device_id = :d",
+                  {"d": device_id})
+
+
+def fetch_coughs(device_id: int) -> pd.DataFrame:
     # Events the caregiver marked as false alarms (is_verified = 0) are excluded from training.
-    coughs = pd.read_sql(
-        f"SELECT recorded_at FROM cough_events WHERE device_id IN ({dev}) "
-        f"AND (is_verified IS NULL OR is_verified = 1)",
-        engine,
-    )
-    inhaler = pd.read_sql(
-        text("SELECT administered_at AS recorded_at, type FROM inhaler_logs WHERE user_id = :u"), engine, params={"u": user_id}
-    )
-    for df in (telemetry, coughs, inhaler):
-        df["recorded_at"] = pd.to_datetime(df["recorded_at"])
-    # Rescue doses mark episodes. Controller (daily) doses are preventive: counting them as
-    # episodes taught the model that every daily dose was an attack.
-    rescue = inhaler.loc[inhaler["type"] != "controller", ["recorded_at"]]
-    controller = inhaler.loc[inhaler["type"] == "controller", ["recorded_at"]]
-    return telemetry, coughs, rescue, controller
+    return _frame("SELECT recorded_at FROM cough_events WHERE device_id = :d AND (is_verified IS NULL OR is_verified = 1)",
+                  {"d": device_id})
+
+
+def fetch_doses(patient_id: int):
+    """(rescue, controller) doses of a patient. Rescue doses mark episodes; controller (daily) doses
+    are preventive: counting them as episodes taught the model that every daily dose was an attack."""
+    inhaler = _frame("SELECT administered_at AS recorded_at, type FROM inhaler_logs WHERE patient_id = :p", {"p": patient_id})
+    return (inhaler.loc[inhaler["type"] != "controller", ["recorded_at"]],
+            inhaler.loc[inhaler["type"] == "controller", ["recorded_at"]])
 
 
 def forward_window(series: pd.Series, n: int, how: str) -> pd.Series:
@@ -287,71 +308,95 @@ def evaluate(df: pd.DataFrame) -> dict:
     return result
 
 
-def train_from_frames(user_id: int, telemetry, coughs, rescue, controller) -> dict:
-    if telemetry.empty:
-        raise HTTPException(status_code=400, detail="Not enough data to train.")
+NO_EVENTS = pd.DataFrame({"recorded_at": pd.to_datetime([])})
 
-    df = build_dataset(telemetry, coughs, rescue, controller)
+
+def train_room_from_frames(key: str, telemetry: pd.DataFrame) -> dict:
+    """Room model (Stage 1) of one device: what is normal for that room. Needs no health events,
+    so it is useful from the first day, also for a shared room."""
+    df = build_dataset(telemetry, NO_EVENTS, NO_EVENTS, NO_EVENTS) if not telemetry.empty else telemetry
     if len(df) == 0:
-        raise HTTPException(status_code=400, detail="Not enough valid data after preprocessing. Please wait for more telemetry.")
+        raise HTTPException(status_code=400, detail="Not enough valid data yet. Please wait for more telemetry.")
+    baseline = room_baseline(df)
+    joblib.dump(baseline, baseline_path(key))
+    return {"message": "Room baseline (anomaly detection) trained.", "windows_used": len(df), "baseline": baseline}
+
+
+def train_risk_from_frames(key: str, rooms: list, rescue: pd.DataFrame, controller: pd.DataFrame) -> dict:
+    """Risk model (Stage 2) of one patient, from the 10-minute windows of each of their rooms
+    (rooms = [(telemetry, coughs), ...]), labelled by their rescue doses and the coughs heard in that
+    room. Windows of all rooms are combined in time order: the model learns what preceded this
+    child's episodes, wherever the child was. Below MIN_POSITIVES no model is kept (Stage 1)."""
+    frames = [build_dataset(t, c, rescue, controller) for t, c in rooms if not t.empty]
+    frames = [f for f in frames if len(f)]
+    if not frames:
+        raise HTTPException(status_code=400, detail="Not enough valid data yet. Please wait for more telemetry.")
+    df = pd.concat(frames).sort_index(kind="stable")  # time order: evaluate() holds out the latest 25 %
 
     X, y = df[FEATURES], df["target_attack_soon"]
     positives = int(y.sum())
 
-    # The room's normal range is kept at both stages: predict() never sets a limit inside it.
-    baseline = room_baseline(df)
-    joblib.dump(baseline, baseline_path(user_id))
-
     if positives < MIN_POSITIVES:
-        for path in (model_path(user_id), meta_path(user_id)):
+        for path in (model_path(key), meta_path(key)):
             if os.path.exists(path):
                 os.remove(path)
         message = ("No asthma events recorded yet." if positives == 0
                    else f"{positives} episode windows so far; a risk model needs {MIN_POSITIVES}.")
-        return {"message": f"{message} Stage 1 baseline (anomaly detection) created.",
-                "windows_used": len(df), "episode_windows": positives, "baseline": baseline}
+        return {"message": f"{message} The rooms use Stage 1 (anomaly detection).",
+                "windows_used": len(df), "episode_windows": positives}
 
     evaluation = evaluate(df)
     model_type, model = make_model(positives)
     model.fit(X, y)
-    joblib.dump(model, model_path(user_id))
-    meta = {"model_type": model_type, "windows_used": len(df), "episode_windows": positives, "evaluation": evaluation}
-    joblib.dump(meta, meta_path(user_id))
+    joblib.dump(model, model_path(key))
+    meta = {"model_type": model_type, "rooms": len(frames), "windows_used": len(df),
+            "episode_windows": positives, "evaluation": evaluation}
+    joblib.dump(meta, meta_path(key))
 
     return {"message": "Stage 2 personalised model trained.", **meta}
 
 
-@app.get("/train")
-def train_model(user_id: int = Query(..., ge=1)):
-    return train_from_frames(user_id, *fetch_user_data(user_id))
+@app.get("/train/room")
+def train_room(device_id: int = Query(..., ge=1)):
+    device_patient(device_id)  # 404 for an unknown device
+    return train_room_from_frames(room_key(device_id), fetch_telemetry(device_id))
+
+
+@app.get("/train/risk")
+def train_risk(patient_id: int = Query(..., ge=1)):
+    ids = patient_device_ids(patient_id)
+    if not ids:
+        raise HTTPException(status_code=404, detail="This patient has no rooms.")
+    rooms = [(fetch_telemetry(d), fetch_coughs(d)) for d in ids]
+    return train_risk_from_frames(risk_key(patient_id), rooms, *fetch_doses(patient_id))
 
 
 @app.get("/predict")
-def predict_attack(user_id: int = Query(..., ge=1)):
-    has_stage2 = os.path.exists(model_path(user_id))
-    has_stage1 = os.path.exists(baseline_path(user_id))
+def predict_attack(device_id: int = Query(..., ge=1)):
+    """Prediction for one room: its own baseline (Stage 1), or its patient's risk model (Stage 2)
+    fed with this room's latest window. Limits come from this room's learned normal."""
+    patient_id = device_patient(device_id)
+    rkey = room_key(device_id)
+    pkey = risk_key(patient_id) if patient_id else None
+    has_stage1 = os.path.exists(baseline_path(rkey))
+    has_stage2 = bool(pkey) and os.path.exists(model_path(pkey))
     if not has_stage2 and not has_stage1:
         raise HTTPException(status_code=400, detail="Model not trained yet. Call /train first.")
 
-    ids = device_ids(user_id)
-    if not ids:
-        raise HTTPException(status_code=404, detail="This account has no paired devices.")
-    dev = in_clause(ids)
     now = db_now()
     # Features must match training: the latest 10-minute window (readings averaged, coughs counted).
     since = now - timedelta(minutes=10)
-
     recent = pd.read_sql(
-        text(f"SELECT AVG(pm25_level) AS pm25, AVG(temperature) AS temp, AVG(humidity) AS hum "
-             f"FROM telemetry_logs WHERE device_id IN ({dev}) AND recorded_at >= :since"),
-        engine, params={"since": since},
+        text("SELECT AVG(pm25_level) AS pm25, AVG(temperature) AS temp, AVG(humidity) AS hum "
+             "FROM telemetry_logs WHERE device_id = :d AND recorded_at >= :since"),
+        engine, params={"d": device_id, "since": since},
     )
 
     def count_coughs(start):
         return int(pd.read_sql(
-            text(f"SELECT COUNT(*) AS c FROM cough_events WHERE device_id IN ({dev}) AND recorded_at >= :since "
-                 f"AND (is_verified IS NULL OR is_verified = 1)"),
-            engine, params={"since": start},
+            text("SELECT COUNT(*) AS c FROM cough_events WHERE device_id = :d AND recorded_at >= :since "
+                 "AND (is_verified IS NULL OR is_verified = 1)"),
+            engine, params={"d": device_id, "since": start},
         )["c"][0])
 
     cough_count = count_coughs(since)
@@ -360,24 +405,27 @@ def predict_attack(user_id: int = Query(..., ge=1)):
     if recent[["pm25", "temp", "hum"]].isnull().any(axis=None):
         raise HTTPException(status_code=400, detail="No complete telemetry in the last 10 minutes.")
 
-    controller_24h = int(pd.read_sql(
-        text("SELECT COUNT(*) AS c FROM inhaler_logs WHERE user_id = :u AND type = 'controller' AND administered_at >= :since"),
-        engine, params={"u": user_id, "since": now - timedelta(hours=24)},
-    )["c"][0] > 0)
+    controller_24h = 0
+    if patient_id:
+        controller_24h = int(pd.read_sql(
+            text("SELECT COUNT(*) AS c FROM inhaler_logs WHERE patient_id = :p AND type = 'controller' "
+                 "AND administered_at >= :since"),
+            engine, params={"p": patient_id, "since": now - timedelta(hours=24)},
+        )["c"][0] > 0)
 
     pm25, temp, hum = (float(recent[c][0]) for c in ("pm25", "temp", "hum"))
     X_new = pd.DataFrame([[pm25, temp, hum, cough_count, controller_24h]], columns=FEATURES)
 
     # A model saved before the feature list changed cannot score the new inputs: fall back to
     # Stage 1 (or Learning mode) until the next training run replaces it.
-    if has_stage2 and getattr(joblib.load(model_path(user_id)), "n_features_in_", len(FEATURES)) != len(FEATURES):
+    if has_stage2 and getattr(joblib.load(model_path(pkey)), "n_features_in_", len(FEATURES)) != len(FEATURES):
         has_stage2 = False
         if not has_stage1:
             raise HTTPException(status_code=400, detail="Model is outdated; it will be retrained on the next run.")
-    room = joblib.load(baseline_path(user_id)) if has_stage1 else None
+    room = joblib.load(baseline_path(rkey)) if has_stage1 else None
 
     if has_stage2:
-        model = joblib.load(model_path(user_id))
+        model = joblib.load(model_path(pkey))
         probability = float(model.predict_proba(X_new)[0][list(model.classes_).index(1)])
         # Start from the room's learned limits, then lower each by up to 50% in proportion to that
         # feature's importance and the current risk (the risk model only tightens, DESIGN 5.4).
@@ -397,7 +445,7 @@ def predict_attack(user_id: int = Query(..., ge=1)):
 
     return {
         "model_stage": stage,
-        "model": (joblib.load(meta_path(user_id)) if has_stage2 and os.path.exists(meta_path(user_id)) else None),
+        "model": (joblib.load(meta_path(pkey)) if has_stage2 and os.path.exists(meta_path(pkey)) else None),
         "probability_of_attack": round(probability, 2),
         "suggested_thresholds": thresholds,
         # Top of the room's normal range per reading (mean + 2 std): a user limit below it will alarm often.

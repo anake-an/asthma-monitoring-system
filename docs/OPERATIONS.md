@@ -62,13 +62,16 @@ Never add `--seed` on the server: the seeder refuses to run in production (local
 
 ## 5. Reset the AI engine
 
-Models are stored per user in the `ai_models` volume (`/app/models/user_<id>_model.pkl` and `user_<id>_baseline.pkl`). Deleting them returns that account to Stage 1 (anomaly detection) until it is retrained.
+Models are stored in the `ai_models` volume, two levels (DESIGN §5): a **room model per device** (`/app/models/device_<id>_baseline.pkl`) and a **risk model per child** (`patient_<id>_model.pkl` + `_meta.pkl`). Deleting them returns that room or child to Learning mode / Stage 1 until it is retrained. Files named `user_<id>_*` are from before patients existed and are no longer read.
 
 ```bash
-# one account
-docker compose exec ai_engine sh -c 'rm -f /app/models/user_1_*'
-# every account
+# one room / one child
+docker compose exec ai_engine sh -c 'rm -f /app/models/device_1_*'
+docker compose exec ai_engine sh -c 'rm -f /app/models/patient_1_*'
+# everything
 docker compose exec ai_engine sh -c 'rm -f /app/models/*.pkl'
+# retrain now instead of waiting for the 4-hourly schedule
+docker compose exec backend php artisan ai:train
 ```
 No restart is needed: the engine checks for the files on every request.
 

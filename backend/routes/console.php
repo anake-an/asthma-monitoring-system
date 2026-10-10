@@ -1,22 +1,12 @@
 <?php
 
-use App\Models\User;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
 
-// Every 4 hours, retrain each account's model on that account's own data.
-Schedule::call(function () {
-    User::has('devices')->pluck('id')->each(function ($userId) {
-        try {
-            Http::timeout(30)->get(config('services.ai_engine.url') . '/train', ['user_id' => $userId]);
-        } catch (\Throwable $e) {
-            Log::warning('Scheduled AI training failed', ['user_id' => $userId, 'error' => $e->getMessage()]);
-        }
-    });
-})->everyFourHours()->name('ai-train-per-user')->withoutOverlapping();
+// Every 4 hours, retrain the AI: a room model per device, a risk model per child
+// (DESIGN_MULTI_PATIENT.md section 5). Run "php artisan ai:train" by hand after a reset.
+Schedule::command('ai:train')->everyFourHours()->withoutOverlapping();
 
-// Every 5 minutes, apply each account's AI-suggested thresholds and push changes to that
-// account's devices. Only accounts with "AI optimization" enabled; the AI may tighten a limit
-// below the user's own value (cap) but never raise it above, and never touches locked limits.
+// Every 5 minutes, apply each room's AI-suggested limits and push changes to that device. Only rooms
+// with "AI optimization" enabled; the AI may tighten a limit below the user's own value (cap) but
+// never raise it above, never touches locked limits, and changes each limit at most once a day.
 Schedule::command('ai:optimize')->everyFiveMinutes()->withoutOverlapping();
