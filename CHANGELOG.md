@@ -5,6 +5,14 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 ## [Unreleased]
 
 ### Added
+- **Edge AI module updates from the dashboard:** the Raspberry Pi Pico (cough detection, now called **Edge AI**) gets its own versions (`2.0.0 Build …`, history in `hardware/FIRMWARE_HISTORY.md`) and is updated through the ESP32.
+    - The ESP32 (firmware 3.3.0) downloads the build from the server, checks its SHA-256 and sends it over the UART link in numbered, CRC-checked frames.
+    - The Pico stores it and installs it on restart. A failed or interrupted update changes nothing.
+    - Rooms shows "Edge AI 2.0.0" with its own status and Update button, and the banner covers both parts.
+    - GitHub Actions also builds and publishes the Pico firmware when it changes.
+    - The link to the Pico runs at 115200 (was 9600).
+
+  **One-time:** update the ESP32 to 3.3.0, then flash the Pico over USB with Flash Size "2MB (Sketch: 1MB, FS: 1MB)".
 - **Night mode switch:** Smart Alerts has **Night Mode** per room (on by default). Off keeps the device's screen lit at night. It needs firmware 3.2.0, which owners get as an update.
 
 ## [6.2.0] - 2026-10-10

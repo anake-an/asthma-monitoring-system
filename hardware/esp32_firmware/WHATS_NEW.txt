@@ -1,4 +1,5 @@
 # What owners see under "What's new" when this firmware is offered as an update.
 # One short point per line, in plain words (no technical terms). Lines starting with # are ignored.
 # Update it together with FIRMWARE_VERSION in esp32_firmware.ino.
-Night mode can be switched off in Smart Alerts, so the screen stays lit at night
+Edge AI updates can now be installed from the dashboard
+Faster connection to the Edge AI module

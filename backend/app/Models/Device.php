@@ -65,7 +65,7 @@ class Device extends Model
             $error = 'No answer from the device within ' . self::OTA_TIMEOUT_MINUTES . ' minutes. It still runs its old firmware.';
         }
 
-        return ['status' => $status, 'target' => $this->ota_target_version, 'error' => $error];
+        return ['status' => $status, 'target' => $this->ota_target_version, 'part' => $this->ota_target ?? 'esp32', 'error' => $error];
     }
 
     /** pending (never connected), online, or offline (no message for OFFLINE_AFTER_SECONDS). */

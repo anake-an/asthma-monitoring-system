@@ -1,28 +1,36 @@
 "use client";
-// A room's firmware in Account Settings > Rooms: its version, one short status (up to date,
-// update available, updating, updated, didn't finish), and the "Update available" dialog,
-// written the way device makers word it. The server checks every update again.
+// One part of a room's device in Account Settings > Rooms: its firmware (ESP32) or its Edge AI
+// module (Pico). Its version, one short status (up to date, update available, updating, didn't
+// finish) and the "Update available" dialog, worded the way device makers word it. The server
+// checks every update again.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { authHeaders, firmwareUpdateFor, useRooms, type Device } from "@/lib/rooms";
+import { authHeaders, firmwareUpdateFor, useRooms, type Device, type FirmwarePart } from "@/lib/rooms";
 
-export default function FirmwareUpdate({ device, onToast }: {
+const PART_NAME: Record<FirmwarePart, string> = { esp32: "Firmware", pico: "Edge AI" };
+
+export default function FirmwareUpdate({ device, part = "esp32", onToast }: {
   device: Device;
+  part?: FirmwarePart;
   onToast: (message: string, type: "success" | "error") => void;
 }) {
-  const { latestFirmware, refresh } = useRooms();
+  const { latestFirmware, latestEdgeAi, refresh } = useRooms();
+  const latest = part === "pico" ? latestEdgeAi : latestFirmware;
+  const name = PART_NAME[part];
   const [open, setOpen] = useState(false);
   const [starting, setStarting] = useState(false);
-  const update = firmwareUpdateFor(device, latestFirmware);
-  const ota = device.ota ?? { status: null, target: null, error: null };
+  const update = firmwareUpdateFor(device, latest, part);
+  // The device's last update, if it was for this part.
+  const deviceOta = device.ota ?? { status: null, target: null, part: "esp32" as FirmwarePart, error: null };
+  const ota = (deviceOta.part ?? "esp32") === part ? deviceOta : { ...deviceOta, status: null };
 
   // "Ali Bedroom is up to date" once an update this page saw running has finished.
   const lastStatus = useRef(ota.status);
   useEffect(() => {
-    if (lastStatus.current === "updating" && ota.status === "updated") onToast(`${device.name} is up to date`, "success");
+    if (lastStatus.current === "updating" && ota.status === "updated") onToast(`${device.name}: ${name} is up to date`, "success");
     lastStatus.current = ota.status;
-  }, [ota.status, device.name, onToast]);
+  }, [ota.status, device.name, name, onToast]);
 
   const start = async () => {
     setStarting(true);
@@ -30,6 +38,7 @@ export default function FirmwareUpdate({ device, onToast }: {
       const res = await fetch(`/api/devices/${device.id}/firmware-update`, {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ target: part }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "The update could not start");
@@ -43,8 +52,10 @@ export default function FirmwareUpdate({ device, onToast }: {
   };
 
   const offline = device.status !== "online";
-  const notes = (latestFirmware?.notes ?? "").split("\n").filter(Boolean);
-  const version = device.firmware_version ?? "not known";
+  const notes = (latest?.notes ?? "").split("\n").filter(Boolean);
+  const current = part === "pico" ? device.edge_ai_version : device.firmware_version;
+  const currentLabel = part === "pico" ? device.edge_ai_label : device.firmware_label;
+  const version = current ?? (part === "pico" ? "" : "not known");
 
   let status: ReactNode;
   if (ota.status === "updating") {
@@ -58,16 +69,16 @@ export default function FirmwareUpdate({ device, onToast }: {
     status = <span className="text-amber-600 dark:text-amber-400">Update didn&apos;t finish</span>;
   } else if (update) {
     status = <span className="text-blue-500 dark:text-blue-400">● Update available</span>;
-  } else if (device.firmware_version) {
+  } else if (current) {
     status = <span className="text-emerald-600 dark:text-emerald-400">✓ Up to date</span>;
   } else {
-    status = <span>Waiting for the device</span>;
+    status = <span>{part === "pico" ? "Not connected" : "Waiting for the device"}</span>;
   }
 
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-        <span title={device.firmware_label ?? undefined}>Firmware {version}</span>
+        <span title={currentLabel ?? undefined}>{name}{version ? ` ${version}` : ""}</span>
         <span aria-hidden="true">·</span>
         {status}
         {update && (
@@ -85,7 +96,7 @@ export default function FirmwareUpdate({ device, onToast }: {
         <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Your device is still working normally.</p>
       )}
 
-      {open && latestFirmware && createPortal(
+      {open && latest && createPortal(
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-zinc-900/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby={`fw-title-${device.id}`}>
           <div className="bg-white dark:bg-[#12121e] border border-zinc-200 dark:border-white/10 w-full max-w-sm rounded-3xl shadow-2xl p-6">
             <div className="flex items-center gap-3 mb-4">
@@ -94,11 +105,11 @@ export default function FirmwareUpdate({ device, onToast }: {
               </div>
               <div>
                 <h3 id={`fw-title-${device.id}`} className="font-semibold text-lg text-zinc-900 dark:text-white leading-tight">Update available</h3>
-                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Firmware {latestFirmware.label}</p>
+                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">{name} {latest.label}</p>
               </div>
             </div>
 
-            <p className="text-sm text-zinc-700 dark:text-zinc-300 mb-4">New firmware for <span className="font-medium">{device.name}</span>.</p>
+            <p className="text-sm text-zinc-700 dark:text-zinc-300 mb-4">{part === "pico" ? "New Edge AI software for " : "New firmware for "}<span className="font-medium">{device.name}</span>.</p>
 
             {notes.length > 0 && (
               <div className="mb-4">

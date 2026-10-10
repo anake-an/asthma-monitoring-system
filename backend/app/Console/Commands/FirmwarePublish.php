@@ -20,7 +20,8 @@ class FirmwarePublish extends Command
     protected $signature = 'firmware:publish {file? : The .ino.bin, relative to the backend folder}
         {--notes= : What changed (shown to owners)}
         {--list : Show the published versions}
-        {--remove= : Unpublish a version and delete its file}';
+        {--remove= : Unpublish a version and delete its file}
+        {--target=esp32 : With --remove: esp32 (device firmware) or pico (Edge AI)}';
 
     protected $description = 'Publish an ESP32 firmware build for cloud updates (or list / remove them)';
 
@@ -28,14 +29,14 @@ class FirmwarePublish extends Command
     {
         if ($this->option('list')) {
             $rows = FirmwareRelease::all()->sort(fn ($a, $b) => version_compare($b->version, $a->version))
-                ->map(fn ($r) => [$r->version, number_format($r->size), $r->created_at?->toDateTimeString(), $r->notes]);
-            $this->table(['Version', 'Bytes', 'Published', 'Notes'], $rows->all());
+                ->map(fn ($r) => [FirmwareRelease::TARGETS[$r->target] ?? $r->target, FirmwareRelease::label($r->version, $r->build), number_format($r->size), $r->created_at?->toDateTimeString(), $r->notes]);
+            $this->table(['For', 'Version', 'Bytes', 'Published', 'Notes'], $rows->all());
 
             return self::SUCCESS;
         }
 
         if ($version = $this->option('remove')) {
-            $release = FirmwareRelease::where('version', $version)->first();
+            $release = FirmwareRelease::where('target', $this->option('target'))->where('version', $version)->first();
             if (!$release) {
                 $this->error("No published version {$version}.");
 
