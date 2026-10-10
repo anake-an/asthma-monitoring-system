@@ -15,6 +15,10 @@ Schedule::command('ai:optimize')->everyFiveMinutes()->withoutOverlapping();
 // only devices whose answer changed are sent anything (App\Console\Commands\DoseReminders).
 Schedule::command('devices:dose-reminders')->everyFiveMinutes()->withoutOverlapping();
 
+// Every 5 minutes, email and push a room's alert recipients when its device has been silent for
+// 30 minutes, once per outage (App\Console\Commands\DeviceOfflineAlerts).
+Schedule::command('devices:offline-alerts')->everyFiveMinutes()->withoutOverlapping();
+
 // Nightly, thin out old sensor readings: every reading for 7 days, then one 10-minute average per
 // device, deleted after a year (App\Console\Commands\TelemetryPrune).
 Schedule::command('telemetry:prune')->dailyAt('03:30')->withoutOverlapping();
