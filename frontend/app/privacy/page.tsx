@@ -91,7 +91,7 @@ export default function PrivacyPolicyPage() {
               Hak Akses & Padam (Right to Access & Erasure)
             </h2>
             <p>
-              You maintain full ownership of your medical data. At any time, you have the right to request a full export of your telemetry data or request the permanent deletion of your account and all associated AI training models (the "Right to be Forgotten").
+              You maintain full ownership of your medical data. At any time you can download a child&apos;s data yourself (Activity Log → Download: sensor readings, coughs, inhaler doses and alert limit changes, as spreadsheet files), and you can permanently delete a child or your whole account (Account Settings) together with their records (the &quot;Right to be Forgotten&quot;). Sensor readings older than 7 days are kept as 10-minute averages and deleted after a year.
             </p>
           </section>
 

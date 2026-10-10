@@ -42,6 +42,10 @@ abstract class TestCase extends BaseTestCase
     {
         parent::setUp();
 
+        // Deleting a room, child or account asks the AI engine to delete their model files; never
+        // reach a real engine from tests (a test can still fake more routes and assert on this one).
+        \Illuminate\Support\Facades\Http::fake(['*/models?*' => \Illuminate\Support\Facades\Http::response(['removed_files' => 0])]);
+
         // Never talk to a real broker from tests; record what would have been published.
         $test = $this;
         $this->app->instance(Mqtt::class, new class($test) extends Mqtt {

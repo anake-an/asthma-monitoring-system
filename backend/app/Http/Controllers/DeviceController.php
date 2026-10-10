@@ -6,6 +6,7 @@ use App\Models\AuditLog;
 use App\Models\Device;
 use App\Models\HardwareConfig;
 use App\Models\Patient;
+use App\Support\AiEngine;
 use App\Support\Mqtt;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -116,6 +117,7 @@ class DeviceController extends Controller
 
         AuditLog::record($request->user(), 'device.removed', $device->patient_id, $device->id, ['room' => $device->name, 'token' => $device->device_token]);
         $device->delete();
+        app(AiEngine::class)->forget([$device->id]); // its room model too
 
         return response()->json(['message' => 'Device removed successfully']);
     }
