@@ -93,7 +93,9 @@ export default function FirmwareUpdate({ device, part = "esp32", onToast }: {
         )}
       </div>
       {ota.status === "failed" && update && (
-        <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Your device is still working normally.</p>
+        <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+          {ota.error ? `${ota.error} ` : ""}Your device is still working normally.
+        </p>
       )}
 
       {open && latest && createPortal(
