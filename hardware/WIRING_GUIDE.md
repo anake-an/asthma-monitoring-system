@@ -11,20 +11,38 @@ Wiring for the dual-processor build: an **ESP32** (sensors, display, alarm, Wi-F
 
 | Part | Notes |
 |---|---|
+| 2 full-size breadboards, joined side by side | one wide board (section 6) |
 | Raspberry Pi Pico (Edge AI module) | arduino-pico core, Flash Size "2MB (Sketch: 1MB, FS: 1MB)" |
-| ESP32 dev board (ESP32-WROOM) | arduino-esp32 core 2.0.x or 3.x, Partition Scheme "Minimal SPIFFS (1.9MB APP with OTA)" |
+| ESP32 dev board (ESP32-**WROOM**-32) | arduino-esp32 core 2.0.x or 3.x, Partition Scheme "Minimal SPIFFS (1.9MB APP with OTA)". Not a WROVER board: there GPIO 16/17 belong to the PSRAM |
 | USB cable (data, not charge-only) + 5 V 1-2 A USB charger | powers the ESP32 (and the Pico through it) |
 | INMP441 I2S microphone | 3.3 V only |
 | DHT22, 3-pin module (or bare 4-pin sensor) | the module has its pull-up, a bare sensor needs 10 kΩ |
-| MQ-135 gas sensor module | 5 V heater |
-| Sharp GP2Y1010AU0F dust sensor, bare, 6-wire cable | + 150 Ω (220 Ω ∥ 470 Ω) and 220 µF |
+| MQ-135 gas sensor module | 5 V heater, about 150 mA |
+| Sharp GP2Y1010AU0F dust sensor, bare, 6-wire cable | + about 150 Ω (**240 Ω ∥ 470 Ω** = 159 Ω) and **220 µF 16 V** |
 | 16×2 LCD with PCF8574T I2C backpack | 5 V |
-| BSS138 4-channel logic level shifter | for the LCD's I2C lines |
-| Passive buzzer (2 terminals, `+` / `−`) | + 220 Ω series resistor |
-| Red and green LED | + 220 Ω each |
+| BSS138 4-channel logic level shifter | channels 1-2 for the LCD's I2C lines, 3-4 spare |
+| Passive buzzer (2 terminals, `+` / `−`) | + **240 Ω** series resistor |
+| Red and green LED | + **240 Ω** each |
 | MB-102 breadboard power module + 9 V DC adapter (barrel plug, 1 A) | 5 V rail for the sensors and LCD |
-| Resistors: 10 kΩ ×2-3, 20 kΩ ×2, 220 Ω ×4, 470 Ω ×1 | third 10 kΩ only for a bare DHT22 |
-| Capacitors: 1000 µF ×1, 220 µF ×1 (electrolytic) | long leg = `+`, striped side = `−` |
+| Resistors (from the kit) | see **Resistor and capacitor list** below |
+| Capacitors: 1000 µF 25 V ×1, 220 µF 16 V ×1, 220 µF 25 V ×2 (electrolytic) | long leg = `+`, striped side = `−` |
+
+### Resistor and capacitor list (what each one does)
+
+| Part | Used | Where | Why |
+|---|---|---|---|
+| 10 kΩ | 2 (3 with a bare DHT22) | top of the MQ-135 and Sharp dividers; DHT22 pull-up if bare | 5 V signals → 3.33 V for the ESP32 |
+| 20 kΩ | 2 | bottom of the MQ-135 and Sharp dividers (to GND) | same dividers (ratio 1.5, as the firmware expects) |
+| 240 Ω | 4 | Sharp LED (with the 470 Ω), green LED, red LED, buzzer | current limits |
+| 470 Ω | 1 | in parallel with a 240 Ω for the Sharp LED | 240 ∥ 470 = 159 Ω, close to the datasheet's 150 Ω |
+| 100 Ω | 0 (spare) | replaces the green LED's 240 Ω if that LED looks dim | some green LEDs need 3 V |
+| 22 Ω | 0 (spare) | optional, in series in the INMP441 SCK wire | only if the microphone crackles on long wires |
+| 1000 µF 25 V | 1 | MB-102 5 V rail ↔ GND, next to the module | bulk supply for the MQ-135 heater, LCD and Sharp |
+| 220 µF 16 V | 1 | Sharp pin 1 (V-LED) ↔ GND | supplies the LED's pulse (datasheet C1) |
+| 220 µF 25 V | 1 | ESP32 3V3 ↔ GND, next to the ESP32 | rides through Wi-Fi current peaks (no brown-out resets) |
+| 220 µF 25 V | 1 | Pico VSYS (pin 39) ↔ GND, next to the Pico | keeps Wi-Fi noise out of the microphone's supply |
+
+Left over: 10 kΩ ×7-8, 20 kΩ ×3, 240 Ω ×1, 470 Ω ×4, 100 Ω ×5, 22 Ω ×5.
 
 ---
 
@@ -48,7 +66,7 @@ Rules:
 2. **Never connect the MB-102's 5 V to the ESP32's 5 V/VIN pin or to the Pico's VSYS/VBUS.** The boards run from USB; two 5 V sources fighting each other can damage either. Only the grounds are shared. (The ESP32's own 5V/VIN pin may feed the Pico's VSYS: section 2.)
 3. **MB-102 jumper:** the rail that feeds the sensors must be set to **5 V**, not 3.3 V. Leave the other rail off or unused. Feed the MB-102 from its **DC barrel jack** (6.5-12 V, 9 V recommended) **or** its own USB socket, never both at once.
 4. **Why split:** the MB-102 uses linear regulators. At 9 V in, every 100 mA it supplies turns into ~0.4 W of heat. The sensors and LCD (~200 mA) are fine. Adding the ESP32's Wi-Fi peaks and the Pico would overheat it.
-5. **Bulk capacitor:** 1000 µF across the MB-102's 5 V rail and GND, close to the module (`+` to 5 V).
+5. **Capacitors:** 1000 µF across the MB-102's 5 V rail and GND, close to the module; 220 µF across the ESP32's 3V3 and GND; 220 µF across the Pico's VSYS (pin 39) and GND. `+` (long leg) always to the supply, `−` (stripe) to GND. A reversed electrolytic heats up and can burst.
 6. **Power-on order: DC adapter (MB-102) first, then the ESP32's USB** (or press the ESP32's EN/RST button after switching the MB-102 on). If the ESP32 boots while the LCD is unpowered, the LCD misses its initialisation and shows garbage characters until the ESP32 is reset. The Pico starts with the ESP32.
 7. **Never feed 5 V into an ESP32 or Pico pin.** The two 5 V analog sensors go through 10 kΩ / 20 kΩ dividers (5 V → 3.33 V), and the LCD's I2C lines go through the level shifter.
 
@@ -109,6 +127,7 @@ Power the Pico from the ESP32 as below (the reference build), or from its own US
 |---|---|
 | **5V** (some boards: **VIN**) | **VSYS** (pin 39: right-hand side, second pin from the USB end) |
 | GND | GND (already connected for the UART) |
+| | **220 µF 25 V** from VSYS (pin 39, `+`) to GND (pin 38), right next to the Pico |
 
 The Pico needs about 25 mA (about 27 mA with the microphone), which the ESP32's USB supply easily gives. Rules:
 - **VSYS only.** Not VBUS (pin 40), and never the Pico's **3V3** (pin 36): that pin is an output.
@@ -156,14 +175,14 @@ Pin 1 is marked on the sensor's connector. Cable colours vary between suppliers,
 
 | Sharp pin | Connect to |
 |---|---|
-| 1 V-LED | **~150 Ω** to the MB-102 **5 V** rail (a **220 Ω and a 470 Ω in parallel** = 149.9 Ω), and a **220 µF** capacitor from pin 1 to GND (`+` on pin 1) |
+| 1 V-LED | **~150 Ω** to the MB-102 **5 V** rail (a **240 Ω and a 470 Ω in parallel** = 159 Ω), and the **220 µF 16 V** capacitor from pin 1 to GND (`+` on pin 1) |
 | 2 LED-GND | GND |
 | 3 LED | ESP32 **GPIO 5** (the firmware pulses it, LOW = LED on) |
 | 4 S-GND | GND |
 | 5 Vo | **10 kΩ** ➔ ESP32 **GPIO 35**, and **20 kΩ** from GPIO 35 to GND |
 | 6 Vcc | MB-102 **5 V** rail |
 
-The 150 Ω and 220 µF are required by the datasheet: the capacitor supplies the LED's short current pulse. The firmware multiplies the reading by 1.5 to undo the divider (`DUST_DIVIDER_RATIO`). The GP2Y1014AU0F has the same pinout and wiring.
+The datasheet's circuit uses 150 Ω and 220 µF: the capacitor supplies the LED's short current pulse (0.32 ms every 10 ms). 159 Ω gives about 6 % less LED current, which the firmware's clean-air calibration absorbs. The firmware multiplies the reading by 1.5 to undo the divider (`DUST_DIVIDER_RATIO`). The GP2Y1014AU0F has the same pinout and wiring.
 
 **Wire colours are not standardised** between cable suppliers. Identify pins by position (pin 6, Vcc, is the red wire at one end of the connector). **Calibration:** each sensor has its own clean-air output (0-1.5 V). The firmware learns it as the lowest reading since power-on and converts the rise above it with the datasheet's typical sensitivity (0.5 V per 100 µg/m³). Power the device up in clean air. The Serial Monitor shows the learned baseline. The value is an estimated dust density, not a size-selective PM2.5 measurement.
 
@@ -187,19 +206,19 @@ The firmware uses I2C address `0x27`. If the screen lights up but stays blank, t
 ### Passive buzzer
 | Buzzer | Connect to |
 |---|---|
-| `+` | **220 Ω** ➔ ESP32 **GPIO 18** |
+| `+` | **240 Ω** ➔ ESP32 **GPIO 18** |
 | `−` | GND |
 
-The firmware drives it with a 2.7 kHz `tone()`. The 220 Ω keeps the pin current around 14 mA even if the buzzer is a low-resistance magnetic type. Never connect it to the pin without the resistor. If the buzzer board has more than two pins, pins with the same mark are connected together.
+The firmware drives it with a 2.7 kHz `tone()`. The 240 Ω keeps the pin current around 13 mA even if the buzzer is a low-resistance magnetic type (about 16 Ω). Never connect it to the pin without the resistor. If the buzzer board has more than two pins, pins with the same mark are connected together. A **3-pin buzzer module** (`VCC`, `I/O`, `GND`, with its own transistor) goes VCC → ESP32 3V3, I/O → GPIO 18 directly, GND → GND.
 
 ### Status LEDs
 | From | Through | To |
 |---|---|---|
-| ESP32 **GPIO 19** | 220 Ω | **green** LED anode (long leg) |
-| ESP32 **GPIO 23** | 220 Ω | **red** LED anode (long leg) |
+| ESP32 **GPIO 19** | 240 Ω | **green** LED anode (long leg) |
+| ESP32 **GPIO 23** | 240 Ω | **red** LED anode (long leg) |
 | both LED cathodes (short leg) | | GND |
 
-Green = connected and normal. Red = alarm, or not connected to the broker.
+Green = connected and normal. Red = alarm, or not connected to the broker. With 240 Ω each LED gets about 5 mA, bright enough for a status light. If the green one is dim (some green LEDs need about 3 V), use a 100 Ω for it instead.
 
 ---
 
@@ -233,3 +252,50 @@ Test each part on its own before adding the next. It makes faults easy to find.
 5. Unplug the Pico's USB, then connect the **Pico ↔ ESP32 UART** (pins 1, 2, 3) and the **VSYS power wire** (ESP32 5V → Pico pin 39). In the dashboard, Rooms shows "Edge AI 3.0.x". Cough near the microphone (a clap or talking should not count): the Pico's LED blinks, the LCD shows "Cough heard" and chirps, and the cough appears in the dashboard's cough history.
 
 After this, both chips are updated from the dashboard (Account Settings → Rooms): no more USB flashing.
+
+---
+
+## 6. Breadboard layout (two full-size boards joined)
+
+Lay the two boards one above the other and snap them together along their long edges. Board A (top) carries the 5 V side and the Pico; board B (bottom) carries the 3.3 V side. The **ESP32 sits across the join**, one pin row in each board, so both rows keep free holes beside them. (On a single board an ESP32 covers almost every hole.)
+
+```
+  BOARD A  ┌────────────────────────────────────────────────────────────────────────┐
+  outer    │ ═══ +5V ═══════════════ GND ═══  ◄ MB-102 output 1, jumper on 5 V        │
+  rail     │┌──────┐ 1000µF                                    Sharp: 159Ω + 220µF 16V│
+           ││MB-102│        INMP441   [ Pico across the channel ] 220µF on VSYS       │
+           │└──────┘ DC in                                      5 V wires out to:   │
+  inner    │ ─ ─ ─ unused (MB-102 output 2 = OFF) ─ ─ ─ ─          MQ-135, Sharp, LCD │
+  rail     └──────────────────────────┬──────────────┬──────────────────────────────┘
+                                      │   ESP32      │  ◄ across the join, USB outward
+  BOARD B  ┌──────────────────────────┴──────────────┴──────────────────────────────┐
+  inner    │ ─ ─ ─ unused ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │
+  rail     │  220µF on 3V3   dividers 10k/20k ×2   level shifter   240Ω+LEDs  240Ω+buzzer│
+  outer    │ ═══ +3V3 ═════════════ GND ═══  ◄ wires from the ESP32's 3V3 and GND      │
+  rail     └────────────────────────────────────────────────────────────────────────┘
+  Off the board, on wires: LCD (4), MQ-135 (3), DHT22 (3), Sharp sensor (6-wire cable)
+```
+
+| Rail | Feeds |
+|---|---|
+| Board A outer **+5V** (MB-102 output 1 on 5 V) | MQ-135 VCC, Sharp pin 6 and its 159 Ω, LCD VCC, level shifter HV |
+| Board B outer **+3V3** (ESP32 3V3 pin) | DHT22 VCC, level shifter LV |
+| **GND** of both outer rails | everything: join the two GND rails with a jumper wire (and to the ESP32 GND) |
+| The two inner rails, at the join | **nothing**: set the MB-102's second output jumper to **OFF**. If the ESP32 needs the room, slide those rail strips off |
+
+Not on any rail: the Pico takes its power from the ESP32's **5V** pin (to VSYS), and the INMP441 takes 3.3 V from the Pico's **3V3 (OUT)** (pin 36).
+
+Checks before powering on:
+- **ESP32 pins only in the terminal holes**, never in a rail hole: a rail would connect several of its pins together.
+- **Split rails:** many full-size boards break each rail in the middle (a gap in the red/blue line). Bridge the gap with a short jumper, or the far half has no power.
+- **Never join a +5V rail and a +3V3 rail.** Only the GND rails are joined.
+- **Placement:** keep the **DHT22 at least 10 cm away** from the MQ-135 (its heater runs hot) and from the ESP32, or it reads the board's heat instead of the room. Mount the **Sharp sensor upright** with its hole facing the room and out of direct light. Keep the **microphone away from the buzzer**.
+
+### Power budget
+
+| Supply | Load | Current |
+|---|---|---|
+| MB-102 5 V (from the 9 V adapter) | MQ-135 heater ~150 mA, LCD with backlight ~25 mA, Sharp ~11 mA (20 mA max), level shifter ~1 mA | **~190 mA**, within the MB-102 (it warms by about 0.8 W at 9 V in) |
+| USB 5 V → ESP32 | ESP32 80-120 mA (Wi-Fi peaks ~400 mA), Pico + INMP441 ~27 mA, DHT22 ~1.5 mA, LEDs and buzzer ~25 mA | **~250 mA average, ~500 mA peaks**: use a 5 V 1-2 A charger |
+| ESP32 3V3 regulator | ESP32, DHT22, level shifter LV | well under its 1 A |
+| Pico 3V3 (OUT) | INMP441 1.4 mA | well under its 300 mA |
