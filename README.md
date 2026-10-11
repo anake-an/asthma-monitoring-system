@@ -2,7 +2,7 @@
 
 ![Version](https://img.shields.io/badge/version-v6.2.0-blue)
 ![Firmware](https://img.shields.io/badge/firmware-3.3.0-informational)
-![Edge AI](https://img.shields.io/badge/Edge%20AI-2.0.1-informational)
+![Edge AI](https://img.shields.io/badge/Edge%20AI-3.0.0-informational)
 ![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)
 ![Laravel](https://img.shields.io/badge/Laravel-12-red.svg)
 ![Python](https://img.shields.io/badge/Python-3.10-yellow.svg)
@@ -42,7 +42,7 @@ A responsive dashboard in light and dark mode: live readings per room, the AI pa
 | Part | Chip | What it does |
 |---|---|---|
 | **Main unit** | `ESP32` | Reads the DHT22 (temperature, humidity), the MQ-135 (gas, estimated CO₂-equivalent ppm) and the Sharp dust sensor every 3 s, smoothed over about 12 s. Sounds a passive buzzer and lights a red LED when a reading crosses its limit, even without the internet. Connects to the cloud over Wi-Fi (set up from a phone through the **RespiroSync-Setup** hotspot). |
-| **Edge AI module** | `Raspberry Pi Pico` + `INMP441` | Listens through an I2S microphone and detects cough-like bursts on the device itself, with a 0-1 detection strength. Only events leave the device, never audio. |
+| **Edge AI module** | `Raspberry Pi Pico` + `INMP441` | Listens through an I2S microphone and recognises coughs on the device itself with an Edge Impulse neural network, with a 0-1 cough score. Only events leave the device, never audio. |
 | **Display** | `16×2 LCD` | Every line centred. Start-up steps (Wi-Fi, clock, cloud), then pages every 5 s: **Air quality**, **Room climate**, the clock, and **Daily dose?** when a dose is overdue. Alerts and coughs take over the screen. **Night mode** turns the backlight off from 9 pm to 7 am (switchable per room). |
 | **Power** | DC adapter + USB | A 9 V adapter on the breadboard supply feeds the sensors and LCD. USB feeds the ESP32, which also powers the Pico. |
 
@@ -54,7 +54,7 @@ A responsive dashboard in light and dark mode: live readings per room, the AI pa
 
 | Feature | Technology | Description |
 |---|---|---|
-| **Cough detection at the edge** | `Raspberry Pi Pico` | The Edge AI module measures each 16 ms of sound and reports bursts that last at least 32 ms, with a detection strength. Electrical noise is filtered out (data line pulled down, 3 s settle at start-up). |
+| **Cough detection at the edge** | `Raspberry Pi Pico` + `Edge Impulse` | A neural network trained in Edge Impulse (Audio MFE + 1D CNN, int8) tells a cough from talking, TV, laughing, throat clearing and traffic: 93 % on validation, 86 % on unseen test sounds. One core records without a break, the other classifies the last second every 0.5 s (260 ms of work), and a cough counts when two windows in a row agree. Details in [`docs/EDGE_IMPULSE.md`](docs/EDGE_IMPULSE.md). |
 | **Environmental telemetry** | `ESP32` | Dust, gas, temperature and humidity every 3 s. The gas and dust sensors calibrate themselves against the cleanest air they see, and the gas sensor warms up for 3 minutes before it is read. |
 | **Secure IoT transport** | `Mosquitto + Cloudflare Tunnel` | MQTT over WSS. No anonymous access. Each device can only use the topics of its own token (broker ACL). |
 | **AI, two levels** | `Python / scikit-learn` | A **room model per device** learns what is normal for that room and flags unusual readings (Stage 1). A **risk model per child**, once about two flare-ups are recorded, learns what comes before a rescue dose or a cough cluster in the next hour and shows a percentage (Stage 2: logistic regression, then Random Forest). It uses window averages, how fast dust and humidity are rising, night-time, coughs and the daily dose, and it is evaluated by recall and precision on later data. Coughs reviewed as false alarms are left out of training. |
@@ -96,7 +96,7 @@ The AI engine keeps a room model per device and a risk model per child. The back
 | Topic | Direction | Payload |
 |---|---|---|
 | `respirosync/devices/<token>/telemetry` | device → cloud | `{"pm25_level":12.3,"temperature":29.1,"humidity":70,"mq135_level":410}` (`null` for a failed or warming sensor) |
-| `respirosync/devices/<token>/events` | device → cloud | `{"event":"cough","level":2,"confidence":0.42}`, `hello` (firmware and Edge AI versions), `time_request`, `ota` (update result) |
+| `respirosync/devices/<token>/events` | device → cloud | `{"event":"cough","level":2,"confidence":0.87}`, `hello` (firmware and Edge AI versions), `time_request`, `ota` (update result) |
 | `respirosync/devices/<token>/config` | cloud → device (retained) | the room's limits, `is_buzzer_muted`, `night_mode`, `dose_due` |
 | `respirosync/devices/<token>/commands` | cloud → device | `factory_reset`, `buzzer_on`, `buzzer_off`, `set_time`, `ota` (for the ESP32 or the Edge AI module) |
 
@@ -115,6 +115,7 @@ asthma-monitoring-system/
 ├── hardware/
 │   ├── esp32_firmware/     # main unit firmware (WHATS_NEW.txt for owners)
 │   ├── pico_cough_ai/      # Edge AI module firmware (WHATS_NEW.txt for owners)
+│   ├── libraries/          # the Edge Impulse cough model (exported Arduino library)
 │   ├── FIRMWARE_HISTORY.md # versions of both chips
 │   └── WIRING_GUIDE.md     # pin-by-pin wiring and power
 ├── mosquitto/config/       # mosquitto.conf + acl (passwd is created on the server, never committed)
@@ -132,7 +133,8 @@ asthma-monitoring-system/
 | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Health checks, backups, resets, scheduled tasks, testing alerts, publishing firmware, running the tests |
 | [`docs/DEMO.md`](docs/DEMO.md) | A 12-minute demo script, with commands to trigger the slow alerts on the spot |
 | [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) | Architecture, alert, AI, device and LCD diagrams (Mermaid) for the report and slides |
-| [`hardware/README.md`](hardware/README.md) | Firmware setup, cloud updates for both chips, and the Edge Impulse roadmap |
+| [`docs/EDGE_IMPULSE.md`](docs/EDGE_IMPULSE.md) | The cough model: training data, settings, results, and how to update it |
+| [`hardware/README.md`](hardware/README.md) | Firmware setup and cloud updates for both chips |
 | [`hardware/WIRING_GUIDE.md`](hardware/WIRING_GUIDE.md) | Pin-by-pin wiring, power and bring-up order |
 | [`hardware/FIRMWARE_HISTORY.md`](hardware/FIRMWARE_HISTORY.md) | Every firmware version of the main unit and the Edge AI module |
 
@@ -192,7 +194,7 @@ The dashboard is served on `127.0.0.1:3005` and published through the Cloudflare
 ## ⚡ Hardware Setup
 
 1. Wire everything as described in [`hardware/WIRING_GUIDE.md`](hardware/WIRING_GUIDE.md): the 9 V DC adapter for the sensors and LCD, USB for the ESP32 (which powers the Pico), and the voltage dividers on the two 5 V analog sensors.
-2. Flash `hardware/pico_cough_ai/pico_cough_ai.ino` to the Pico with the **arduino-pico** core and **Flash Size "2MB (Sketch: 1MB, FS: 1MB)"**.
+2. Copy `hardware/libraries/RespiroSync_Cough_inferencing` (the cough model) into `Documents/Arduino/libraries`, then flash `hardware/pico_cough_ai/pico_cough_ai.ino` to the Pico with the **arduino-pico** core and **Flash Size "2MB (Sketch: 1MB, FS: 1MB)"**.
 3. Copy `hardware/esp32_firmware/secrets.example.h` to `secrets.h`, fill in the broker URL and device password, and flash `esp32_firmware.ino` with **Partition Scheme "Minimal SPIFFS (1.9MB APP with OTA)"**.
 4. In the dashboard, open *Account Settings → Children & rooms*, choose the child the room is for and click **Pair New ESP32 Device**. Connect your phone to the **RespiroSync-Setup** Wi-Fi hotspot and enter the Wi-Fi details and the token. Then give the room a name (for example "Bedroom").
 5. From then on, both chips are updated from the dashboard: *Account Settings → Rooms → Update*.
@@ -205,7 +207,7 @@ The dashboard is served on `127.0.0.1:3005` and published through the Cloudflare
 
 ## 🗺️ Roadmap
 
-- **Edge Impulse cough classifier:** a trained model on the Edge AI module that tells a cough from a door slam, a clap or a shout. It will ship to devices as an Edge AI update from the dashboard, with no change to the hardware.
+- **Cough model trained on home recordings:** retrain the Edge Impulse model with coughs and everyday sounds (Malay and English talk, TV, children playing) recorded through the device's own INMP441, and ship it as an Edge AI update from the dashboard.
 
 ---
 
@@ -218,4 +220,4 @@ This project is licensed under the **GNU General Public License v3.0 (GPLv3)**. 
 
 Security issues: please report them privately, as described in [`SECURITY.md`](SECURITY.md). Release history: [`CHANGELOG.md`](CHANGELOG.md).
 
-**MEDICAL DISCLAIMER:** RespiroSync is a student prototype. It is **not** a registered medical device (in Malaysia, medical devices are regulated by the Medical Device Authority under the Medical Device Act 2012, Act 737), and it has not been clinically validated. Its cough detection reacts to loud cough-like sounds, and its sensor readings and AI outputs can be wrong. It must **never** replace professional medical advice, diagnosis, treatment or emergency services.
+**MEDICAL DISCLAIMER:** RespiroSync is a student prototype. It is **not** a registered medical device (in Malaysia, medical devices are regulated by the Medical Device Authority under the Medical Device Act 2012, Act 737), and it has not been clinically validated. Its cough model can miss coughs or mistake other sounds for one, and its sensor readings and AI outputs can be wrong. It must **never** replace professional medical advice, diagnosis, treatment or emergency services.

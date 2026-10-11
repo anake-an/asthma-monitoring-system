@@ -115,7 +115,7 @@ The Pico needs about 25 mA (about 27 mA with the microphone), which the ESP32's 
 - **Never both supplies at once.** Pull the VSYS wire off before plugging the Pico's own USB into the PC (to flash it or open its Serial Monitor), so two 5 V supplies never meet. Optional: a 1N5817/1N5819 Schottky diode in the VSYS wire (stripe towards the Pico) makes it safe to keep both connected.
 - **A good supply for the ESP32:** a PC port, or a 5 V 1-2 A charger. A weak one makes the ESP32 restart when Wi-Fi peaks.
 
-When the INMP441 arrives, add it as in the table above (GP13, GP14, GP15, 3V3 (OUT) on pin 36, GND). No change to the firmware is needed.
+Wire the INMP441 as in the table above (GP13, GP14, GP15, 3V3 (OUT) on pin 36, GND). No change to the firmware is needed.
 
 ---
 
@@ -226,10 +226,10 @@ Green = connected and normal. Red = alarm, or not connected to the broker.
 
 Test each part on its own before adding the next. It makes faults easy to find.
 
-1. **Pico + INMP441** on the Pico's own USB. Flash `pico_cough_ai.ino` with **Flash Size "2MB (Sketch: 1MB, FS: 1MB)"** (and `DEBUG_LEVELS 1` to calibrate): open the Serial Plotter, clap or cough, and set `RMS_THRESHOLD` above your room's background level. Then set `DEBUG_LEVELS` back to 0 and flash again.
+1. **Pico + INMP441** on the Pico's own USB. Copy `hardware/libraries/RespiroSync_Cough_inferencing` into `Documents/Arduino/libraries`, then flash `pico_cough_ai.ino` with **Flash Size "2MB (Sketch: 1MB, FS: 1MB)"**. To check the microphone, set `DEBUG_SCORES 1`, open the Serial Monitor (115200) and cough: the cough score rises towards 1, and stays low for talking. Then set `DEBUG_SCORES` back to 0 and flash again.
 2. **ESP32 alone** on USB. Fill `secrets.h`, choose **Partition Scheme "Minimal SPIFFS (1.9MB APP with OTA)"**, flash with *Erase All Flash Before Sketch Upload* enabled (the first time only: it also erases the token and Wi-Fi), pair it from the dashboard, and check that it appears online.
 3. Plug in the **DC adapter** (MB-102 on 5 V) and add the **DHT22**, **LEDs**, **buzzer** and **LCD** (with the level shifter). Reset the ESP32 after the MB-102 is on. Temperature and humidity should appear on the LCD and the dashboard.
 4. Add the **MQ-135** and the **Sharp sensor**. Readings should appear within a few seconds. Gas shows a 3-minute warm-up countdown, and the MQ-135 drifts during its first day.
-5. Unplug the Pico's USB, then connect the **Pico ↔ ESP32 UART** (pins 1, 2, 3) and the **VSYS power wire** (ESP32 5V → Pico pin 39). In the dashboard, Rooms shows "Edge AI 2.0.x". Cough (or clap) near the microphone: the Pico's LED blinks, the LCD shows "Cough heard" and chirps, and the cough appears in the dashboard's cough history.
+5. Unplug the Pico's USB, then connect the **Pico ↔ ESP32 UART** (pins 1, 2, 3) and the **VSYS power wire** (ESP32 5V → Pico pin 39). In the dashboard, Rooms shows "Edge AI 3.0.x". Cough near the microphone (a clap or talking should not count): the Pico's LED blinks, the LCD shows "Cough heard" and chirps, and the cough appears in the dashboard's cough history.
 
 After this, both chips are updated from the dashboard (Account Settings → Rooms): no more USB flashing.

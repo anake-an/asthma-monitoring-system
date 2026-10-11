@@ -5,6 +5,13 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 ## [Unreleased]
 
 ### Added
+- **Edge Impulse cough model (Edge AI 3.0.0):** the Pico now runs a neural network (Audio MFE + 1D CNN, int8) that tells a cough apart from talking, TV, laughing, throat clearing and traffic, instead of reacting to any loud sound.
+    - Trained on about 1 h 18 min of public recordings: 93 % on validation, 86 % on unseen test sounds. Data, settings and results in `docs/EDGE_IMPULSE.md`.
+    - Core 1 records without a break, core 0 classifies the last second every 0.5 s (260 ms of work). A cough counts when two windows in a row agree (score 0.6 or more).
+    - The report's second value is now the model's cough score; the dashboard calls it **Score**, the alert email **Cough score**. The alert rule is unchanged (2 coughs with a score of 0.8 or more, or 3 in 10 minutes).
+    - The model is kept in `hardware/libraries/` (with a one-line fix for the GCC 16 of arduino-pico 6.x); CI builds and publishes it like any Edge AI update. The data collector records with the same conversion as the firmware.
+
+  Installs from the dashboard as an Edge AI update (no USB needed).
 - **Edge AI module updates from the dashboard:** the Raspberry Pi Pico (cough detection, now called **Edge AI**) gets its own versions (`2.0.0 Build …`, history in `hardware/FIRMWARE_HISTORY.md`) and is updated through the ESP32.
     - The ESP32 (firmware 3.3.0) downloads the build from the server, checks its SHA-256 and sends it over the UART link in numbered, CRC-checked frames.
     - The Pico stores it and installs it on restart. A failed or interrupted update changes nothing.

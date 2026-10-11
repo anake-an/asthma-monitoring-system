@@ -30,8 +30,18 @@ void setup() {
   }
 }
 
+// Same conversion as pico_cough_ai.ino (keep MIC_SHIFT equal), so the recordings sound exactly
+// like what the cough model hears on the device: DC offset removed, 24-bit to 16-bit with 8x gain.
+const int MIC_SHIFT = 13;
+
 void loop() {
+  static int32_t dc = 0;
   int32_t left = 0, right = 0;
   i2s.read32(&left, &right);         // mic data is on the left slot (L/R = GND)
-  Serial.println((int16_t)(left >> 16));  // top 16 bits
+  int32_t s = left >> 8;             // 24-bit signed sample
+  dc += (s - dc) >> 10;
+  s = (s - dc) >> (MIC_SHIFT - 8);
+  if (s > 32767) s = 32767;
+  if (s < -32768) s = -32768;
+  Serial.println(s);
 }
