@@ -32,7 +32,7 @@ class DeviceMessageHandler
     /** A strong detection needs at least this many coughs in the window to alert. */
     public const STRONG_CLUSTER_COUNT = 2;
 
-    /** Pico detection-strength value considered "strong" (heuristic, not a probability). */
+    /** Edge AI cough score (averaged over two windows) considered "strong". */
     public const STRONG_DETECTION = 0.80;
 
     public function handle(string $topic, string $message): void
@@ -179,7 +179,7 @@ class DeviceMessageHandler
             ->exists();
 
         // Alert rule: a cluster of coughs, or a strong detection that is not isolated.
-        // A single loud sound (door slam, clap) is logged but never alerts on its own.
+        // A single cough (or one misheard sound) is logged but never alerts on its own.
         $isAlert = $recentCoughs >= self::CLUSTER_COUNT
             || ($confidence !== null && $confidence >= self::STRONG_DETECTION && $recentCoughs >= self::STRONG_CLUSTER_COUNT);
 

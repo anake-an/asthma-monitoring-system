@@ -22,7 +22,7 @@ class CoughAlertMail extends Mailable
             ->with([
                 'clusterCount' => $this->clusterCount,
                 'windowMinutes' => \App\Services\DeviceMessageHandler::WINDOW_MINUTES,
-                // Pico detection strength (heuristic 0..1). Null means the device did not report one.
+                // Edge AI cough score 0..1. Null means the device did not report one.
                 'strength' => $this->event->confidence,
                 // The room and its child, like the push ("Bedroom (Aiman)").
                 'where' => self::where($this->event->device),

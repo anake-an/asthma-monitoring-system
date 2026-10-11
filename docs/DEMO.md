@@ -45,11 +45,11 @@ NAS commands run from the project folder (`/volume2/docker/iot-project`) and nee
 
 ## 4. A cough (2 min)
 
-1. Cough (or clap) clearly near the microphone, **three times** within a minute.
+1. Cough clearly near the microphone, **three times** within a minute.
 2. Each time: the Pico's LED blinks, the LCD shows "Cough heard" with a pulse, and the ESP32 chirps.
-3. The dashboard's cough history shows three events. The third meets the rule (**3 coughs in 10 minutes**), so it is an **Alert**: email and push. Two strong ones (a very loud sound) are enough.
+3. The dashboard's cough history shows three events. The third meets the rule (**3 coughs in 10 minutes**), so it is an **Alert**: email and push. Two strong ones (a cough score of 80 % or more) are enough.
 4. Review them: **Inhaler**, **Real cough** or **False alarm**. False alarms are left out of the report and the AI's training.
-5. Explain that the microphone today detects loud bursts, not coughs specifically (Phase 2: a trained model).
+5. Show that talking or a clap does not count: the Edge AI module runs a neural network trained to tell coughs from other sounds (see `docs/EDGE_IMPULSE.md`).
 
 ## 5. Device offline (1 min)
 

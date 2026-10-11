@@ -109,7 +109,7 @@ export const whenText = (iso: string) =>
 
 // The texts of the summary box, shared by the page and the PDF.
 export const observationText = (data: ReportData) =>
-  `During this reporting period, the device recorded ${data.total_events} cough-like sounds (a loudness detector, not a diagnosis), of which ${data.high_severity_events} met the alert rule (3 within 10 minutes, or 2 with a strong detection).`
+  `During this reporting period, the device recorded ${data.total_events} coughs (recognised by the device's Edge AI model, not a diagnosis), of which ${data.high_severity_events} met the alert rule (3 within 10 minutes, or 2 the model was very sure of).`
   + (data.false_alarms ? ` ${data.false_alarms} other ${data.false_alarms === 1 ? "sound was" : "sounds were"} marked as false alarms and are not counted.` : "");
 // Facts only: the app does not judge asthma control or suggest treatment changes.
 export const medicationText = (data: ReportData) =>

@@ -38,7 +38,8 @@ The module that listens for coughs. Same version style (`2.0.0 Build 261011`): `
 
 | Edge AI | Build | What changed |
 |---|---|---|
-| 2.0.1 | set by CI | Repeats its version to the ESP32 every 10 minutes |
+| **3.0.0** | 261011 | **Edge Impulse cough model**: a neural network tells coughs from other sounds (was a loudness check); the report carries a cough score. Model and results in `docs/EDGE_IMPULSE.md` |
+| 2.0.1 | 261010.5 | Repeats its version to the ESP32 every 10 minutes |
 | **2.0.0** | 261010.4 | Updates from the dashboard (through the ESP32); faster link (115200); reports its version. **One USB flash needed**, with Flash Size "2MB (Sketch: 1MB, FS: 1MB)" |
 | 1.3.0 | 261010.3 | Test mode removed |
 | 1.2.1 | 261010.2 | No false coughs from electrical noise (data line pulled down, 3 s settle, 32 ms minimum) |
@@ -46,4 +47,4 @@ The module that listens for coughs. Same version style (`2.0.0 Build 261011`): `
 | 1.1.0 | 261009 | Detection strength (0-1) and the correct microphone pins |
 | 1.0.0 | 261008 | First version: reports loud bursts to the ESP32 |
 
-The builds before 2.0.0 were numbered afterwards from the Git history of `hardware/pico_cough_ai/`. An Edge Impulse model, built into this firmware, will be a later Edge AI version.
+The builds before 2.0.0 were numbered afterwards from the Git history of `hardware/pico_cough_ai/`.

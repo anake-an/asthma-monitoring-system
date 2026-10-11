@@ -4,12 +4,15 @@
  * Board:    Raspberry Pi Pico, Tools > Flash Size > "2MB (Sketch: 1MB, FS: 1MB)" (the FS half
  *           receives cloud updates; flash this once over USB with that setting)
  * Hardware: Raspberry Pi Pico (or Pico W) + INMP441 I2S microphone
+ * Library:  RespiroSync_Cough_inferencing (the Edge Impulse export, in hardware/libraries/; for the
+ *           Arduino IDE copy that folder into Documents/Arduino/libraries)
  *
- * WHAT THIS IS (and is not):
- *   A sound-level heuristic. It flags short, loud bursts (at least 32 ms, ignoring the first
- *   3 s after power-on) and reports a
- *   "detection strength" between 0 and 1. It does NOT tell a cough apart from a
- *   clap, a door slam or a shout. See README "Phase 2" for a trained classifier.
+ * WHAT THIS DOES:
+ *   An Edge Impulse model (Audio MFE + small 1D CNN, int8) tells a cough apart from other sounds
+ *   (talking, TV, laughing, throat clearing, traffic). Core 1 records the microphone non-stop;
+ *   core 0 classifies the last second of sound every half second (about 260 ms of work). A cough
+ *   is reported when the cough score, averaged over two windows in a row, reaches 0.6; the first
+ *   3 s after power-on are ignored. Training data and results: docs/EDGE_IMPULSE.md.
  *   The Pico's LED blinks once for every detection sent to the ESP32.
  *
  * Cloud updates: the ESP32 downloads a new build from the server and sends it over the UART
@@ -28,7 +31,7 @@
  *   GND            -> ESP32 GND (shared ground is required)
  *
  * UART link (115200 baud), one line per message:
- *   Pico -> ESP32: COUGH:<level 1-4>,<strength 0.00-1.00>
+ *   Pico -> ESP32: COUGH:<level 1-4 (loudness)>,<cough score 0.00-1.00>
  *                  HELLO:<version> build <build>      (at start-up, and when asked with VER?)
  *   ESP32 -> Pico: VER?
  *
@@ -44,9 +47,10 @@
 #include <LittleFS.h>
 #include <Updater.h>
 #include <math.h>
+#include <RespiroSync_Cough_inferencing.h>
 
 // Raise for every build you publish; CI adds the build stamp (build_info.h). See FIRMWARE_HISTORY.md.
-#define EDGE_AI_VERSION "2.0.1"
+#define EDGE_AI_VERSION "3.0.0"
 #if __has_include("build_info.h")
 #include "build_info.h"
 #endif
@@ -60,22 +64,31 @@ const char EDGE_AI_TAG[] = "RespiroSync-edge-ai:" EDGE_AI_VERSION " build " EDGE
 #define I2S_DATA 13
 const unsigned long LINK_BAUD = 115200;
 
-const int SAMPLE_RATE = 16000;
-const int FRAMES_PER_BLOCK = 256;  // 16 ms per analysis block
+const int SAMPLE_RATE = EI_CLASSIFIER_FREQUENCY;     // 16 kHz, as the model was trained
+const int WINDOW = EI_CLASSIFIER_RAW_SAMPLE_COUNT;   // 1 s of sound per classification
+const int STEP = WINDOW / 2;                         // a new classification every 0.5 s
 
-// RMS level (24-bit full scale = 8388608) that counts as a burst.
-// INMP441: 94 dB SPL ~ -26 dBFS. 50,000 ~ -44.5 dBFS ~ 75 dB SPL at the mic.
-// Calibrate in your room with DEBUG_LEVELS 1 (Serial Plotter) and adjust.
-const float RMS_THRESHOLD = 50000.0f;
+// INMP441 samples are 24-bit in a 32-bit slot. Shifting right by 13 gives 16-bit samples with
+// 8x gain: the INMP441 is quiet (94 dB SPL = -26 dBFS) next to the phone and lab recordings the
+// model learnt from. Retune together with the model once it is trained on this microphone.
+const int MIC_SHIFT = 13;
+const float COUGH_THRESHOLD = 0.6f;        // cough score, averaged over two windows in a row
 const unsigned long DEBOUNCE_MS = 1500;    // one cough = one event
 const unsigned long SETTLE_MS = 3000;      // ignore sound for this long after power-on
-const int MIN_LOUD_BLOCKS = 2;             // a burst must last 2 blocks (32 ms); a cough lasts 200-500 ms
-#define DEBUG_LEVELS 0
+// Loudness level 1-4 of a cough: the loudest 16 ms of the window against this RMS (16-bit,
+// about 75 dB SPL at the mic); level 2 from 2x, 3 from 4x, 4 from 6x.
+const float LEVEL_RMS = 1500.0f;
+#define DEBUG_SCORES 0  // 1: print every cough score on USB serial
 
 I2S i2s(INPUT);
-bool micReady = false;
+volatile bool micReady = false;
+volatile bool micChecked = false;   // core 1 has tried to start the microphone
 unsigned long lastCoughTime = 0;
-int loudBlocks = 0;  // consecutive blocks above the threshold
+
+// Core 1 writes the microphone into this ring; core 0 copies the last second out of it.
+int16_t ring[WINDOW];
+volatile uint32_t samplesRecorded = 0;
+int16_t window[WINDOW];             // the second being classified
 
 void sayHello() {
   Serial1.print("HELLO:");
@@ -197,30 +210,73 @@ void setup() {
   LittleFS.begin();             // the FS area that receives cloud updates
   Serial.println(EDGE_AI_TAG);
 
+  while (!micChecked) delay(1);  // core 1 starts the microphone
+  if (micReady) Serial.println("I2S microphone ready. Listening for coughs...");
+  // Keep answering the ESP32 (version, updates) even without the microphone.
+  else Serial.println("Failed to initialise I2S. Check INMP441 wiring (SCK=GP14, WS=GP15, SD=GP13).");
+  sayHello();
+}
+
+// ---------- Core 1: records the microphone without a break ----------
+void setup1() {
   i2s.setBCLK(I2S_BCLK);
   i2s.setDATA(I2S_DATA);
   i2s.setBitsPerSample(32);  // INMP441 sends 24-bit samples in 32-bit slots
   i2s.setFrequency(SAMPLE_RATE);
-
-  micReady = i2s.begin();
-  if (micReady) {
-    // Pull the data line down: while the microphone starts (or if it is missing) the line would
-    // float and pick up noise that looks like a loud burst. The INMP441 datasheet asks for this too.
-    gpio_pull_down(I2S_DATA);
-    Serial.println("I2S microphone ready. Listening...");
-  } else {
-    // Keep answering the ESP32 (version, updates) even without the microphone.
-    Serial.println("Failed to initialise I2S. Check INMP441 wiring (SCK=GP14, WS=GP15, SD=GP13).");
-  }
-  sayHello();
+  bool ok = i2s.begin();
+  // Pull the data line down: while the microphone starts (or if it is missing) the line would
+  // float and pick up noise. The INMP441 datasheet asks for this too.
+  if (ok) gpio_pull_down(I2S_DATA);
+  micReady = ok;
+  micChecked = true;
 }
 
+void loop1() {
+  if (!micReady) {
+    delay(100);
+    return;
+  }
+  static int32_t dc = 0;  // the microphone's DC offset, followed slowly
+  int32_t left = 0, right = 0;
+  i2s.read32(&left, &right);         // blocking; L/R tied to GND => data is on the left slot
+  int32_t s = left >> 8;             // 24-bit signed sample
+  dc += (s - dc) >> 10;
+  s = (s - dc) >> (MIC_SHIFT - 8);   // to 16-bit with gain
+  if (s > 32767) s = 32767;
+  if (s < -32768) s = -32768;
+  ring[samplesRecorded % WINDOW] = (int16_t)s;
+  samplesRecorded = samplesRecorded + 1;
+}
+
+// ---------- Core 0: classifies, talks to the ESP32 ----------
 /** Repeat the version every 10 minutes, so the ESP32 knows it even if one of them restarted alone. */
 void helloNowAndThen() {
   static unsigned long last = 0;
   if (millis() - last < 600000UL) return;
   last = millis();
   sayHello();
+}
+
+/** Audio for the Edge Impulse classifier, as floats. */
+int getAudio(size_t offset, size_t length, float *out) {
+  numpy::int16_to_float(&window[offset], out, length);
+  return 0;
+}
+
+/** Loudness level 1-4 from the loudest 16 ms block of the window. */
+int loudnessLevel() {
+  float loudest = 0;
+  for (int b = 0; b + 256 <= WINDOW; b += 256) {
+    int64_t sumSq = 0;
+    for (int i = b; i < b + 256; i++) sumSq += (int32_t)window[i] * window[i];
+    float rms = sqrtf((float)sumSq / 256);
+    if (rms > loudest) loudest = rms;
+  }
+  float ratio = loudest / LEVEL_RMS;
+  if (ratio >= 6) return 4;
+  if (ratio >= 4) return 3;
+  if (ratio >= 2) return 2;
+  return 1;
 }
 
 void loop() {
@@ -231,47 +287,42 @@ void loop() {
     return;
   }
 
-  int64_t sum = 0;
-  int64_t sumSq = 0;
-
-  for (int i = 0; i < FRAMES_PER_BLOCK; i++) {
-    int32_t left = 0, right = 0;
-    i2s.read32(&left, &right);  // blocking; L/R tied to GND => data is on the left slot
-    int32_t s = left >> 8;      // 24-bit signed sample
-    sum += s;
-    sumSq += (int64_t)s * s;    // 64-bit: no overflow (max 2^46 per sample)
-  }
-
-  // RMS with the DC offset removed
-  double mean = (double)sum / FRAMES_PER_BLOCK;
-  double variance = (double)sumSq / FRAMES_PER_BLOCK - mean * mean;
-  float rms = variance > 0 ? (float)sqrt(variance) : 0.0f;
-
-#if DEBUG_LEVELS
-  Serial.println(rms);
-#endif
-
-  if (rms < RMS_THRESHOLD) {
-    loudBlocks = 0;
+  // Wait for half a second of new sound (and a full second at the start).
+  static uint32_t nextAt = WINDOW;
+  uint32_t recorded = samplesRecorded;
+  if (recorded < nextAt) {
+    delay(2);
     return;
   }
-  // Not during start-up, and not for a single 16 ms spike (electrical noise, a click).
-  if (millis() < SETTLE_MS || ++loudBlocks < MIN_LOUD_BLOCKS) return;
+  nextAt = recorded + STEP;  // if classifying ever takes longer, skip ahead instead of falling behind
+
+  // Copy the last second out of the ring, oldest sample first.
+  uint32_t start = recorded % WINDOW;
+  memcpy(window, ring + start, (WINDOW - start) * sizeof(int16_t));
+  memcpy(window + (WINDOW - start), ring, start * sizeof(int16_t));
+
+  signal_t signal;
+  signal.total_length = WINDOW;
+  signal.get_data = &getAudio;
+  ei_impulse_result_t result = { 0 };
+  if (run_classifier(&signal, &result, false) != EI_IMPULSE_OK) return;
+
+  float cough = 0;
+  for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
+    if (strcmp(result.classification[i].label, "cough") == 0) cough = result.classification[i].value;
+  }
+#if DEBUG_SCORES
+  Serial.printf("cough %.2f (%d ms)\n", cough, result.timing.dsp + result.timing.classification);
+#endif
+
+  // Two windows in a row (they overlap by half) must agree: one odd window is not enough.
+  static float previous = 0;
+  float score = (cough + previous) / 2;
+  previous = cough;
+  if (score < COUGH_THRESHOLD || millis() < SETTLE_MS) return;
 
   unsigned long now = millis();
   if (now - lastCoughTime < DEBOUNCE_MS) return;
   lastCoughTime = now;
-
-  // Strength: 0 at the threshold, 1 at 8x the threshold (+18 dB). A heuristic, not a probability.
-  float ratio = rms / RMS_THRESHOLD;
-  float strength = log2f(ratio) / 3.0f;
-  if (strength < 0) strength = 0;
-  if (strength > 1) strength = 1;
-
-  int level = 1;
-  if (ratio >= 2) level = 2;
-  if (ratio >= 4) level = 3;
-  if (ratio >= 6) level = 4;
-
-  sendCough(level, strength);
+  sendCough(loudnessLevel(), score);
 }

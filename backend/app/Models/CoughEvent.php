@@ -29,7 +29,8 @@ class CoughEvent extends Model
     protected $casts = [
         'recorded_at' => 'datetime',
         'severity' => 'float',
-        // Heuristic detection strength 0..1 reported by the Pico; null when the device did not send one.
+        // Cough score 0..1 from the Edge AI model (Edge AI 3.0.0+; older builds sent a loudness
+        // heuristic); null when the device did not send one.
         'confidence' => 'float',
         'is_verified' => 'boolean',
         'inhaler_used' => 'boolean',

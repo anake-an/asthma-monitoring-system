@@ -31,25 +31,23 @@ The ESP32 is the central brain of the hardware system.
     *   **Night mode (21:00-07:00, can be switched off per room in Smart Alerts):** the backlight is off unless there is an alarm or a cough. It also lights up for 30 s after the board's **BOOT** button is pressed. Outside night mode, the BOOT button shows the next page.
 
 ## 2. Raspberry Pi Pico (Acoustic AI Coprocessor)
-The Raspberry Pi Pico is dedicated entirely to high-speed audio sampling.
-*   **Phase 1 (current, heuristic):** `pico_cough_ai/pico_cough_ai.ino` measures the RMS sound level of each 16 ms block and reports loud bursts as `COUGH:<level>,<strength>`. Strength is 0 at the threshold and 1 at 8× the threshold. It is a loudness measure, **not** a cough classifier: claps and door slams also trigger it.
-*   **Phase 2 (not implemented yet):** train a real cough/noise classifier with Edge Impulse (steps below).
+The Raspberry Pi Pico (the **Edge AI** module) listens for coughs, so the ESP32 never handles audio.
+*   **Cough model:** `pico_cough_ai/pico_cough_ai.ino` runs an Edge Impulse neural network (Audio MFE + 1D CNN, int8) from `libraries/RespiroSync_Cough_inferencing`. Core 1 records the INMP441 without a break; core 0 classifies the last second every 0.5 s (about 260 ms of work) and reports `COUGH:<level>,<score>` when the cough score, averaged over two windows in a row, reaches 0.6. Level 1-4 is the loudness, the score is how sure the model is.
+*   **Training data, settings and results:** [`docs/EDGE_IMPULSE.md`](../docs/EDGE_IMPULSE.md) (93 % on validation, 86 % on unseen test sounds).
 *   **Core:** use the **arduino-pico** core by Earle Philhower ("Raspberry Pi Pico/RP2040" in Boards Manager). The sketches use its `I2S i2s(INPUT)` API.
-*   **Calibration:** set `DEBUG_LEVELS 1`, open the Serial Plotter, and set `RMS_THRESHOLD` above your room's normal speech level.
+*   **Library (USB flashing only):** copy `libraries/RespiroSync_Cough_inferencing` into `Documents/Arduino/libraries`. GitHub Actions uses it straight from the repo.
+*   **Checking it:** set `DEBUG_SCORES 1` and open the Serial Monitor (115200) to see every cough score.
 
 ---
 
-## Phase 2: Edge Impulse Neural Network (How-To)
-To upgrade the Pico from Phase 1 math-based logic to Phase 2 True AI (Distinguishing coughs from sneezes/talking), follow these steps:
+## Training the model on this microphone
 
-1. **Flash Data Collector:** Open `pico_cough_ai/data_collection/data_collection.ino` in the Arduino IDE and flash it to the Pico. This script streams raw 16KHz audio over the USB Serial port.
-2. **Install Edge Impulse:** Create a free account at [edgeimpulse.com](https://edgeimpulse.com/). Install the Edge Impulse CLI on your PC (`npm install -g edge-impulse-cli`).
-3. **Stream Data:** Open your PC terminal and run: `edge-impulse-data-forwarder --frequency 16000`. It will detect the Pico and link it to your cloud project.
-4. **Train the Brain:** 
-    *   Record 5 minutes of coughing and label it `cough`.
-    *   Record 5 minutes of talking/room noise and label it `noise`.
-    *   In the Edge Impulse Studio, add an **Audio (MFCC)** processing block and a **Classification (Keras)** learning block. Click "Start Training".
-5. **Deploy:** Go to the "Deployment" tab, select **Arduino Library**, and download the `.zip`. Add this ZIP to your Arduino IDE and replace the Phase 1 script with the generated Edge Impulse inference script!
+The model was trained on public recordings (see `docs/EDGE_IMPULSE.md`). Recordings made with the device's own INMP441 make it fit the real rooms:
+
+1. **Flash the data collector:** `pico_cough_ai/data_collection/data_collection.ino` streams 16 kHz audio over USB, converted exactly like the Edge AI firmware does it.
+2. **Stream to Edge Impulse:** install the CLI (`npm install -g edge-impulse-cli`) and run `edge-impulse-data-forwarder --frequency 16000`; it links the Pico to the "RespiroSync Cough" project.
+3. **Record:** coughs labelled `cough`, and 5-10 minutes of the home labelled `noise` (talking in Malay and English, TV, fan, children playing, quiet).
+4. **Retrain and test** in the Studio, then export the **Arduino library** and ship it as an Edge AI update (steps in `docs/EDGE_IMPULSE.md`).
 
 ---
 

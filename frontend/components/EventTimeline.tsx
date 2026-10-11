@@ -120,7 +120,7 @@ export default function EventTimeline() {
           {/* Table Header */}
           <div className="grid grid-cols-[1fr_80px_80px_230px] gap-3 px-4 py-2.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-400 uppercase tracking-wider bg-gray-50 dark:bg-[#0e0e18] border-b border-zinc-200 dark:border-[#1e1e30]">
             <span>Timestamp</span>
-            <span title="Sound-level heuristic from the Pico, not a probability">Strength</span>
+            <span title="How sure the Edge AI cough model was (Edge AI 3.0.0 and newer; older builds measured loudness)">Score</span>
             <span>Status</span>
             <span className="text-right" title="Your review teaches the AI: false alarms are left out of training and the report">Your review</span>
           </div>

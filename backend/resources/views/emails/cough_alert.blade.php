@@ -38,8 +38,8 @@
                         <span class="data-value" style="color: #dc2626;">{{ $clusterCount }} in the last {{ $windowMinutes }} minutes</span>
                     </div>
                     <div class="data-row">
-                        <span class="data-label">Detection strength</span>
-                        <span class="data-value">{{ $strength !== null ? number_format($strength * 100, 0) . '% (sound-level heuristic)' : 'Not reported by device' }}</span>
+                        <span class="data-label">Cough score</span>
+                        <span class="data-value">{{ $strength !== null ? number_format($strength * 100, 0) . '% (Edge AI cough model)' : 'Not reported by device' }}</span>
                     </div>
                     <div class="data-row">
                         <span class="data-label">Time Detected</span>

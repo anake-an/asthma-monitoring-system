@@ -6,13 +6,14 @@ How the hardware, AI, backend and frontend fit together, what each part really d
 
 ## 1. Hardware (dual-processor)
 
-### 🎤 Raspberry Pi Pico: sound-level cough detector
+### 🎤 Raspberry Pi Pico: Edge AI cough detector
 *   **Hardware:** Raspberry Pi Pico + INMP441 I2S microphone.
 *   **Why a second chip:** continuous 16 kHz audio sampling is kept off the ESP32, which handles Wi-Fi, TLS and sensors.
-*   **How it works:** every 16 ms it computes the RMS sound level (DC offset removed). A burst above the threshold, at most once per 1.5 s, is reported as a cough candidate with a **detection strength** from 0 (just above threshold) to 1 (8× threshold, +18 dB).
-*   **Limits (be honest in the report):** this is a loudness heuristic, not a classifier. Claps, door slams and shouting also trigger it. `pico_cough_ai/data_collection/` and `hardware/README.md` describe the Phase 2 path to a trained model (Edge Impulse).
-*   **Code:** `hardware/pico_cough_ai/pico_cough_ai.ino`
-*   **Output:** `COUGH:<level 1-4>,<strength 0.00-1.00>` over UART to the ESP32.
+*   **How it works:** an Edge Impulse neural network (Audio MFE features + a small 1D CNN, int8) classifies each second of sound as **cough** or **noise**. Core 1 records without a break; core 0 classifies the last second every 0.5 s (about 260 ms on the RP2040). A cough is reported when the cough score, averaged over two windows in a row, reaches 0.6, at most once per 1.5 s.
+*   **Accuracy:** 93 % on validation and 86 % on test sounds it never heard (84 % of coughs caught, 87 % of other sounds ignored, the rest marked uncertain and not reported). Training data and settings: `docs/EDGE_IMPULSE.md`.
+*   **Limits (be honest in the report):** trained on public recordings (phones, a lab microphone), not yet on the INMP441 in a real home, so it can miss coughs or take another sound for one. Recording the home through the device and retraining (`hardware/README.md`) is the next step. It recognises a cough sound; it does not diagnose anything.
+*   **Code:** `hardware/pico_cough_ai/pico_cough_ai.ino`, model in `hardware/libraries/RespiroSync_Cough_inferencing`
+*   **Output:** `COUGH:<level 1-4 (loudness)>,<cough score 0.00-1.00>` over UART to the ESP32.
 
 ### 📡 ESP32: gateway and environment monitor
 *   **Hardware:** ESP32 + DHT22 + MQ-135 + Sharp GP2Y1010AU0F (or the pin-compatible GP2Y1014AU0F), passive buzzer, red/green LEDs, 16x2 I2C LCD behind a BSS138 level shifter, MB-102 5 V supply for the sensors.
@@ -34,7 +35,7 @@ How the hardware, AI, backend and frontend fit together, what each part really d
 ## 2. AI
 
 ### A. On-device detection
-The Pico heuristic above. It produces candidate events and a strength value; it does not diagnose anything.
+The Edge Impulse cough model on the Pico, above. It produces cough events with a score; it does not diagnose anything.
 
 ### B. Cloud risk model (`ai_engine/main.py`, FastAPI + scikit-learn)
 *   **Two levels (DESIGN §5):** a **room model per device** (`/train/room?device_id=`, `device_<id>_baseline.pkl`: what is normal for that room, needs only telemetry) and a **risk model per child** (`/train/risk?patient_id=`, `patient_<id>_model.pkl`: what preceded that child's rescue doses and cough clusters, from the windows of all of their rooms in time order; shared rooms never train a child's model). `/predict?device_id=` answers for one room: its baseline (Stage 1) or its child's risk model fed with that room's latest window (Stage 2), with limits from the room's own learned normal. The backend checks access before every call (`AiController`, `ai:optimize`); `php artisan ai:train` (every 4 h) trains every room, then every child.
@@ -55,12 +56,12 @@ The Pico heuristic above. It produces candidate events and a strength value; it 
 
 ### ⚙️ Laravel 12
 *   **MQTT worker:** `app/Console/Commands/MqttSubscribe.php` subscribes to `respirosync/devices/+/telemetry` and `/events` and hands each message to `app/Services/DeviceMessageHandler.php`. Device identity comes from the topic, never from the payload.
-*   **Alert rule:** a cough raises an alert when there are **3 coughs in 10 minutes**, or **2 coughs in 10 minutes where this one has strength ≥ 0.8**. A single loud sound never alerts on its own. At most **one email per device per 10 minutes**. A mail failure is logged and never stops the worker.
+*   **Alert rule:** a cough raises an alert when there are **3 coughs in 10 minutes**, or **2 coughs in 10 minutes where this one has a cough score ≥ 0.8**. A single cough never alerts on its own. At most **one email per device per 10 minutes**. A mail failure is logged and never stops the worker.
 *   **Other alerts (email + push, same recipients):**
     *   **A reading over its room's limit for 5 minutes**, at most once an hour per reading (`DeviceMessageHandler::checkLimits`).
     *   **A device silent for 30 minutes**, once per outage, with a "back online" push afterwards (`devices:offline-alerts`).
     *   **On the LCD only:** "Daily dose?" while a child's daily dose is overdue (`devices:dose-reminders`).
-*   **Alert email:** `resources/views/emails/cough_alert.blade.php` shows the cough count and the device-reported strength, or "Not reported by device". It never shows an invented confidence.
+*   **Alert email:** `resources/views/emails/cough_alert.blade.php` shows the cough count and the device-reported cough score, or "Not reported by device". It never shows an invented confidence.
 *   **Patients, rooms and access:** a **patient** (the child: display name, optional birth year) is separate from the login; `patient_user` gives each account a role (owner now; caregiver and viewer with sharing). A **device** is a room: it belongs to one child or is a **shared room** (coughs shown, never counted for a child). Alert limits (`hardware_configs`) are **per device**; inhaler doses (`inhaler_logs.patient_id`) are per child; telemetry and coughs come from the device. Every API call resolves its `device_id` / `patient_id` through one check (`AppPoliciesDevicePolicy`, `PatientPolicy`, `Controller::device()` / `::patient()`): anything not yours is a 404. Devices record `last_seen_at` on every message; online = a message in the last 20 s.
 *   **REST API:** `routes/api.php`, protected by Sanctum tokens.
 *   **Tests:** `backend/tests/` (`php artisan test` on a development machine or an isolated container; never inside the production backend container, see README).
@@ -71,7 +72,7 @@ The Pico heuristic above. It produces candidate events and a strength value; it 
 *   **Live Monitor:** latest readings; shows "Sensor Error" when the DHT22 failed.
 *   **Command Center:** thresholds and buzzer mute. Saving pushes the new config to every device on the account.
 *   **AI Risk panel:** model stage, risk level, and coughs in the last hour.
-*   **Cough History:** each event's detection strength and whether it was an Alert or only Logged; caregivers can mark events as false alarms, which then feeds into training.
+*   **Cough History:** each event's cough score and whether it was an Alert or only Logged; caregivers can mark events as false alarms, which then feeds into training.
 
 ---
 

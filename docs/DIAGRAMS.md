@@ -11,7 +11,7 @@ flowchart LR
     subgraph Room["Child's room"]
         PICO["Raspberry Pi Pico<br/>+ INMP441 microphone<br/>cough candidates"]
         ESP["ESP32<br/>DHT22, MQ-135, Sharp dust<br/>LCD, buzzer, LEDs"]
-        PICO -- "UART<br/>COUGH:level,strength" --> ESP
+        PICO -- "UART<br/>COUGH:level,score" --> ESP
     end
 
     subgraph Cloud["Cloudflare"]
@@ -98,7 +98,7 @@ sequenceDiagram
     PI->>E: COUGH:2,0.45 (UART)
     E->>E: LCD "Cough heard" + chirp
     E->>W: event (MQTT)
-    W->>W: 3 coughs in 10 min, or 2 with strength >= 0.8?
+    W->>W: 3 coughs in 10 min, or 2 with cough score >= 0.8?
     alt rule met, no alert in the last 10 min
         W->>P: cough alert email + push
     else

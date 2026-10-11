@@ -173,6 +173,9 @@ jobs:
           platforms: |
             - name: rp2040:rp2040
               source-url: https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
+          # The Edge Impulse cough model (exported Arduino library, kept in the repo)
+          libraries: |
+            - source-path: hardware/libraries/RespiroSync_Cough_inferencing
           # Finds both sketches: pico_cough_ai and data_collection/
           sketch-paths: |
             - hardware/pico_cough_ai
@@ -266,8 +269,9 @@ jobs:
               echo "esp32=true" >> "$GITHUB_OUTPUT"
             fi
           fi
-          if echo "$changed" | grep -q '^hardware/pico_cough_ai/'; then echo "pico=true" >> "$GITHUB_OUTPUT"; fi
-          echo "$changed" | grep -qE '^hardware/(esp32_firmware|pico_cough_ai)/' || echo "No firmware changed in this push: nothing to publish."
+          # The Edge AI build changes with its sketch or with the cough model library.
+          if echo "$changed" | grep -qE '^hardware/(pico_cough_ai|libraries)/'; then echo "pico=true" >> "$GITHUB_OUTPUT"; fi
+          echo "$changed" | grep -qE '^hardware/(esp32_firmware|pico_cough_ai|libraries)/' || echo "No firmware changed in this push: nothing to publish."
 
       - uses: arduino/setup-arduino-cli@v2
         if: steps.check.outputs.esp32 == 'true' || steps.check.outputs.pico == 'true'
@@ -299,7 +303,8 @@ jobs:
           BUILD=$(.github/firmware-build-stamp.sh hardware/pico_cough_ai)
           echo "#define EDGE_AI_BUILD \"$BUILD\"" > hardware/pico_cough_ai/build_info.h
           echo "Edge AI build $BUILD"
-          arduino-cli compile --fqbn "$PICO_FQBN" --output-dir build-pico hardware/pico_cough_ai
+          arduino-cli compile --fqbn "$PICO_FQBN" --library hardware/libraries/RespiroSync_Cough_inferencing \
+            --output-dir build-pico hardware/pico_cough_ai
           rm hardware/pico_cough_ai/build_info.h
 
       - name: Upload to the server
