@@ -41,19 +41,6 @@ jobs:
   migrations:
     name: Migrations on MySQL 8 (same engine as production)
     runs-on: ubuntu-latest
-    services:
-      mysql:
-        # The official mysql image via AWS's public mirror: Docker Hub rate-limits pulls from the
-        # shared GitHub runner IPs ("toomanyrequests").
-        image: public.ecr.aws/docker/library/mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: ci-only
-          MYSQL_DATABASE: asthma_db
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -pci-only"
-          --health-interval=5s --health-timeout=5s --health-retries=20
     defaults:
       run:
         working-directory: backend
@@ -66,6 +53,43 @@ jobs:
       DB_PASSWORD: ci-only
     steps:
       - uses: actions/checkout@v5
+
+      # The official mysql:8.0 image (as in docker-compose.yaml), started here rather than as a
+      # service container: a service gets three pulls in ~15 s from one registry, and a shared runner
+      # IP over that registry's anonymous limit ("toomanyrequests: Data limit exceeded") stays over
+      # it. These registries all serve Docker Hub's library/mysql (same digest), so take it from
+      # whichever answers, backing off between rounds.
+      - name: Start MySQL 8.0
+        timeout-minutes: 10
+        run: |
+          image=
+          for wait in 0 15 30 60 120; do
+            sleep "$wait"
+            for src in mirror.gcr.io/library/mysql:8.0 public.ecr.aws/docker/library/mysql:8.0 docker.io/library/mysql:8.0; do
+              if docker pull --quiet "$src"; then image=$src; break 2; fi
+              echo "::warning::Could not pull $src"
+            done
+          done
+          [ -n "$image" ] || { echo "::error::No registry would serve mysql:8.0"; exit 1; }
+          docker image inspect --format '{{index .RepoDigests 0}}' "$image"
+          docker run -d --name mysql -p 127.0.0.1:3306:3306 \
+            -e MYSQL_ROOT_PASSWORD="$DB_PASSWORD" -e MYSQL_DATABASE="$DB_DATABASE" \
+            --health-cmd="mysqladmin ping -h 127.0.0.1 -p$DB_PASSWORD" \
+            --health-interval=5s --health-timeout=5s --health-retries=20 \
+            "$image"
+          for i in $(seq 60); do
+            state=$(docker inspect --format '{{.State.Status}}/{{.State.Health.Status}}' mysql)
+            [ "$state" = running/healthy ] && break
+            if [ "$state" != running/starting ] || [ "$i" = 60 ]; then
+              docker logs mysql
+              echo "::error::MySQL did not become ready ($state)"
+              exit 1
+            fi
+            sleep 2
+          done
+          version=$(docker exec -e MYSQL_PWD="$DB_PASSWORD" mysql mysql -uroot -NBe 'SELECT VERSION()')
+          echo "MySQL $version"
+          case "$version" in 8.0.*) ;; *) echo "::error::Expected MySQL 8.0, got '$version'"; exit 1 ;; esac
 
       - uses: shivammathur/setup-php@v2
         with:
