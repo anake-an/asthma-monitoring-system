@@ -176,7 +176,7 @@ jobs:
           # The Edge Impulse cough model (exported Arduino library, kept in the repo)
           libraries: |
             - source-path: hardware/libraries/RespiroSync_Cough_inferencing
-          # Finds both sketches: pico_cough_ai and data_collection/
+          # The Edge AI sketch (with the cough model library)
           sketch-paths: |
             - hardware/pico_cough_ai
           enable-deltas-report: false

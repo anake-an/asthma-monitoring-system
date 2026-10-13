@@ -38,17 +38,23 @@ On the Pico (int8, EON Compiler): **258 ms** per window (MFE 250 ms + network 8 
 
 ## On the device
 
-- Core 1 records the microphone without a break into a 1 s ring buffer (24-bit samples to 16-bit with 8x gain, DC offset removed).
+- Core 1 records the microphone without a break into a 1 s ring buffer (24-bit samples to 16-bit with 4x gain, through a 200 Hz high-pass filter that removes mains hum and the DC offset; Edge AI 3.0.2).
 - Core 0 classifies the last second every 0.5 s. A cough is reported when the cough score, **averaged over two windows in a row**, reaches 0.6. That cuts single-window false alarms.
 - One report per 1.5 s at most, nothing in the first 3 s after power-on. The report (`COUGH:<level>,<score>`) carries the loudness level 1-4 (loudest 16 ms of the window) and the averaged cough score.
 
 ## Next: train on the real microphone
 
-The model has not heard the INMP441 yet. Once it is wired:
+**First test on the device (2026-10-13):** the INMP441 works (loudest 16 ms ≈ 600-1,000 in a quiet room, 5,000-6,000 for a cough at arm's length; 132 ms per window on the Pico), but the cough score stayed near 0.35 for coughs. Two causes were measured and fixed in Edge AI 3.0.2: **50 Hz mains hum** (with harmonics up to ~800 Hz) about 10x stronger than everything above 1 kHz, now cut by a 200 Hz high-pass filter; and **too much gain**: at 8x a cough reached ~10,000 and scored 0.00, at 4x coughs sit near the training level and score up to 0.6. The rest of the gap (this microphone, the room, the remaining hum harmonics) needs recordings from the device.
 
-1. Flash `hardware/pico_cough_ai/data_collection` and record with `edge-impulse-data-forwarder --frequency 16000`: coughs from the family, and 5-10 min of the home (Malay and English talking, TV, fan, children playing, quiet).
-2. Label them cough / noise in the same project, then retrain and run Model testing.
-3. Check `MIC_SHIFT` in the firmware against the recorded levels.
+Recording with the device itself (Edge AI 3.0.2 or newer, Windows PowerShell, no extra software):
+
+1. Pull the Pico's VSYS wire, plug its USB into the PC, close the Arduino Serial Monitor.
+2. Record, from `hardware/tools`:
+   - coughs: `.\record_audio.ps1 -Port COM4 -Seconds 20 -Out coughs-01.wav`, coughing every 2-3 s at different distances (0.5-2 m) and loudness; several people if possible. About 10 files.
+   - everything else: `.\record_audio.ps1 -Port COM4 -Seconds 60 -Out room-01.wav` with talking (Malay and English), TV, fan, children playing, a quiet room, doors, laughing, throat clearing. About 10 files.
+3. Cut: `.\cut_clips.ps1 -In coughs-01.wav -Label cough -OutDir clips` (one clip per cough) and `.\cut_clips.ps1 -In room-01.wav -Label noise -OutDir clips` (every second). Listen to a few cough clips; delete any without a cough.
+4. Edge Impulse, Data acquisition, Upload data: the `clips` folder, "Automatically split between training and test", "Infer from filename".
+5. Generate features, retrain, Model testing, then deploy as below.
 
 ## Updating the model on the devices
 
