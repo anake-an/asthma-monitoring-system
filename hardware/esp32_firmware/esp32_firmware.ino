@@ -36,6 +36,7 @@
 #include <LiquidCrystal_I2C.h>  // https://github.com/johnrickman/LiquidCrystal_I2C
 #include "esp_https_ota.h"      // cloud firmware updates
 #include "esp_ota_ops.h"
+#include "esp_netif.h"          // a fallback DNS server
 #include "mbedtls/sha256.h"     // checks Edge AI updates before they are installed
 #include "mbedtls/version.h"
 #if MBEDTLS_VERSION_MAJOR < 3  // core 2.x (ESP-IDF 4.4): the *_ret functions
@@ -53,7 +54,7 @@
 // Firmware "3.1.0 Build 261011": the version is set here (major.feature.fix, history in
 // hardware/FIRMWARE_HISTORY.md); the build stamp (build date YYMMDD, ".2" for a second build that
 // day) is written by CI into build_info.h. A build made in the Arduino IDE says "dev".
-#define FIRMWARE_VERSION "3.3.0"
+#define FIRMWARE_VERSION "3.3.1"
 #if __has_include("build_info.h")
 #include "build_info.h"
 #endif
@@ -105,7 +106,12 @@ void setBuzzer(bool on) {
 }
 
 DHT dht(DHTPIN, DHTTYPE);
-LiquidCrystal_I2C lcd(0x27, 16, 2);  // try 0x3F if the screen stays blank
+// The LCD's I2C backpack answers at 0x27 (PCF8574T chip) or 0x3F (PCF8574AT): setup() uses
+// whichever is there.
+LiquidCrystal_I2C lcdAt27(0x27, 16, 2);
+LiquidCrystal_I2C lcdAt3F(0x3F, 16, 2);
+LiquidCrystal_I2C *lcdPtr = &lcdAt27;
+#define lcd (*lcdPtr)
 
 // --- Identity / MQTT ---
 char device_token[7] = "";
@@ -723,6 +729,44 @@ void reportOta(const char *status, const char *error) {
   publishJson(topicEvents, doc);
 }
 
+/** True when a chip acknowledges this I2C address. */
+bool i2cAnswers(uint8_t address) {
+  Wire.beginTransmission(address);
+  return Wire.endTransmission() == 0;
+}
+
+/**
+ * Adds a public DNS server (1.1.1.1) as the fallback. The router's DNS stays first; some routers
+ * now and then stop answering, and the update download needs a fresh lookup of the server.
+ */
+void addFallbackDns() {
+  esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  if (!sta) return;
+  esp_netif_dns_info_t dns = {};
+  dns.ip.type = ESP_IPADDR_TYPE_V4;
+  dns.ip.u_addr.ip4.addr = ESP_IP4TOADDR(1, 1, 1, 1);
+  esp_netif_set_dns_info(sta, ESP_NETIF_DNS_FALLBACK, &dns);
+}
+
+/** Looks up the update's server, up to 3 tries, so one missed DNS answer does not fail the update. */
+bool resolveUpdateHost() {
+  String host = otaJob.url;
+  int start = host.indexOf("://");
+  host = host.substring(start < 0 ? 0 : start + 3);
+  int end = host.indexOf('/');
+  if (end >= 0) host = host.substring(0, end);
+  int colon = host.indexOf(':');
+  if (colon >= 0) host = host.substring(0, colon);
+  IPAddress ip;
+  for (int attempt = 0; attempt < 3; attempt++) {
+    if (WiFi.hostByName(host.c_str(), ip) == 1) return true;
+    Serial.printf("DNS lookup of %s failed (try %d)\n", host.c_str(), attempt + 1);
+    addFallbackDns();
+    delay(1000);
+  }
+  return false;
+}
+
 void otaFail(const char *lcdLine, const char *error) {
   Serial.printf("Update failed: %s\n", error);
   showScreen("Update failed", lcdLine);
@@ -883,6 +927,11 @@ void runOta() {
     otaPending = false;
     return;
   }
+  if (!resolveUpdateHost()) {
+    otaPending = false;
+    otaFail("Server not found", "The device could not look up the server's address (DNS). Check that the Wi-Fi has internet, then try again.");
+    return;
+  }
   if (strcmp(otaJob.target, "pico") == 0) {
     runEdgeAiOta();
     return;
@@ -1022,6 +1071,14 @@ void setup() {
   digitalWrite(RED_LED_PIN, HIGH);  // red until connected
 
   Wire.begin(21, 22);
+  if (i2cAnswers(0x27)) {
+    Serial.println("LCD at I2C address 0x27");
+  } else if (i2cAnswers(0x3F)) {
+    lcdPtr = &lcdAt3F;
+    Serial.println("LCD at I2C address 0x3F");
+  } else {
+    Serial.println("No LCD answers at 0x27 or 0x3F: check SDA/SCL, and the level shifter's LV, HV and GND");
+  }
   lcd.init();
   lcd.backlight();
   createGlyphs();
@@ -1058,6 +1115,7 @@ void setup() {
     delay(3000);
     ESP.restart();
   }
+  addFallbackDns();
 
   if (shouldSaveConfig) {
     String newToken = custom_token.getValue();
