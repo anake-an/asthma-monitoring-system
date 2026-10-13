@@ -1,5 +1,5 @@
 # What owners see under "What's new" when this firmware is offered as an update.
 # One short point per line, in plain words (no technical terms). Lines starting with # are ignored.
 # Update it together with FIRMWARE_VERSION in esp32_firmware.ino.
-Edge AI updates can now be installed from the dashboard
-Faster connection to the Edge AI module
+Updates no longer fail when the home router is slow to find the server
+Clearer message when the device cannot reach the server
