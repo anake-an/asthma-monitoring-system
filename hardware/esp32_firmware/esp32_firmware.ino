@@ -36,7 +36,7 @@
 #include <LiquidCrystal_I2C.h>  // https://github.com/johnrickman/LiquidCrystal_I2C
 #include "esp_https_ota.h"      // cloud firmware updates
 #include "esp_ota_ops.h"
-#include "esp_netif.h"          // a fallback DNS server
+#include "esp_netif.h"          // DNS servers (useDnsServers)
 #include "mbedtls/sha256.h"     // checks Edge AI updates before they are installed
 #include "mbedtls/version.h"
 #if MBEDTLS_VERSION_MAJOR < 3  // core 2.x (ESP-IDF 4.4): the *_ret functions
@@ -54,7 +54,7 @@
 // Firmware "3.1.0 Build 261011": the version is set here (major.feature.fix, history in
 // hardware/FIRMWARE_HISTORY.md); the build stamp (build date YYMMDD, ".2" for a second build that
 // day) is written by CI into build_info.h. A build made in the Arduino IDE says "dev".
-#define FIRMWARE_VERSION "3.3.1"
+#define FIRMWARE_VERSION "3.3.2"
 #if __has_include("build_info.h")
 #include "build_info.h"
 #endif
@@ -189,6 +189,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_DISCONNECTED:
       mqtt_connected = false;
       Serial.println("MQTT disconnected (client will retry)");
+      useDnsServers();  // DHCP may have put the router's DNS back first
       break;
 
     case MQTT_EVENT_DATA: {
@@ -736,16 +737,30 @@ bool i2cAnswers(uint8_t address) {
 }
 
 /**
- * Adds a public DNS server (1.1.1.1) as the fallback. The router's DNS stays first; some routers
- * now and then stop answering, and the update download needs a fresh lookup of the server.
+ * DNS order: 1.1.1.1 first, the router's own DNS second, 8.8.8.8 last. Some routers answer a
+ * lookup with an error now and then (getaddrinfo 202), and lwIP only moves on to the next server
+ * when one stays silent, not when it answers with an error. A network that blocks 1.1.1.1 keeps
+ * working: the silent server is skipped after a few seconds. DHCP puts the router back first when
+ * the lease renews, so this runs again at every reconnect and before every update.
  */
-void addFallbackDns() {
+void useDnsServers() {
   esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
   if (!sta) return;
+  const uint32_t cloudflare = ESP_IP4TOADDR(1, 1, 1, 1);
+  esp_netif_dns_info_t current = {};
+  if (esp_netif_get_dns_info(sta, ESP_NETIF_DNS_MAIN, &current) != ESP_OK) return;
+  if (current.ip.type == ESP_IPADDR_TYPE_V4 && current.ip.u_addr.ip4.addr == cloudflare) return;  // already set
+
   esp_netif_dns_info_t dns = {};
   dns.ip.type = ESP_IPADDR_TYPE_V4;
-  dns.ip.u_addr.ip4.addr = ESP_IP4TOADDR(1, 1, 1, 1);
+  dns.ip.u_addr.ip4.addr = cloudflare;
+  esp_netif_set_dns_info(sta, ESP_NETIF_DNS_MAIN, &dns);
+  if (current.ip.type == ESP_IPADDR_TYPE_V4 && current.ip.u_addr.ip4.addr != 0) {
+    esp_netif_set_dns_info(sta, ESP_NETIF_DNS_BACKUP, &current);  // the router
+  }
+  dns.ip.u_addr.ip4.addr = ESP_IP4TOADDR(8, 8, 8, 8);
   esp_netif_set_dns_info(sta, ESP_NETIF_DNS_FALLBACK, &dns);
+  Serial.println("DNS: 1.1.1.1, then the router, then 8.8.8.8");
 }
 
 /** Looks up the update's server, up to 3 tries, so one missed DNS answer does not fail the update. */
@@ -761,7 +776,7 @@ bool resolveUpdateHost() {
   for (int attempt = 0; attempt < 3; attempt++) {
     if (WiFi.hostByName(host.c_str(), ip) == 1) return true;
     Serial.printf("DNS lookup of %s failed (try %d)\n", host.c_str(), attempt + 1);
-    addFallbackDns();
+    useDnsServers();
     delay(1000);
   }
   return false;
@@ -1115,7 +1130,7 @@ void setup() {
     delay(3000);
     ESP.restart();
   }
-  addFallbackDns();
+  useDnsServers();
 
   if (shouldSaveConfig) {
     String newToken = custom_token.getValue();
