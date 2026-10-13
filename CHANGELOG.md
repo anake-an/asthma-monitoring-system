@@ -4,6 +4,18 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Robustness (firmware 3.5.0, Edge AI 3.2.0)
+- **No coughs lost offline:** the ESP32 holds coughs and possible coughs (up to 40) with the time they happened and sends them when the connection is back. The server stores a cough with its own time (`ts`) when it waited more than a minute, and gives no alert for one older than 5 minutes.
+- **Calmer local alarms:** an alarm starts after 3 readings in a row over its limit and stops after 3 under the limit minus a margin (dust 5 % / 2 µg/m³, gas 5 %, 0.5 °C, 2 % humidity). Holding BOOT for 2 s silences the buzzer for 10 minutes ("Alarm silenced" on the LCD); it ends early when the alarm is over.
+- **Updates in a humid room:** only dust, gas and app alerts block an update now; temperature and humidity alarms do not.
+- **Remembers its limits:** the last limits from the cloud are kept in flash and used after a restart without internet.
+- **Watchdogs:** the ESP32's loop restarts the device after a 5 s hang (off during updates; messages are now queued for the MQTT task, so a slow network never blocks the loop). The Pico restarts after an 8 s hang or 3 s without recording.
+- **Edge AI health:** after 25 minutes without a word from the module, the ESP32 reports it and Rooms shows "Edge AI · Not connected" until it answers again.
+- **Sensor baselines:** dust and gas references move only after 3 readings in a row (one glitch cannot set them for good) and follow slow drift while the air is clean.
+- **Cough decision (Edge AI 3.2.0):** classification every 0.25 s; a cough when 2 of the last 3 windows reach the threshold, instead of the average of 2 windows at 0.5 s, which halved short coughs. A **level guard** scales a window with a clear burst into the loudness band of the training coughs, so distance and microphone placement matter less.
+- **Overflow fixes:** the Pico's sample counter is compared by difference (it wraps after ~74 h and could pause detection), and the ESP32's timers are safe at the 49-day `millis()` wrap.
+- **Honest model tests:** `cut_clips.ps1` writes `info.labels` with each clip's recording and a training/test category per recording (`-Category`, `-TestShare`), so copies of one cough never sit on both sides; Edge Impulse can also validate by the `recording` metadata.
+
 ### Fixed
 - **Routers with unreliable DNS (firmware 3.3.2):** the ESP32 now asks 1.1.1.1 first, the router second and 8.8.8.8 last, set again after every disconnect. The router answered some lookups with an error, which made the broker connection need several tries and made an update download fail. (3.3.1 had added 1.1.1.1 only as a fallback, which lwIP does not use after an error answer.)
 - **Updates (firmware 3.3.1):** the ESP32 looks the update server up (up to 3 tries) before downloading. A failed lookup now says "Server not found" instead of "The download did not start". It also finds the LCD at I2C address 0x27 or 0x3F by itself (both backpack chips are common).

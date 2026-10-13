@@ -11,13 +11,23 @@
 # louder than the recording's typical level and at least 600, whose loudest 16 ms within 0.5 s
 # reaches -MinPeak (default 1000; fainter bursts are usually breaths). At most one burst per
 # 0.8 s. Several -PreRoll values give several clips per cough, each shifted in the window.
+#
+# info.labels: every clip is also listed in <OutDir>/info.labels (kept across runs) with its label,
+# its recording (metadata "recording") and a category. All clips of one recording get the same
+# category, so shifted or quieter copies of a cough never sit in both training and test (which
+# made test accuracy look better than it is). -Category auto (default) puts about -TestShare of the
+# recordings in testing, chosen from the recording name (the same name always lands the same way);
+# training or testing forces it. Upload the folder with info.labels in Edge Impulse, and set
+# "Split train/validation set on metadata key" to: recording.
 param(
     [Parameter(Mandatory = $true)][string]$In,
     [Parameter(Mandatory = $true)][ValidateSet('cough', 'noise')][string]$Label,
     [string]$OutDir = 'clips',
     [double[]]$PreRoll = @(0.15),
     [double]$MinPeak = 1000,
-    [double[]]$Gain = @(1.0)
+    [double[]]$Gain = @(1.0),
+    [ValidateSet('auto', 'training', 'testing')][string]$Category = 'auto',
+    [double]$TestShare = 0.2
 )
 $ErrorActionPreference = 'Stop'
 $rate = 16000
@@ -60,6 +70,22 @@ function Write-Clip([string]$path, [int16[]]$s, [int]$start, [double]$gain) {
     $w.Write($bytes); $w.Close()
 }
 
+# Training or testing for a whole recording: forced, or from a stable hash of its name.
+function Get-Category([string]$recording) {
+    if ($Category -ne 'auto') { return $Category }
+    $hash = 0
+    for ($i = 0; $i -lt $recording.Length; $i++) { $hash = ($hash * 31 + [int]$recording[$i]) % 1000003 }
+    if (($hash % 100) -lt [int]($TestShare * 100)) { return 'testing' }
+    return 'training'
+}
+
+# The entries already in this folder's info.labels (from earlier runs), by file name.
+$labelsPath = Join-Path $OutDir 'info.labels'
+$entries = [ordered]@{}
+if (Test-Path $labelsPath) {
+    foreach ($e in (Get-Content -Raw $labelsPath | ConvertFrom-Json).files) { $entries[$e.path] = $e }
+}
+
 $files = if (Test-Path $In -PathType Container) { Get-ChildItem $In -Filter *.wav } else { Get-Item $In }
 $total = 0
 foreach ($f in $files) {
@@ -97,15 +123,29 @@ foreach ($f in $files) {
             }
         }
     }
+    $category = Get-Category $name
     $n = 0
     for ($i = 0; $i -lt $starts.Count; $i++) {
         foreach ($g in $Gain) {
             $suffix = if ($Gain.Count -gt 1 -or $g -ne 1.0) { "-g$([int]($g * 100))" } else { "" }
-            Write-Clip (Join-Path $OutDir "$Label.$name-$($tags[$i])$suffix.wav") $s $starts[$i] $g
+            $file = "$Label.$name-$($tags[$i])$suffix.wav"
+            Write-Clip (Join-Path $OutDir $file) $s $starts[$i] $g
+            $entries[$file] = [ordered]@{
+                path = $file
+                name = [IO.Path]::GetFileNameWithoutExtension($file)
+                category = $category
+                label = [ordered]@{ type = 'label'; label = $Label }
+                metadata = [ordered]@{ recording = $name }
+            }
             $n++
         }
     }
-    Write-Host "$($f.Name): $n $Label clips"
+    Write-Host "$($f.Name): $n $Label clips ($category)"
     $total += $n
 }
-Write-Host "Total: $total clips in $OutDir"
+
+# info.labels: the clips of earlier runs in this folder, plus this run's
+$listed = foreach ($key in ($entries.Keys | Sort-Object)) { $entries[$key] }
+$json = [ordered]@{ version = 1; files = @($listed) } | ConvertTo-Json -Depth 6
+[IO.File]::WriteAllText((Join-Path $OutDir 'info.labels'), $json, (New-Object Text.UTF8Encoding($false)))  # no BOM
+Write-Host "Total: $total clips in $OutDir (info.labels lists $($entries.Count))"

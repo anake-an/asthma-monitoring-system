@@ -1,8 +1,8 @@
 # 🫁 RespiroSync: AI-Powered Asthma Monitoring System
 
 ![Version](https://img.shields.io/badge/version-v6.2.0-blue)
-![Firmware](https://img.shields.io/badge/firmware-3.4.0-informational)
-![Edge AI](https://img.shields.io/badge/Edge%20AI-3.1.0-informational)
+![Firmware](https://img.shields.io/badge/firmware-3.5.0-informational)
+![Edge AI](https://img.shields.io/badge/Edge%20AI-3.2.0-informational)
 ![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)
 ![Laravel](https://img.shields.io/badge/Laravel-12-red.svg)
 ![Python](https://img.shields.io/badge/Python-3.10-yellow.svg)
@@ -54,7 +54,7 @@ A responsive dashboard in light and dark mode: live readings per room, the AI pa
 
 | Feature | Technology | Description |
 |---|---|---|
-| **Cough detection at the edge** | `Raspberry Pi Pico` + `Edge Impulse` | A neural network trained in Edge Impulse (Audio MFE + 1D CNN, int8) tells a cough from talking, TV, laughing, throat clearing and traffic: 93 % on validation, 86 % on unseen test sounds. One core records without a break, the other classifies the last second every 0.5 s (260 ms of work), and a cough counts when two windows in a row agree. Details in [`docs/EDGE_IMPULSE.md`](docs/EDGE_IMPULSE.md). |
+| **Cough detection at the edge** | `Raspberry Pi Pico` + `Edge Impulse` | A neural network trained in Edge Impulse (Audio MFE + 1D CNN, int8) tells a cough from talking, TV, laughing, throat clearing and traffic: 93 % on validation, 86 % on unseen test sounds. One core records without a break, the other classifies the last second every 0.25 s (about 140 ms of work); a cough counts when 2 of the last 3 windows agree, and a level guard keeps far and near coughs in the loudness the model learned. Details in [`docs/EDGE_IMPULSE.md`](docs/EDGE_IMPULSE.md). |
 | **Environmental telemetry** | `ESP32` | Dust, gas, temperature and humidity every 3 s. The gas and dust sensors calibrate themselves against the cleanest air they see, and the gas sensor warms up for 3 minutes before it is read. |
 | **Secure IoT transport** | `Mosquitto + Cloudflare Tunnel` | MQTT over WSS. No anonymous access. Each device can only use the topics of its own token (broker ACL). |
 | **AI, two levels** | `Python / scikit-learn` | A **room model per device** learns what is normal for that room and flags unusual readings (Stage 1). A **risk model per child**, once about two flare-ups are recorded, learns what comes before a rescue dose or a cough cluster in the next hour and shows a percentage (Stage 2: logistic regression, then Random Forest). It uses window averages, how fast dust and humidity are rising, night-time, coughs and the daily dose, and it is evaluated by recall and precision on later data. Coughs reviewed as false alarms are left out of training. |

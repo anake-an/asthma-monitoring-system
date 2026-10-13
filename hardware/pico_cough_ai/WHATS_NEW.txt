@@ -1,6 +1,6 @@
 # What owners see under "What's new" when this Edge AI build is offered as an update.
 # One short point per line, in plain words. Lines starting with # are ignored.
 # Update it together with EDGE_AI_VERSION in pico_cough_ai.ino.
-Cough AI retrained with recordings from this microphone
-Reports sounds it was almost sure of as possible coughs, for you to check
-Its sensitivity follows your cough reviews (needs device firmware 3.4.0)
+Catches short coughs better by listening four times a second
+Copes better with coughs that are far away or very close
+Restarts by itself if it ever freezes

@@ -28,11 +28,11 @@ The ESP32 is the central brain of the hardware system.
         *   **Alert from the app:** "!! ALERT !!".
         *   **Connection drops:** "Offline / Alarms still on".
     *   **Clock source:** the internet time servers (NTP). Where a network blocks those (UDP port 123), the device asks the server over MQTT (a `time_request` event, answered with a `set_time` command), every 30 s until it has the time.
-    *   **Night mode (21:00-07:00, can be switched off per room in Smart Alerts):** the backlight is off unless there is an alarm or a cough. It also lights up for 30 s after the board's **BOOT** button is pressed. Outside night mode, the BOOT button shows the next page.
+    *   **Night mode (21:00-07:00, can be switched off per room in Smart Alerts):** the backlight is off unless there is an alarm or a cough. It also lights up for 30 s after the board's **BOOT** button is pressed. Outside night mode, the BOOT button shows the next page. **Holding BOOT for 2 s** while an alarm sounds silences the buzzer for 10 minutes (the screen shows "Alarm silenced").
 
 ## 2. Raspberry Pi Pico (Acoustic AI Coprocessor)
 The Raspberry Pi Pico (the **Edge AI** module) listens for coughs, so the ESP32 never handles audio.
-*   **Cough model:** `pico_cough_ai/pico_cough_ai.ino` runs an Edge Impulse neural network (Audio MFE + 1D CNN, int8) from `libraries/RespiroSync_Cough_inferencing`. Core 1 records the INMP441 without a break; core 0 classifies the last second every 0.5 s (about 260 ms of work) and reports `COUGH:<level>,<score>` when the cough score, averaged over two windows in a row, reaches 0.6. Level 1-4 is the loudness, the score is how sure the model is.
+*   **Cough model:** `pico_cough_ai/pico_cough_ai.ino` runs an Edge Impulse neural network (Audio MFE + 1D CNN, int8) from `libraries/RespiroSync_Cough_inferencing`. Core 1 records the INMP441 without a break; core 0 classifies the last second every 0.25 s (about 140 ms of work) and reports `COUGH:<level>,<score>` when 2 of the last 3 windows reach the room's threshold (0.6 to start, tuned by the cough reviews), or `MAYBE:` (a possible cough) a little under it. A watchdog restarts it if it hangs. Level 1-4 is the loudness, the score is how sure the model is.
 *   **Training data, settings and results:** [`docs/EDGE_IMPULSE.md`](../docs/EDGE_IMPULSE.md) (93 % on validation, 86 % on unseen test sounds).
 *   **Core:** use the **arduino-pico** core by Earle Philhower ("Raspberry Pi Pico/RP2040" in Boards Manager). The sketches use its `I2S i2s(INPUT)` API.
 *   **Library (USB flashing only):** copy `libraries/RespiroSync_Cough_inferencing` into `Documents/Arduino/libraries`. GitHub Actions uses it straight from the repo.

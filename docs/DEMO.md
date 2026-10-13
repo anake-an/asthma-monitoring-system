@@ -21,7 +21,7 @@ NAS commands run from the project folder (`/volume2/docker/iot-project`) and nee
 
 1. Press the ESP32's **EN** (reset) button. The start-up appears: RespiroSync slides in, then Connecting WiFi, WiFi connected (network name), Setting clock, Connecting cloud, Ready.
 2. Point out the pages, every 5 s: **Air quality** (PM2.5 and gas), **Room climate** (temperature and humidity), the **clock** with the online icon.
-3. Press the **BOOT** button to skip to the next page. At night, the screen is dark and BOOT lights it.
+3. Press the **BOOT** button to skip to the next page. At night, the screen is dark and BOOT lights it. Holding BOOT for 2 s during an alarm silences the buzzer for 10 minutes.
 
 ## 2. The dashboard (2 min)
 

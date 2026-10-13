@@ -16,6 +16,7 @@ Raise `FIRMWARE_VERSION` and write `WHATS_NEW.txt` (what owners read in the upda
 
 | Firmware | Build | What changed |
 |---|---|---|
+| **3.5.0** | 261014 | Coughs held while offline (40, with their time; the server stores late ones without an alert); alarm hysteresis (3 readings over to start, 3 under the limit minus a margin to stop); BOOT held 2 s silences the buzzer for 10 min; last limits kept in flash; Edge AI reported as not connected after 25 min of silence; loop watchdog (5 s, off during updates); messages queued for the MQTT task; dust and gas baselines resist glitches and follow drift; temperature and humidity alarms no longer block updates; timers safe at the 49-day millis() wrap |
 | **3.4.0** | 261013.3 | Passes the room's cough threshold (`cough_threshold` in the config) to the Edge AI module (`THR:`), again after each hello; forwards possible coughs (`MAYBE:`) as `"possible": true`, without the cough screen or chirp |
 | 3.3.2 | 261013.2 | Asks 1.1.1.1 first, then the router, then 8.8.8.8 (the router answered some lookups with an error, which lwIP does not retry elsewhere); re-applied after every disconnect. Fixes the broker connection needing several tries |
 | 3.3.1 | 261013 | Backup DNS server (1.1.1.1) and up to 3 lookups before an update download, so a router that misses one DNS answer no longer fails the update; "Server not found" when it cannot look the server up; finds the LCD at 0x27 or 0x3F by itself |
@@ -41,6 +42,7 @@ The module that listens for coughs. Same version style (`2.0.0 Build 261011`): `
 
 | Edge AI | Build | What changed |
 |---|---|---|
+| **3.2.0** | 261014 | Classifies every 0.25 s; a cough when 2 of the last 3 windows reach the threshold (was the average of 2 windows at 0.5 s); level guard scales a window with a burst into the training loudness band (2,500-12,000, x0.33 to x6); watchdog (8 s) that also restarts when recording stops; sample counter safe at its ~74 h wrap |
 | **3.1.0** | 261013.3 | Model 1.0.4, retrained with 33 coughs and 6 min of room sound recorded through the device's own INMP441 (396 cough clips with shifts and quieter copies); bigger network (16 + 32 filters). Cough threshold set by the ESP32 (`THR:`); possible coughs (`MAYBE:`) up to 0.15 under it in a window with a clear burst, at most one per 20 s |
 | 3.0.2 | 261013.2 | 200 Hz high-pass filter (mains hum measured at ~10x the level above 1 kHz); gain 4x instead of 8x (coughs scored 0.00 at 8x); USB command `rec <seconds>` streams raw audio as the model hears it; `hardware/tools/record_audio.ps1` saves it as WAV and `cut_clips.ps1` cuts training clips |
 | 3.0.1 | 261013 | Prints the cough score and microphone level (loudest 16 ms) on USB serial whenever a PC has the port open; replaces the DEBUG_SCORES switch |

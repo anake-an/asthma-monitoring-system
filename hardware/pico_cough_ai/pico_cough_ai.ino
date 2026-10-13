@@ -10,12 +10,13 @@
  * WHAT THIS DOES:
  *   An Edge Impulse model (Audio MFE + small 1D CNN, int8) tells a cough apart from other sounds
  *   (talking, TV, laughing, throat clearing, traffic). Core 1 records the microphone non-stop;
- *   core 0 classifies the last second of sound every half second (about 140 ms of work). A cough
- *   is reported when the cough score, averaged over two windows in a row, reaches the room's
- *   threshold (0.6 until the ESP32 sends the room's value, which follows the cough reviews). A score
- *   a little under it, in a window with a clear burst of sound, is reported as a possible cough for
- *   review. The first 3 s after power-on are ignored. Training data and results: docs/EDGE_IMPULSE.md.
- *   The Pico's LED blinks once for every detection sent to the ESP32.
+ *   core 0 classifies the last second of sound every 0.25 s (about 140 ms of work). A cough is
+ *   reported when at least two of the last three windows reach the room's threshold (0.6 until the
+ *   ESP32 sends the room's value, which follows the cough reviews). A score a little under it, in a
+ *   window with a clear burst of sound, is reported as a possible cough for review. A window with a
+ *   burst is first scaled into the loudness band the model learned (level guard). The first 3 s
+ *   after power-on are ignored; a watchdog restarts the Pico if it hangs. Training data and
+ *   results: docs/EDGE_IMPULSE.md. The Pico's LED blinks once for every detection sent to the ESP32.
  *
  * Cloud updates: the ESP32 downloads a new build from the server and sends it over the UART
  * link (UPDATE PROTOCOL below); this firmware stores it in the FS area and installs it on
@@ -54,7 +55,7 @@
 #include <RespiroSync_Cough_inferencing.h>
 
 // Raise for every build you publish; CI adds the build stamp (build_info.h). See FIRMWARE_HISTORY.md.
-#define EDGE_AI_VERSION "3.1.0"
+#define EDGE_AI_VERSION "3.2.0"
 #if __has_include("build_info.h")
 #include "build_info.h"
 #endif
@@ -70,7 +71,7 @@ const unsigned long LINK_BAUD = 115200;
 
 const int SAMPLE_RATE = EI_CLASSIFIER_FREQUENCY;     // 16 kHz, as the model was trained
 const int WINDOW = EI_CLASSIFIER_RAW_SAMPLE_COUNT;   // 1 s of sound per classification
-const int STEP = WINDOW / 2;                         // a new classification every 0.5 s
+const int STEP = WINDOW / 4;                         // a new classification every 0.25 s (~140 ms of work each)
 
 // INMP441 samples are 24-bit in a 32-bit slot. Shifting right by 14 gives 16-bit samples with
 // 4x gain. Measured on the device: at 8x a cough at arm's length reached ~10,000 (loudest 16 ms)
@@ -91,6 +92,11 @@ const unsigned long SETTLE_MS = 3000;      // ignore sound for this long after p
 // Loudness level 1-4 of a cough: the loudest 16 ms of the window against this RMS (16-bit,
 // about 75 dB SPL at the mic); level 2 from 2x, 3 from 4x, 4 from 6x.
 const float LEVEL_RMS = 1500.0f;
+// Level guard (levelGuard): the band of loudness the training coughs had, and how far a window
+// with a burst may be scaled into it.
+const float LEVEL_LOW = 2500.0f, LEVEL_HIGH = 12000.0f;
+const float LEVEL_MAX_GAIN = 6.0f, LEVEL_MIN_GAIN = 0.33f;
+const uint32_t WATCHDOG_MS = 8000;  // the Pico restarts when its main loop stops for this long
 
 I2S i2s(INPUT);
 volatile bool micReady = false;
@@ -98,8 +104,11 @@ volatile bool micChecked = false;   // core 1 has tried to start the microphone
 unsigned long lastCoughTime = 0;
 
 // Core 1 writes the microphone into this ring; core 0 copies the last second out of it.
+// samplesRecorded only ever counts (it wraps after ~74 h: compare it by difference, never with <);
+// ringPos is where the next sample goes, so the ring has no jump when the count wraps.
 int16_t ring[WINDOW];
 volatile uint32_t samplesRecorded = 0;
+volatile uint32_t ringPos = 0;
 int16_t window[WINDOW];             // the second being classified
 
 void sayHello() {
@@ -145,9 +154,37 @@ uint16_t crc16(const uint8_t *data, size_t len, uint16_t crc) {
   return crc;
 }
 
+/** Read exactly n bytes from the ESP32 within timeoutMs, feeding the watchdog while waiting. */
 bool readExact(uint8_t *buf, size_t n, unsigned long timeoutMs) {
-  Serial1.setTimeout(timeoutMs);
-  return Serial1.readBytes(buf, n) == n;
+  size_t got = 0;
+  unsigned long start = millis();
+  while (got < n) {
+    int c = Serial1.read();
+    if (c >= 0) {
+      buf[got++] = (uint8_t)c;
+      continue;
+    }
+    if (millis() - start >= timeoutMs) return false;
+    rp2040.wdt_reset();  // long waits are normal during an update
+  }
+  return true;
+}
+
+/** One line from the ESP32 (without the newline) within timeoutMs, feeding the watchdog. */
+String readLineWaiting(unsigned long timeoutMs) {
+  String line;
+  unsigned long start = millis();
+  while (millis() - start < timeoutMs) {
+    int c = Serial1.read();
+    if (c < 0) {
+      rp2040.wdt_reset();
+      continue;
+    }
+    if (c == '\n') break;
+    line += (char)c;
+  }
+  line.trim();
+  return line;
 }
 
 /** Receive a new build ("UPD:<size>" was just read) and install it, or leave everything as is. */
@@ -193,9 +230,7 @@ void receiveUpdate(size_t size) {
     Serial1.println("K");
   }
 
-  Serial1.setTimeout(10000);
-  String end = Serial1.readStringUntil('\n');
-  end.trim();
+  String end = readLineWaiting(10000);
   digitalWrite(LED_BUILTIN, LOW);
   if (end != "END") {
     Serial.println("Update aborted: nothing installed");
@@ -243,6 +278,9 @@ void setup() {
   // Keep answering the ESP32 (version, updates) even without the microphone.
   else Serial.println("Failed to initialise I2S. Check INMP441 wiring (SCK=GP14, WS=GP15, SD=GP13).");
   sayHello();
+  // A hang (the classifier, the link, or recording stuck on core 1) restarts the Pico; the ESP32
+  // then sees its hello again. Fed by feedWatchdog() in loop() and while an update is received.
+  rp2040.wdt_begin(WATCHDOG_MS);
 }
 
 // ---------- Core 1: records the microphone without a break ----------
@@ -291,7 +329,9 @@ void loop1() {
   int32_t s = (int32_t)(y * (1.0f / (1 << (MIC_SHIFT - 8))));  // to 16-bit with gain
   if (s > 32767) s = 32767;
   if (s < -32768) s = -32768;
-  ring[samplesRecorded % WINDOW] = (int16_t)s;
+  uint32_t pos = ringPos;
+  ring[pos] = (int16_t)s;
+  ringPos = pos + 1 == (uint32_t)WINDOW ? 0 : pos + 1;
   samplesRecorded = samplesRecorded + 1;
 }
 
@@ -349,9 +389,9 @@ float loudestRms() {
   return loudest;
 }
 
-/** Loudness level 1-4 from the loudest 16 ms block of the window. */
-int loudnessLevel() {
-  float ratio = loudestRms() / LEVEL_RMS;
+/** Loudness level 1-4 from the loudest 16 ms block of the window (as heard, before the level guard). */
+int loudnessFrom(float loudest) {
+  float ratio = loudest / LEVEL_RMS;
   if (ratio >= 6) return 4;
   if (ratio >= 4) return 3;
   if (ratio >= 2) return 2;
@@ -373,26 +413,65 @@ void handleUsbCommand() {
   if (seconds < 1 || seconds > 60) return;
   const uint32_t total = (uint32_t)seconds * SAMPLE_RATE;
   Serial.printf("REC %lu\n", (unsigned long)total);
-  uint32_t pos = samplesRecorded, sent = 0;
+  uint32_t idx = ringPos;            // the next sample core 1 writes
+  uint32_t counted = samplesRecorded;
+  uint32_t sent = 0;
   while (sent < total) {
-    uint32_t avail = samplesRecorded - pos;
+    rp2040.wdt_reset();
+    uint32_t avail = samplesRecorded - counted;  // new samples since the last chunk (wrap-safe)
     if (avail == 0) {
       delay(1);
       continue;
     }
-    if (avail > (uint32_t)WINDOW / 2) pos = samplesRecorded - WINDOW / 2;  // USB fell behind: skip ahead
-    uint32_t idx = pos % WINDOW;
-    uint32_t run = min(samplesRecorded - pos, (uint32_t)(WINDOW - idx));
+    if (avail > (uint32_t)WINDOW / 2) {  // USB fell behind: skip ahead
+      idx = (idx + avail - WINDOW / 2) % WINDOW;
+      counted += avail - WINDOW / 2;
+      avail = WINDOW / 2;
+    }
+    uint32_t run = min(avail, (uint32_t)(WINDOW - idx));
     run = min(run, total - sent);
     run = min(run, (uint32_t)512);
     Serial.write((const uint8_t *)(ring + idx), run * sizeof(int16_t));
-    pos += run;
+    idx = (idx + run) % WINDOW;
+    counted += run;
     sent += run;
   }
   Serial.print("\nEND\n");
 }
 
+/**
+ * Level guard: the model recognises coughs near the loudness it learned (training coughs: loudest
+ * 16 ms about LEVEL_LOW-LEVEL_HIGH at this gain). A window with a clear burst outside that band is
+ * scaled into it (LEVEL_MIN_GAIN to LEVEL_MAX_GAIN), so distance and microphone placement matter
+ * less. Windows without a burst (a quiet room, steady sound) are left as they are.
+ */
+void levelGuard(float loudest, bool burst) {
+  if (!burst || loudest <= 0) return;
+  float gain = 1.0f;
+  if (loudest < LEVEL_LOW) gain = min(LEVEL_LOW / loudest, LEVEL_MAX_GAIN);
+  else if (loudest > LEVEL_HIGH) gain = max(LEVEL_HIGH / loudest, LEVEL_MIN_GAIN);
+  if (gain == 1.0f) return;
+  for (int i = 0; i < WINDOW; i++) {
+    float v = window[i] * gain;
+    window[i] = (int16_t)(v > 32767.0f ? 32767.0f : (v < -32768.0f ? -32768.0f : v));
+  }
+}
+
+/** Feed the watchdog while core 1 keeps recording (or there is no microphone to record from). */
+void feedWatchdog() {
+  static uint32_t lastCount = 0;
+  static unsigned long lastProgressAt = 0;
+  uint32_t count = samplesRecorded;
+  if (!micReady || count != lastCount) {
+    lastCount = count;
+    lastProgressAt = millis();
+  }
+  // Recording stuck for 3 s: stop feeding, and the watchdog restarts the Pico.
+  if (millis() - lastProgressAt < 3000) rp2040.wdt_reset();
+}
+
 void loop() {
+  feedWatchdog();
   handleLink();
   handleUsbCommand();
   helloNowAndThen();
@@ -401,19 +480,25 @@ void loop() {
     return;
   }
 
-  // Wait for half a second of new sound (and a full second at the start).
+  // Wait for STEP of new sound (and a full second at the start). Compared by difference, so the
+  // sample count wrapping after ~74 h changes nothing.
   static uint32_t nextAt = WINDOW;
   uint32_t recorded = samplesRecorded;
-  if (recorded < nextAt) {
+  if ((int32_t)(recorded - nextAt) < 0) {
     delay(2);
     return;
   }
   nextAt = recorded + STEP;  // if classifying ever takes longer, skip ahead instead of falling behind
 
-  // Copy the last second out of the ring, oldest sample first.
-  uint32_t start = recorded % WINDOW;
+  // Copy the last second out of the ring, oldest sample (where core 1 writes next) first.
+  uint32_t start = ringPos;
   memcpy(window, ring + start, (WINDOW - start) * sizeof(int16_t));
   memcpy(window + (WINDOW - start), ring, start * sizeof(int16_t));
+
+  // Loudness as heard (for the report and the possible-cough check), then the level guard.
+  float loudest = loudestRms();
+  bool burst = hasBurst();
+  levelGuard(loudest, burst);
 
   signal_t signal;
   signal.total_length = WINDOW;
@@ -425,32 +510,38 @@ void loop() {
   for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
     if (strcmp(result.classification[i].label, "cough") == 0) cough = result.classification[i].value;
   }
-  // Two windows in a row (they overlap by half) must agree: one odd window is not enough.
-  static float previous = 0;
-  float score = (cough + previous) / 2;
-  previous = cough;
+  // The last three windows (0.25 s apart, so a cough is in all three): a cough when at least two
+  // reach the threshold. One odd window is not enough, and a short cough that one window catches
+  // only partly is not averaged away. The score reported is the mean of the two highest.
+  static float scores[3] = {0, 0, 0};
+  scores[2] = scores[1];
+  scores[1] = scores[0];
+  scores[0] = cough;
+  int over = (scores[0] >= coughThreshold) + (scores[1] >= coughThreshold) + (scores[2] >= coughThreshold);
+  float lowest = min(scores[0], min(scores[1], scores[2]));
+  float score = (scores[0] + scores[1] + scores[2] - lowest) / 2;
 
   // With a PC on the USB port (Serial Monitor at 115200 open), print what the microphone hears.
   // "loudest" near 0 all the time means no signal from the microphone: check its wiring.
   if (Serial) {
-    Serial.printf("cough %.2f  two-window %.2f  loudest %5.0f  (%d ms)\n", cough, score, loudestRms(),
+    Serial.printf("cough %.2f  top-two %.2f  loudest %5.0f%s  (%d ms)\n", cough, score, loudest, burst ? " burst" : "",
                   (int)(result.timing.dsp + result.timing.classification));
   }
   if (millis() < SETTLE_MS) return;
 
   unsigned long now = millis();
-  if (score >= coughThreshold) {
+  if (over >= 2) {
     if (now - lastCoughTime < DEBOUNCE_MS) return;
     lastCoughTime = now;
-    sendCough(loudnessLevel(), score);
+    sendCough(loudnessFrom(loudest), score);
     return;
   }
   // A possible cough: a little under the threshold, in a window with a clear burst of sound.
   // Caregivers review it; confirmed ones make the room more sensitive (server side).
   static unsigned long lastPossibleTime = 0;
-  if (score >= coughThreshold - POSSIBLE_MARGIN && now - lastCoughTime >= DEBOUNCE_MS
-      && (lastPossibleTime == 0 || now - lastPossibleTime >= POSSIBLE_GAP_MS) && hasBurst()) {
+  if (score >= coughThreshold - POSSIBLE_MARGIN && burst && now - lastCoughTime >= DEBOUNCE_MS
+      && (lastPossibleTime == 0 || now - lastPossibleTime >= POSSIBLE_GAP_MS)) {
     lastPossibleTime = now;
-    sendPossible(loudnessLevel(), score);
+    sendPossible(loudnessFrom(loudest), score);
   }
 }
