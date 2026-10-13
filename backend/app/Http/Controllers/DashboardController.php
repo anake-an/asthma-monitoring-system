@@ -8,6 +8,7 @@ use App\Models\HardwareConfig;
 use App\Models\InhalerLog;
 use App\Models\LimitChange;
 use App\Models\TelemetryLog;
+use App\Services\CoughSensitivity;
 use App\Support\Mqtt;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -49,10 +50,14 @@ class DashboardController extends Controller
 
         $events = CoughEvent::with('device:id,name')
             ->whereIn('device_id', $deviceIds)
-            // ?exclude_false_alarms=1: only coughs not marked as false alarm
+            // ?exclude_false_alarms=1: only what counts as a cough (no false alarms, no unconfirmed possible coughs)
             ->when($request->boolean('exclude_false_alarms'), fn ($q) => $q->notFalseAlarm())
-            // ?unreviewed=1: only coughs nobody has reviewed yet (the dashboard's banner)
-            ->when($request->boolean('unreviewed'), fn ($q) => $q->whereNull('is_verified'))
+            // ?hide_false_alarms=1: everything except what was marked false alarm / not a cough (the
+            // dashboard's history; they stay stored for the report and the cough sensitivity)
+            ->when($request->boolean('hide_false_alarms'), fn ($q) => $q->where(fn ($q) => $q->whereNull('is_verified')->orWhere('is_verified', true)))
+            // ?unreviewed=1: only coughs nobody has reviewed yet (the dashboard's banner); possible
+            // coughs wait in the history without a banner
+            ->when($request->boolean('unreviewed'), fn ($q) => $q->whereNull('is_verified')->where('is_possible', false))
             ->orderBy('recorded_at', 'desc')
             ->paginate($perPage);
 
@@ -103,6 +108,15 @@ class DashboardController extends Controller
             'verified' => $verified,
             'inhaler_used' => $inhalerUsed,
         ]);
+
+        // The reviews tune the room's cough sensitivity (a rule, see CoughSensitivity).
+        if ($config = CoughSensitivity::adjust($event->device)) {
+            try {
+                app(Mqtt::class)->publishConfig($event->device, $config);
+            } catch (\Throwable $e) {
+                Log::warning("Cough sensitivity for device {$event->device_id} not sent: " . $e->getMessage());
+            }
+        }
 
         return response()->json($event->makeHidden('device'));
     }
@@ -213,7 +227,7 @@ class DashboardController extends Controller
             'start_date' => $startDate->toDateString(),
             'end_date' => now()->toDateString(),
             'total_events' => $coughs()->count(),
-            'false_alarms' => $all()->where('is_verified', false)->count(),
+            'false_alarms' => $all()->where('is_verified', false)->where('is_possible', false)->count(),
             'high_severity_events' => $coughs()->where('severity', '>=', CoughEvent::SEVERITY_ALERT)->count(),
             'inhaler_doses' => $rescueDoses + $controllerDoses,
             'rescue_doses' => $rescueDoses,

@@ -7,7 +7,7 @@ export type DailyData = {
 };
 
 export type LimitChange = {
-  limit_name: "pm25" | "temperature" | "humidity" | "mq135";
+  limit_name: "pm25" | "temperature" | "humidity" | "mq135" | "cough"; // cough: score needed, in %
   old_value: number | null;
   new_value: number;
   source: "ai" | "user" | "rule"; // rule: missed daily dose (15 % lower until a dose is logged)
@@ -37,6 +37,7 @@ export const LIMIT_LABELS: Record<LimitChange["limit_name"], { name: string; uni
   temperature: { name: "Temperature", unit: "°C" },
   humidity: { name: "Humidity", unit: "%" },
   mq135: { name: "Gas", unit: " ppm" },
+  cough: { name: "Cough score needed", unit: "%" }, // the room's cough sensitivity, from the reviews
 };
 
 export const timesText = (n: number) => (n === 0 ? "0 times" : n === 1 ? "once" : `${n} times`);

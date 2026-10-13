@@ -16,6 +16,7 @@ Raise `FIRMWARE_VERSION` and write `WHATS_NEW.txt` (what owners read in the upda
 
 | Firmware | Build | What changed |
 |---|---|---|
+| **3.4.0** | 261013.3 | Passes the room's cough threshold (`cough_threshold` in the config) to the Edge AI module (`THR:`), again after each hello; forwards possible coughs (`MAYBE:`) as `"possible": true`, without the cough screen or chirp |
 | 3.3.2 | 261013.2 | Asks 1.1.1.1 first, then the router, then 8.8.8.8 (the router answered some lookups with an error, which lwIP does not retry elsewhere); re-applied after every disconnect. Fixes the broker connection needing several tries |
 | 3.3.1 | 261013 | Backup DNS server (1.1.1.1) and up to 3 lookups before an update download, so a router that misses one DNS answer no longer fails the update; "Server not found" when it cannot look the server up; finds the LCD at 0x27 or 0x3F by itself |
 | **3.3.0** | 261010.9 | Passes Edge AI updates on to the Pico; faster link to it (115200). **Needs Edge AI 2.0.0** (older Pico builds talk at 9600) |
@@ -40,6 +41,7 @@ The module that listens for coughs. Same version style (`2.0.0 Build 261011`): `
 
 | Edge AI | Build | What changed |
 |---|---|---|
+| **3.1.0** | 261013.3 | Model 1.0.4, retrained with 33 coughs and 6 min of room sound recorded through the device's own INMP441 (396 cough clips with shifts and quieter copies); bigger network (16 + 32 filters). Cough threshold set by the ESP32 (`THR:`); possible coughs (`MAYBE:`) up to 0.15 under it in a window with a clear burst, at most one per 20 s |
 | 3.0.2 | 261013.2 | 200 Hz high-pass filter (mains hum measured at ~10x the level above 1 kHz); gain 4x instead of 8x (coughs scored 0.00 at 8x); USB command `rec <seconds>` streams raw audio as the model hears it; `hardware/tools/record_audio.ps1` saves it as WAV and `cut_clips.ps1` cuts training clips |
 | 3.0.1 | 261013 | Prints the cough score and microphone level (loudest 16 ms) on USB serial whenever a PC has the port open; replaces the DEBUG_SCORES switch |
 | **3.0.0** | 261011 | **Edge Impulse cough model**: a neural network tells coughs from other sounds (was a loudness check); the report carries a cough score. Model and results in `docs/EDGE_IMPULSE.md` |

@@ -150,7 +150,7 @@ const ei_impulse_t impulse_1135828_1 = {
     .project_name = "RespiroSync Cough",
     .impulse_id = 1,
     .impulse_name = "Impulse #1",
-    .deploy_version = 1,
+    .deploy_version = 4,
 
     .nn_input_frame_size = 992,
     .raw_sample_count = 16000,

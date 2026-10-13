@@ -126,4 +126,17 @@ class CoughReviewTest extends TestCase
         $new = $this->cough(1);
         $this->getJson("/api/cough-events?per_page=1&unreviewed=1&device_id={$this->bedroom->id}")->assertJsonPath('data.0.id', $new->id);
     }
+
+    public function test_the_history_can_hide_false_alarms_but_they_stay_stored(): void
+    {
+        $real = $this->cough(4);
+        $this->review($real, true, false);
+        $this->review($this->cough(3), false, false);
+        $possible = CoughEvent::create(['device_id' => $this->bedroom->id, 'severity' => CoughEvent::SEVERITY_LOGGED, 'is_possible' => true, 'recorded_at' => now()->subMinutes(2)]);
+        $this->review(CoughEvent::create(['device_id' => $this->bedroom->id, 'severity' => CoughEvent::SEVERITY_LOGGED, 'is_possible' => true, 'recorded_at' => now()->subMinute()]), false, false);
+
+        $shown = $this->getJson("/api/cough-events?hide_false_alarms=1&device_id={$this->bedroom->id}")->assertJsonPath('total', 2)->json('data');
+        $this->assertEqualsCanonicalizing([$real->id, $possible->id], array_column($shown, 'id'));
+        $this->assertSame(4, CoughEvent::count());
+    }
 }

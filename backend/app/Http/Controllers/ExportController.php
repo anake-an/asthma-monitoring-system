@@ -36,10 +36,11 @@ class ExportController extends Controller
                     ->map(fn ($r) => [$rooms[$r->device_id] ?? '', self::time($r->recorded_at), $r->pm25_level, $r->temperature, $r->humidity, $r->mq135_level, $r->samples]),
             ],
             'coughs' => [
-                ['room', 'recorded_at', 'met_alert_rule', 'detection_strength', 'review', 'inhaler_used'],
+                ['room', 'recorded_at', 'met_alert_rule', 'cough_score', 'possible', 'review', 'inhaler_used'],
                 CoughEvent::whereIn('device_id', $deviceIds)->orderBy('recorded_at')->lazy(2000)
                     ->map(fn ($c) => [$rooms[$c->device_id] ?? '', self::time($c->recorded_at), $c->severity >= CoughEvent::SEVERITY_ALERT ? 'yes' : 'no',
-                        $c->confidence, $c->is_verified === null ? 'not reviewed' : ($c->is_verified ? 'confirmed' : 'false alarm'), $c->inhaler_used ? 'yes' : 'no']),
+                        $c->confidence, $c->is_possible ? 'yes' : 'no',
+                        $c->is_verified === null ? 'not reviewed' : ($c->is_verified ? 'confirmed' : ($c->is_possible ? 'not a cough' : 'false alarm')), $c->inhaler_used ? 'yes' : 'no']),
             ],
             'doses' => [
                 ['administered_at', 'type', 'logged_by', 'how'],

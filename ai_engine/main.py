@@ -243,8 +243,10 @@ def fetch_telemetry(device_id: int) -> pd.DataFrame:
 
 
 def fetch_coughs(device_id: int) -> pd.DataFrame:
-    # Events the caregiver marked as false alarms (is_verified = 0) are excluded from training.
-    return _frame("SELECT recorded_at FROM cough_events WHERE device_id = :d AND (is_verified IS NULL OR is_verified = 1)",
+    # What counts as a cough: confirmed, or a detection not reviewed yet. False alarms (is_verified = 0)
+    # and possible coughs nobody confirmed (is_possible = 1) are left out, as in the backend.
+    return _frame("SELECT recorded_at FROM cough_events WHERE device_id = :d "
+                  "AND (is_verified = 1 OR (is_verified IS NULL AND is_possible = 0))",
                   {"d": device_id})
 
 
@@ -452,7 +454,7 @@ def predict_attack(device_id: int = Query(..., ge=1)):
     def count_coughs(start):
         return int(pd.read_sql(
             text("SELECT COUNT(*) AS c FROM cough_events WHERE device_id = :d AND recorded_at >= :since "
-                 "AND (is_verified IS NULL OR is_verified = 1)"),
+                 "AND (is_verified = 1 OR (is_verified IS NULL AND is_possible = 0))"),
             engine, params={"d": device_id, "since": start},
         )["c"][0])
 
