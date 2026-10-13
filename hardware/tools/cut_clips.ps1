@@ -2,6 +2,8 @@
 #
 #   .\cut_clips.ps1 -In coughs-01.wav -Label cough -OutDir clips   # one clip per cough
 #   .\cut_clips.ps1 -In room-01.wav   -Label noise -OutDir clips   # every second of the file
+#   .\cut_clips.ps1 -In coughs -Label cough -PreRoll 0.05,0.15,0.3 # three clips per cough, shifted
+#   .\cut_clips.ps1 -In coughs -Label cough -Gain 0.5,0.7          # quieter copies (farther away)
 #
 # -In takes a file or a folder of .wav files (16 kHz, 16-bit mono). Clips are named
 # "<label>.<recording>-<n>.wav", so Edge Impulse's "Infer from filename" labels them.
@@ -14,7 +16,8 @@ param(
     [Parameter(Mandatory = $true)][ValidateSet('cough', 'noise')][string]$Label,
     [string]$OutDir = 'clips',
     [double[]]$PreRoll = @(0.15),
-    [double]$MinPeak = 1000
+    [double]$MinPeak = 1000,
+    [double[]]$Gain = @(1.0)
 )
 $ErrorActionPreference = 'Stop'
 $rate = 16000
@@ -39,10 +42,15 @@ function Read-Wav([string]$path) {
     throw "no audio data in $path"
 }
 
-function Write-Clip([string]$path, [int16[]]$s, [int]$start) {
+function Write-Clip([string]$path, [int16[]]$s, [int]$start, [double]$gain) {
     $n = $rate
+    $clip = New-Object int16[] $n
+    for ($i = 0; $i -lt $n; $i++) {
+        $v = [Math]::Round($s[$start + $i] * $gain)
+        $clip[$i] = [int16][Math]::Max(-32768, [Math]::Min(32767, $v))
+    }
     $bytes = New-Object byte[] ($n * 2)
-    [Buffer]::BlockCopy($s, $start * 2, $bytes, 0, $n * 2)
+    [Buffer]::BlockCopy($clip, 0, $bytes, 0, $n * 2)
     $fs = [IO.File]::Create($path); $w = New-Object IO.BinaryWriter($fs)
     $w.Write([Text.Encoding]::ASCII.GetBytes('RIFF')); $w.Write([int](36 + $bytes.Length))
     $w.Write([Text.Encoding]::ASCII.GetBytes('WAVEfmt ')); $w.Write([int]16)
@@ -90,7 +98,13 @@ foreach ($f in $files) {
         }
     }
     $n = 0
-    for ($i = 0; $i -lt $starts.Count; $i++) { Write-Clip (Join-Path $OutDir "$Label.$name-$($tags[$i]).wav") $s $starts[$i]; $n++ }
+    for ($i = 0; $i -lt $starts.Count; $i++) {
+        foreach ($g in $Gain) {
+            $suffix = if ($Gain.Count -gt 1 -or $g -ne 1.0) { "-g$([int]($g * 100))" } else { "" }
+            Write-Clip (Join-Path $OutDir "$Label.$name-$($tags[$i])$suffix.wav") $s $starts[$i] $g
+            $n++
+        }
+    }
     Write-Host "$($f.Name): $n $Label clips"
     $total += $n
 }
