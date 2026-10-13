@@ -67,7 +67,8 @@ class DataExportTest extends TestCase
         LimitChange::create(['user_id' => $this->parent->id, 'device_id' => $this->bedroom->id, 'limit_name' => 'pm25', 'old_value' => 35, 'new_value' => 31.5,
             'source' => 'ai', 'reason' => 'Room unusual (Stage 1)', 'created_at' => '2026-10-10 03:00:00']);
 
-        $this->assertSame(['Bedroom', '2026-10-10 02:00:00', 'yes', '0.9', 'false alarm', 'no'], $this->csv('coughs')[1]);
+        $this->assertSame(['room', 'recorded_at', 'met_alert_rule', 'cough_score', 'possible', 'review', 'inhaler_used'], $this->csv('coughs')[0]);
+        $this->assertSame(['Bedroom', '2026-10-10 02:00:00', 'yes', '0.9', 'no', 'false alarm', 'no'], $this->csv('coughs')[1]);
         $this->assertSame(['2026-10-10 02:05:00', 'emergency (rescue)', $this->parent->name, 'logged by hand'], $this->csv('doses')[1]);
         $this->assertSame(['2026-10-10 03:00:00', 'Bedroom', 'pm25', '35', '31.5', 'AI', 'Room unusual (Stage 1)'], $this->csv('limits')[1]);
         $this->assertSame(3, AuditLog::where('action', 'data.exported')->count());

@@ -50,8 +50,11 @@ class DashboardController extends Controller
 
         $events = CoughEvent::with('device:id,name')
             ->whereIn('device_id', $deviceIds)
-            // ?exclude_false_alarms=1: only coughs not marked as false alarm
+            // ?exclude_false_alarms=1: only what counts as a cough (no false alarms, no unconfirmed possible coughs)
             ->when($request->boolean('exclude_false_alarms'), fn ($q) => $q->notFalseAlarm())
+            // ?hide_false_alarms=1: everything except what was marked false alarm / not a cough (the
+            // dashboard's history; they stay stored for the report and the cough sensitivity)
+            ->when($request->boolean('hide_false_alarms'), fn ($q) => $q->where(fn ($q) => $q->whereNull('is_verified')->orWhere('is_verified', true)))
             // ?unreviewed=1: only coughs nobody has reviewed yet (the dashboard's banner); possible
             // coughs wait in the history without a banner
             ->when($request->boolean('unreviewed'), fn ($q) => $q->whereNull('is_verified')->where('is_possible', false))

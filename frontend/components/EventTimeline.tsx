@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRooms, withDevice } from "@/lib/rooms";
 
 type CoughEvent = {
@@ -18,16 +18,24 @@ type PaginationData = {
   total: number;
 };
 
+// The history shows the 5 latest coughs, and at most the 10 latest (2 pages). Older ones and false
+// alarms are hidden here but stay stored: the report, the risk AI and the cough sensitivity use them.
+const PAGE_SIZE = 5;
+const MAX_SHOWN = 10;
+
 export default function EventTimeline() {
   const { device, deviceId, canMarkCoughs } = useRooms(); // the room on screen; viewers only look
   const [events, setEvents] = useState<CoughEvent[]>([]);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState<PaginationData | null>(null);
+  // A cough just marked as false alarm: hidden at once, with a few seconds to undo it.
+  const [undo, setUndo] = useState<number | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchEvents = useCallback(async () => {
     try {
       const token = localStorage.getItem("auth_token");
-      const res = await fetch(withDevice(`/api/cough-events?page=${page}&per_page=10`, deviceId), {
+      const res = await fetch(withDevice(`/api/cough-events?page=${page}&per_page=${PAGE_SIZE}&hide_false_alarms=1`, deviceId), {
         headers: { 
           "Authorization": `Bearer ${token}`,
           "Accept": "application/json"
@@ -46,7 +54,7 @@ export default function EventTimeline() {
           setEvents(data.data);
           setPagination({
             current_page: data.current_page,
-            last_page: data.last_page,
+            last_page: Math.min(data.last_page, MAX_SHOWN / PAGE_SIZE),
             total: data.total
           });
         } else {
@@ -76,10 +84,18 @@ export default function EventTimeline() {
         })
       });
       if (res.ok) {
-        // Update local state immediately
-        setEvents(prev => prev.map(ev => 
-          ev.id === id ? { ...ev, is_verified: isVerified, inhaler_used: inhalerUsed } : ev
-        ));
+        if (isVerified === false) {
+          // A false alarm leaves the list straight away (it stays stored, see PAGE_SIZE above).
+          setEvents(prev => prev.filter(ev => ev.id !== id));
+          setUndo(id);
+          if (undoTimer.current) clearTimeout(undoTimer.current);
+          undoTimer.current = setTimeout(() => setUndo(null), 6000);
+          fetchEvents(); // the next cough moves up into the list
+        } else {
+          setEvents(prev => prev.map(ev =>
+            ev.id === id ? { ...ev, is_verified: isVerified, inhaler_used: inhalerUsed } : ev
+          ));
+        }
 
         // Option 1: Trigger-Based AI Training
         // If a cough is verified, tell AI to instantly re-evaluate thresholds
@@ -113,10 +129,22 @@ export default function EventTimeline() {
           <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Cough History</h2>
           <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">Recent cough activity detected in {device ? device.name : "the room"}</p>
         </div>
-        <span className="text-xs text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-[#1a1a2e] px-2.5 py-1 rounded border border-zinc-300 dark:border-[#2a2a40]">
-          {pagination ? `${pagination.total} total events` : `${events.length} events`}
+        <span className="text-xs text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-[#1a1a2e] px-2.5 py-1 rounded border border-zinc-300 dark:border-[#2a2a40]" title="The full history is in the Activity Log and the data export">
+          {pagination && pagination.total > MAX_SHOWN ? `Latest ${MAX_SHOWN} of ${pagination.total}` : `${pagination ? pagination.total : events.length} events`}
         </span>
       </div>
+
+      {undo !== null && (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-md border border-zinc-200 dark:border-[#2a2a40] bg-zinc-50 dark:bg-[#16162a] px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300" role="status">
+          <span>Marked as false alarm and hidden. It still teaches this room's cough sensitivity.</span>
+          <button
+            onClick={() => { const id = undo; setUndo(null); handleVerify(id, null, false).then(fetchEvents); }}
+            className="shrink-0 font-medium text-blue-500 hover:underline"
+          >
+            Undo
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-x-auto overflow-y-auto border border-zinc-200 dark:border-[#1e1e30] rounded-md">
         <div className="min-w-[600px]">
