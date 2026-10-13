@@ -39,8 +39,21 @@ On the Pico (int8, EON Compiler): **258 ms** per window (MFE 250 ms + network 8 
 ## On the device
 
 - Core 1 records the microphone without a break into a 1 s ring buffer (24-bit samples to 16-bit with 4x gain, through a 200 Hz high-pass filter that removes mains hum and the DC offset; Edge AI 3.0.2).
-- Core 0 classifies the last second every 0.5 s. A cough is reported when the cough score, **averaged over two windows in a row**, reaches 0.6. That cuts single-window false alarms.
+- Core 0 classifies the last second every 0.5 s. A cough is reported when the cough score, **averaged over two windows in a row**, reaches the room's threshold (0.6 until the ESP32 sends the room's value, Edge AI 3.1.0). Averaging cuts single-window false alarms.
 - One report per 1.5 s at most, nothing in the first 3 s after power-on. The report (`COUGH:<level>,<score>`) carries the loudness level 1-4 (loudest 16 ms of the window) and the averaged cough score.
+- **Possible coughs** (Edge AI 3.1.0): a score up to 0.15 under the threshold, in a window whose loudest 16 ms is at least 4x its typical level, is sent as `MAYBE:<level>,<score>`, at most one per 20 s. The dashboard shows it for review; it never alerts and counts only once confirmed.
+
+## Learning from the reviews
+
+The device sends no audio, so the reviews cannot retrain the model. They move the room's **cough threshold** instead (`App\Services\CoughSensitivity`, a documented rule): possible coughs confirmed as real make the room more sensitive (−0.05), mostly false alarms less sensitive (+0.05), only confirmed coughs a little more (−0.02). Between 0.40 and 0.85, one change per room per 24 h, each needing new reviews; logged in the Activity Log. Improving the model itself still means recording and retraining (below).
+
+## Model 1.0.4 (Edge AI 3.1.0): retrained with the device's microphone
+
+- Added: 33 coughs (5 rounds of 20 s at different distances and loudness) and 6 minutes of room sound (talking, TV, fan, laughing and throat clearing, footsteps and doors, quiet), recorded through the INMP441 with `record_audio.ps1`. 6 faint bursts (breaths) were dropped by `cut_clips.ps1 -MinPeak`.
+- Each cough cut at 6 positions (`-PreRoll 0.05,0.1,0.15,0.22,0.3,0.4`) and, at 3 of them, at 50 % and 70 % volume (`-Gain`): 396 cough clips, 360 noise clips.
+- Network: 1D conv 16 filters, dropout, 1D conv 32 filters, dropout (200 cycles). Validation 89.5 % (cough 89.5 %, noise 89.6 %), test set 86 % (cough 82 %, noise 88 %). On the Pico: about 140 ms per window, 15 KB RAM.
+- The first model (1.0.1) recognised 3 of 19 test coughs recorded through the INMP441; the public recordings dominated it. Shifted and quieter copies give the device's coughs more weight.
+- **Microphone placement matters as much as the model:** in a later check, claps at 30 cm reached only ~930 (loudest 16 ms) where the recorded coughs had reached 20,000+, the sound hole being partly covered. The INMP441's sound hole is on the flat side of its board (opposite the metal can) and must face out through an opening; record training audio with the microphone in its final position.
 
 ## Next: train on the real microphone
 

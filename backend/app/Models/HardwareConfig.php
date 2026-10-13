@@ -30,6 +30,7 @@ class HardwareConfig extends Model
         'pm25_locked' => false, 'temperature_locked' => false, 'humidity_locked' => false, 'mq135_locked' => false,
         'is_buzzer_muted' => false,
         'night_mode' => true, // LCD backlight off 21:00-07:00
+        'cough_threshold' => 0.6, // cough score the Edge AI module needs; follows the reviews (CoughSensitivity)
         'ai_optimization_enabled' => true,
     ];
 
@@ -44,6 +45,7 @@ class HardwareConfig extends Model
         'missed_dose_base',
         'is_buzzer_muted',
         'night_mode',
+        'cough_threshold',
         'ai_optimization_enabled',
     ];
 
@@ -57,6 +59,7 @@ class HardwareConfig extends Model
         'missed_dose_base' => 'array',
         'is_buzzer_muted' => 'boolean',
         'night_mode' => 'boolean',
+        'cough_threshold' => 'float',
         'ai_optimization_enabled' => 'boolean',
     ];
 
@@ -308,6 +311,8 @@ class HardwareConfig extends Model
             'mq135_threshold' => $this->mq135_threshold,
             'is_buzzer_muted' => $this->is_buzzer_muted,
             'night_mode' => $this->night_mode ?? true,
+            // Cough score the Edge AI module needs before it reports a cough (Edge AI 3.1.0+, through ESP32 3.4.0+).
+            'cough_threshold' => round((float) ($this->cough_threshold ?? self::DEFAULTS['cough_threshold']), 2),
             // The room's child usually takes a daily dose and none is logged for 26 h: the LCD shows
             // a reminder (devices:dose-reminders re-sends this when it changes).
             'dose_due' => self::missedDailyDose($this->device?->patient_id, now()),

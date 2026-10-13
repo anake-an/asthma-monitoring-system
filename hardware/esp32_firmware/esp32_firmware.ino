@@ -54,7 +54,7 @@
 // Firmware "3.1.0 Build 261011": the version is set here (major.feature.fix, history in
 // hardware/FIRMWARE_HISTORY.md); the build stamp (build date YYMMDD, ".2" for a second build that
 // day) is written by CI into build_info.h. A build made in the Arduino IDE says "dev".
-#define FIRMWARE_VERSION "3.3.2"
+#define FIRMWARE_VERSION "3.4.0"
 #if __has_include("build_info.h")
 #include "build_info.h"
 #endif
@@ -131,6 +131,7 @@ struct Thresholds {
   bool muted = false;
   bool doseDue = false;   // the child's daily dose is overdue: the LCD shows a reminder
   bool nightMode = true;  // LCD backlight off 21:00-07:00 (switch in Smart Alerts)
+  float coughThreshold = 0.6f;  // cough score the Edge AI module needs; set by the cough reviews
 };
 Thresholds thresholds;
 portMUX_TYPE thresholdsMux = portMUX_INITIALIZER_UNLOCKED;
@@ -210,6 +211,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         t.muted = doc["is_buzzer_muted"] | t.muted;
         t.doseDue = doc["dose_due"] | false;
         t.nightMode = doc["night_mode"] | true;
+        t.coughThreshold = doc["cough_threshold"] | t.coughThreshold;
         portENTER_CRITICAL(&thresholdsMux);
         thresholds = t;
         portEXIT_CRITICAL(&thresholdsMux);
@@ -806,7 +808,7 @@ String edgeAiLine(unsigned long timeoutMs) {
     Serial2.setTimeout(timeoutMs - (millis() - start) + 1);
     String line = Serial2.readStringUntil('\n');
     line.trim();
-    if (line.length() && !line.startsWith("COUGH:")) return line;
+    if (line.length() && !line.startsWith("COUGH:") && !line.startsWith("MAYBE:")) return line;
   }
   return "";
 }
@@ -933,6 +935,22 @@ void askEdgeAi() {
   if (edgeAiVersion[0] || (lastAsk && millis() - lastAsk < 30000)) return;
   lastAsk = millis();
   Serial2.println("VER?");
+}
+
+// The cough threshold last sent to the Edge AI module; -1 = send again (it said hello, so it may
+// have restarted and forgotten it).
+float sentCoughThreshold = -1.0f;
+
+/** "THR:<score>" to the Edge AI module when the room's cough threshold changed (Edge AI 3.1.0+). */
+void sendCoughThreshold() {
+  if (!edgeAiVersion[0]) return;
+  portENTER_CRITICAL(&thresholdsMux);
+  float threshold = thresholds.coughThreshold;
+  portEXIT_CRITICAL(&thresholdsMux);
+  if (fabsf(threshold - sentCoughThreshold) < 0.001f) return;
+  Serial2.printf("THR:%.2f\n", threshold);
+  sentCoughThreshold = threshold;
+  Serial.printf("Cough threshold %.2f sent to the Edge AI module\n", threshold);
 }
 
 /** Download, check and install the firmware the server announced, then restart into it. */
@@ -1196,6 +1214,7 @@ void handlePicoMessage() {
     int sep = rest.indexOf(" build ");
     String version = sep > 0 ? rest.substring(0, sep) : rest;
     String build = sep > 0 ? rest.substring(sep + 7) : "";
+    sentCoughThreshold = -1.0f;  // it may have restarted: send the cough threshold again
     if (version != edgeAiVersion || build != edgeAiBuild) {
       strncpy(edgeAiVersion, version.c_str(), sizeof(edgeAiVersion) - 1);
       strncpy(edgeAiBuild, build.c_str(), sizeof(edgeAiBuild) - 1);
@@ -1204,9 +1223,11 @@ void handlePicoMessage() {
     }
     return;
   }
-  if (!msg.startsWith("COUGH:")) return;
+  // COUGH:<level>,<score> is a cough; MAYBE:<level>,<score> a possible cough (the model was almost
+  // sure, Edge AI 3.1.0+): sent for review only, without the cough screen or chirp.
+  bool possible = msg.startsWith("MAYBE:");
+  if (!possible && !msg.startsWith("COUGH:")) return;
 
-  // Format: COUGH:<level>,<strength>
   int comma = msg.indexOf(',');
   int level = msg.substring(6, comma > 0 ? comma : msg.length()).toInt();
   float strength = comma > 0 ? msg.substring(comma + 1).toFloat() : -1;
@@ -1214,10 +1235,12 @@ void handlePicoMessage() {
   Doc doc;
   doc["event"] = "cough";
   doc["level"] = level;
-  if (strength >= 0) doc["confidence"] = strength;  // heuristic detection strength 0..1
+  if (strength >= 0) doc["confidence"] = strength;  // the Edge AI module's cough score 0..1
+  if (possible) doc["possible"] = true;
   publishJson(topicEvents, doc);
 
-  Serial.printf("Cough from Pico: level %d, strength %.2f\n", level, strength);
+  Serial.printf("%s from Pico: level %d, score %.2f\n", possible ? "Possible cough" : "Cough", level, strength);
+  if (possible) return;
   coughShownAt = millis();  // updateDisplay shows the cough animation
   coughDisplayUntil = millis() + 2000;
 
@@ -1307,6 +1330,7 @@ void loop() {
   sayHello();
   confirmFirmware();
   askEdgeAi();
+  sendCoughThreshold();
   if (otaPending) runOta();
   delay(10);
 }

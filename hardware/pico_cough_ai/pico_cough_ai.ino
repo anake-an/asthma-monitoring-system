@@ -10,9 +10,11 @@
  * WHAT THIS DOES:
  *   An Edge Impulse model (Audio MFE + small 1D CNN, int8) tells a cough apart from other sounds
  *   (talking, TV, laughing, throat clearing, traffic). Core 1 records the microphone non-stop;
- *   core 0 classifies the last second of sound every half second (about 260 ms of work). A cough
- *   is reported when the cough score, averaged over two windows in a row, reaches 0.6; the first
- *   3 s after power-on are ignored. Training data and results: docs/EDGE_IMPULSE.md.
+ *   core 0 classifies the last second of sound every half second (about 140 ms of work). A cough
+ *   is reported when the cough score, averaged over two windows in a row, reaches the room's
+ *   threshold (0.6 until the ESP32 sends the room's value, which follows the cough reviews). A score
+ *   a little under it, in a window with a clear burst of sound, is reported as a possible cough for
+ *   review. The first 3 s after power-on are ignored. Training data and results: docs/EDGE_IMPULSE.md.
  *   The Pico's LED blinks once for every detection sent to the ESP32.
  *
  * Cloud updates: the ESP32 downloads a new build from the server and sends it over the UART
@@ -32,8 +34,10 @@
  *
  * UART link (115200 baud), one line per message:
  *   Pico -> ESP32: COUGH:<level 1-4 (loudness)>,<cough score 0.00-1.00>
+ *                  MAYBE:<level>,<score>               (a possible cough, for review)
  *                  HELLO:<version> build <build>      (at start-up, and when asked with VER?)
  *   ESP32 -> Pico: VER?
+ *                  THR:<score 0.30-0.95>                (the room's cough threshold)
  *
  * UPDATE PROTOCOL (ESP32 -> Pico):
  *   "UPD:<size>"  -> Pico: "READY" (or "ERR:<why>")
@@ -50,7 +54,7 @@
 #include <RespiroSync_Cough_inferencing.h>
 
 // Raise for every build you publish; CI adds the build stamp (build_info.h). See FIRMWARE_HISTORY.md.
-#define EDGE_AI_VERSION "3.0.2"
+#define EDGE_AI_VERSION "3.1.0"
 #if __has_include("build_info.h")
 #include "build_info.h"
 #endif
@@ -74,7 +78,14 @@ const int STEP = WINDOW / 2;                         // a new classification eve
 // level of the training coughs. Keep it equal when recording training data (record_audio.ps1
 // records exactly what the model hears).
 const int MIC_SHIFT = 14;
-const float COUGH_THRESHOLD = 0.6f;        // cough score, averaged over two windows in a row
+// Cough score (averaged over two windows in a row) needed to report a cough. Starts at the model's
+// own 0.6; the ESP32 sends the room's value ("THR:<score>"), which follows the cough reviews.
+float coughThreshold = 0.6f;
+// Possible coughs: a score within POSSIBLE_MARGIN under the threshold, in a window with a burst
+// (loudest 16 ms >= BURST_FACTOR x the typical level), at most one per POSSIBLE_GAP_MS.
+const float POSSIBLE_MARGIN = 0.15f;
+const float BURST_FACTOR = 4.0f;
+const unsigned long POSSIBLE_GAP_MS = 20000;
 const unsigned long DEBOUNCE_MS = 1500;    // one cough = one event
 const unsigned long SETTLE_MS = 3000;      // ignore sound for this long after power-on
 // Loudness level 1-4 of a cough: the loudest 16 ms of the window against this RMS (16-bit,
@@ -113,6 +124,15 @@ void sendCough(int level, float strength) {
   digitalWrite(LED_BUILTIN, HIGH);
   delay(60);
   digitalWrite(LED_BUILTIN, LOW);
+}
+
+/** Send a possible cough to the ESP32 (no LED blink: nothing was detected for sure). */
+void sendPossible(int level, float score) {
+  Serial1.print("MAYBE:");
+  Serial1.print(level);
+  Serial1.print(",");
+  Serial1.println(score, 2);
+  Serial.printf("Possible cough: level %d, score %.2f\n", level, score);
 }
 
 // ---------- Cloud updates over the UART link ----------
@@ -193,7 +213,7 @@ void receiveUpdate(size_t size) {
   rp2040.reboot();
 }
 
-/** Lines from the ESP32: "VER?" or "UPD:<size>". */
+/** Lines from the ESP32: "VER?", "UPD:<size>" or "THR:<score>". */
 void handleLink() {
   if (!Serial1.available()) return;
   Serial1.setTimeout(50);
@@ -201,6 +221,13 @@ void handleLink() {
   line.trim();
   if (line == "VER?") sayHello();
   else if (line.startsWith("UPD:")) receiveUpdate((size_t)line.substring(4).toInt());
+  else if (line.startsWith("THR:")) {
+    float t = line.substring(4).toFloat();
+    if (t >= 0.3f && t <= 0.95f) {
+      coughThreshold = t;
+      Serial.printf("Cough threshold set to %.2f\n", t);
+    }
+  }
 }
 
 void setup() {
@@ -281,6 +308,33 @@ void helloNowAndThen() {
 int getAudio(size_t offset, size_t length, float *out) {
   numpy::int16_to_float(&window[offset], out, length);
   return 0;
+}
+
+/**
+ * True when the window holds a clear burst: its loudest 16 ms block is at least BURST_FACTOR times
+ * its typical (median) block. Keeps steady sounds and hum from becoming possible coughs.
+ */
+bool hasBurst() {
+  const int blocks = WINDOW / 256;
+  static float rms[WINDOW / 256];
+  for (int b = 0; b < blocks; b++) {
+    int64_t sumSq = 0;
+    for (int i = b * 256; i < (b + 1) * 256; i++) sumSq += (int32_t)window[i] * window[i];
+    rms[b] = sqrtf((float)sumSq / 256);
+  }
+  float loudest = 0;
+  for (int b = 0; b < blocks; b++) loudest = max(loudest, rms[b]);
+  // Median by insertion sort (62 values)
+  for (int i = 1; i < blocks; i++) {
+    float v = rms[i];
+    int j = i - 1;
+    while (j >= 0 && rms[j] > v) {
+      rms[j + 1] = rms[j];
+      j--;
+    }
+    rms[j + 1] = v;
+  }
+  return loudest >= BURST_FACTOR * max(rms[blocks / 2], 1.0f);
 }
 
 /** RMS of the loudest 16 ms block of the window (16-bit samples). */
@@ -382,10 +436,21 @@ void loop() {
     Serial.printf("cough %.2f  two-window %.2f  loudest %5.0f  (%d ms)\n", cough, score, loudestRms(),
                   (int)(result.timing.dsp + result.timing.classification));
   }
-  if (score < COUGH_THRESHOLD || millis() < SETTLE_MS) return;
+  if (millis() < SETTLE_MS) return;
 
   unsigned long now = millis();
-  if (now - lastCoughTime < DEBOUNCE_MS) return;
-  lastCoughTime = now;
-  sendCough(loudnessLevel(), score);
+  if (score >= coughThreshold) {
+    if (now - lastCoughTime < DEBOUNCE_MS) return;
+    lastCoughTime = now;
+    sendCough(loudnessLevel(), score);
+    return;
+  }
+  // A possible cough: a little under the threshold, in a window with a clear burst of sound.
+  // Caregivers review it; confirmed ones make the room more sensitive (server side).
+  static unsigned long lastPossibleTime = 0;
+  if (score >= coughThreshold - POSSIBLE_MARGIN && now - lastCoughTime >= DEBOUNCE_MS
+      && (lastPossibleTime == 0 || now - lastPossibleTime >= POSSIBLE_GAP_MS) && hasBurst()) {
+    lastPossibleTime = now;
+    sendPossible(loudnessLevel(), score);
+  }
 }

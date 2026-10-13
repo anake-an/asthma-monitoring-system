@@ -9,6 +9,11 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 - **Updates (firmware 3.3.1):** the ESP32 looks the update server up (up to 3 tries) before downloading. A failed lookup now says "Server not found" instead of "The download did not start". It also finds the LCD at I2C address 0x27 or 0x3F by itself (both backpack chips are common).
 
 ### Added
+- **Cough sensitivity learns from the reviews (Edge AI 3.1.0, firmware 3.4.0):** each room has a cough threshold (the cough score needed, 0.6 to start, between 40 % and 85 %) that the caregivers' reviews move: false alarms make the room less sensitive (+5 points), confirmed coughs a little more (−2), and **possible coughs** confirmed as real more (−5).
+    - **Possible coughs:** the Edge AI module also reports sounds a little under the threshold that contain a clear burst (at most one per 20 s). They appear in the cough history as **Possible**, with "Not a cough" instead of "False alarm"; they never alert and count nowhere (report, alert rule, AI) until confirmed.
+    - One change per room per 24 h, each needing new reviews; off while the room's AI optimization is off. Smart Alerts shows the room's value; each change appears in the Activity Log as a Rule ("Cough score needed 60% → 65%") with its reason.
+    - Not retraining: the device sends no audio. The model is improved by recording and retraining (`docs/EDGE_IMPULSE.md`).
+- **Cough model retrained on the device's own microphone (Edge AI 3.1.0):** 33 coughs and 6 minutes of room sounds recorded through the INMP441 with the new recorder, cut into 396 cough and 360 noise clips; bigger network. Test set 86 %.
 - **Edge Impulse cough model (Edge AI 3.0.0):** the Pico now runs a neural network (Audio MFE + 1D CNN, int8) that tells a cough apart from talking, TV, laughing, throat clearing and traffic, instead of reacting to any loud sound.
     - Trained on about 1 h 18 min of public recordings: 93 % on validation, 86 % on unseen test sounds. Data, settings and results in `docs/EDGE_IMPULSE.md`.
     - Core 1 records without a break, core 0 classifies the last second every 0.5 s (260 ms of work). A cough counts when two windows in a row agree (score 0.6 or more).

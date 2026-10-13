@@ -6,6 +6,7 @@ type CoughEvent = {
   id: number;
   severity: number;
   confidence: number | null;
+  is_possible?: boolean; // the model was almost sure: counts only once confirmed, never alerts
   recorded_at: string;
   is_verified: boolean | null;
   inhaler_used: boolean;
@@ -97,8 +98,10 @@ export default function EventTimeline() {
     return () => clearInterval(interval);
   }, [fetchEvents]);
 
-  // Backend severity: 1 = logged only, 3 = met the alert rule (cough cluster)
-  const getSeverityInfo = (severity: number) => {
+  // Backend severity: 1 = logged only, 3 = met the alert rule (cough cluster). A possible cough was
+  // just under the room's threshold: the review decides, and teaches the room's cough sensitivity.
+  const getSeverityInfo = (severity: number, possible?: boolean) => {
+    if (possible) return { label: "Possible", bg: "bg-amber-500/10", border: "border-amber-500/20", text: "text-amber-600 dark:text-amber-400", dot: "bg-amber-400" };
     if (severity >= 3) return { label: "Alert", bg: "bg-red-500/10", border: "border-red-500/20", text: "text-red-400", dot: "bg-red-400" };
     return { label: "Logged", bg: "bg-zinc-500/10", border: "border-zinc-500/20", text: "text-zinc-500 dark:text-zinc-400", dot: "bg-zinc-400" };
   };
@@ -128,7 +131,7 @@ export default function EventTimeline() {
           <div className="flex flex-col">
         {events.length > 0 ? (
           events.map((ev) => {
-            const sev = getSeverityInfo(ev.severity);
+            const sev = getSeverityInfo(ev.severity, ev.is_possible);
             const isVerified = ev.is_verified;
             return (
               <div
@@ -176,15 +179,17 @@ export default function EventTimeline() {
                       <button
                         onClick={() => handleVerify(ev.id, false, false)}
                         className="px-2 py-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-400 border border-zinc-300 dark:border-zinc-700 rounded text-[10px] transition-colors"
-                        title="Not a cough (a door, a clap...): left out of the report and the AI's training"
+                        title={ev.is_possible
+                          ? "Not a cough: it stays out of the report and the AI"
+                          : "Not a cough (a door, a clap...): left out of the report and the AI's training, and makes this room less sensitive"}
                       >
-                        False alarm
+                        {ev.is_possible ? "Not a cough" : "False alarm"}
                       </button>
                     </>
                   ) : (
                     <>
                       <span className={`text-[10px] px-2 py-1 rounded border ${isVerified ? 'bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border-emerald-500/20' : 'bg-zinc-100 dark:bg-zinc-800/50 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'}`}>
-                        {isVerified ? (ev.inhaler_used ? 'Inhaler used' : 'Real cough') : 'False alarm'}
+                        {isVerified ? (ev.inhaler_used ? 'Inhaler used' : 'Real cough') : (ev.is_possible ? 'Not a cough' : 'False alarm')}
                       </span>
                       {canMarkCoughs && (
                         <button

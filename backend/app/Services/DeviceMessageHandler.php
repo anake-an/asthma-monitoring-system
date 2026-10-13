@@ -166,6 +166,21 @@ class DeviceMessageHandler
         }
 
         $confidence = self::number($data['confidence'] ?? null, 0, 1);
+
+        // A possible cough (the model was almost sure): kept for review only. It never alerts and is
+        // not counted until a caregiver confirms it (CoughEvent::scopeNotFalseAlarm).
+        if (($data['possible'] ?? false) === true) {
+            CoughEvent::create([
+                'device_id' => $device->id,
+                'severity' => CoughEvent::SEVERITY_LOGGED,
+                'confidence' => $confidence,
+                'is_possible' => true,
+                'recorded_at' => now(),
+            ]);
+
+            return;
+        }
+
         $since = now()->subMinutes(self::WINDOW_MINUTES);
 
         $recentCoughs = CoughEvent::where('device_id', $device->id)

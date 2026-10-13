@@ -1,8 +1,8 @@
 # 🫁 RespiroSync: AI-Powered Asthma Monitoring System
 
 ![Version](https://img.shields.io/badge/version-v6.2.0-blue)
-![Firmware](https://img.shields.io/badge/firmware-3.3.0-informational)
-![Edge AI](https://img.shields.io/badge/Edge%20AI-3.0.0-informational)
+![Firmware](https://img.shields.io/badge/firmware-3.4.0-informational)
+![Edge AI](https://img.shields.io/badge/Edge%20AI-3.1.0-informational)
 ![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)
 ![Laravel](https://img.shields.io/badge/Laravel-12-red.svg)
 ![Python](https://img.shields.io/badge/Python-3.10-yellow.svg)
@@ -60,7 +60,7 @@ A responsive dashboard in light and dark mode: live readings per room, the AI pa
 | **AI, two levels** | `Python / scikit-learn` | A **room model per device** learns what is normal for that room and flags unusual readings (Stage 1). A **risk model per child**, once about two flare-ups are recorded, learns what comes before a rescue dose or a cough cluster in the next hour and shows a percentage (Stage 2: logistic regression, then Random Forest). It uses window averages, how fast dust and humidity are rising, night-time, coughs and the daily dose, and it is evaluated by recall and precision on later data. Coughs reviewed as false alarms are left out of training. |
 | **Alarm limits** | `Laravel scheduler` | The value a parent sets is a **cap**. The AI may lower a room's limit toward what is usual for that room, never above the cap, at most once a day by up to 10 %, and only after 24 h of readings. Any limit can be **locked**. A documented rule (not AI) lowers limits 15 % while a daily inhaler dose is missed. Every change is logged with its reason. |
 | **Alerts** | `Brevo SMTP + Web Push` | Email and phone push to every member of the child with alerts on, for: **coughs** that cluster (3 in 10 minutes, or 2 strong ones), a **reading over its limit for 5 minutes**, and a **device offline for 30 minutes** (with a "back online" push). The push names the room and child and opens that room. iPhone: add the dashboard to the Home Screen (iOS 16.4+). |
-| **Cough review** | `Next.js / Laravel` | Each cough can be marked **Inhaler** (logs an emergency dose at the cough's time), **Real cough** or **False alarm**, and changed later. False alarms are left out of the report, the banner, the alert rule and the AI. |
+| **Cough review** | `Next.js / Laravel` | Each cough can be marked **Inhaler** (logs an emergency dose at the cough's time), **Real cough** or **False alarm**, and changed later. False alarms are left out of the report, the banner, the alert rule and the AI. Sounds the Edge AI was almost sure of appear as **possible coughs** to confirm. The reviews tune each room's **cough sensitivity**: false alarms make it less sensitive, confirmed (and confirmed possible) coughs more. |
 | **Medication** | `Next.js / Laravel` | Emergency (blue) and daily (brown) inhaler doses per child. Two emergency doses within 4 hours show a warning. A "Daily dose?" reminder appears on the device when the daily dose is overdue. |
 | **Over-the-air updates** | `ESP32 OTA + UART` | Owners see "Update available" and press **Update**. The ESP32 downloads its own firmware over HTTPS (one-time link, SHA-256 check) and goes back to the previous version if the new one cannot reach the cloud. It also passes **Edge AI** updates on to the Pico over the UART link, in checked frames. GitHub Actions builds and publishes every new firmware automatically. |
 | **Activity Log** | `Next.js` | A weekly report per child: summary cards, a 7-day chart, alert limit changes and notes. It prints on a computer, and in the iPhone app it shares as a PDF (Print, Files, Mail). |
