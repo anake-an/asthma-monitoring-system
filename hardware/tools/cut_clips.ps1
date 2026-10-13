@@ -5,12 +5,16 @@
 #
 # -In takes a file or a folder of .wav files (16 kHz, 16-bit mono). Clips are named
 # "<label>.<recording>-<n>.wav", so Edge Impulse's "Infer from filename" labels them.
-# Coughs: a clip starts 150 ms before each loud burst (a 16 ms block 4x louder than the
-# recording's typical level, and at least 600); one clip per burst, at most one per 0.8 s.
+# Coughs: a clip starts -PreRoll seconds (default 0.15) before each loud burst: a 16 ms block 4x
+# louder than the recording's typical level and at least 600, whose loudest 16 ms within 0.5 s
+# reaches -MinPeak (default 1000; fainter bursts are usually breaths). At most one burst per
+# 0.8 s. Several -PreRoll values give several clips per cough, each shifted in the window.
 param(
     [Parameter(Mandatory = $true)][string]$In,
     [Parameter(Mandatory = $true)][ValidateSet('cough', 'noise')][string]$Label,
-    [string]$OutDir = 'clips'
+    [string]$OutDir = 'clips',
+    [double[]]$PreRoll = @(0.15),
+    [double]$MinPeak = 1000
 )
 $ErrorActionPreference = 'Stop'
 $rate = 16000
@@ -55,8 +59,9 @@ foreach ($f in $files) {
     if ($s.Length -lt $rate) { continue }
     $name = ($f.BaseName -replace '[^A-Za-z0-9-]', '-')
     $starts = New-Object System.Collections.Generic.List[int]
+    $tags = New-Object System.Collections.Generic.List[string]
     if ($Label -eq 'noise') {
-        for ($p = 0; $p + $rate -le $s.Length; $p += $rate) { $starts.Add($p) }
+        for ($p = 0; $p + $rate -le $s.Length; $p += $rate) { $starts.Add($p); $tags.Add("$($starts.Count - 1)") }
     } else {
         $nb = [Math]::Floor($s.Length / $block)
         $rms = New-Object double[] $nb
@@ -68,16 +73,24 @@ foreach ($f in $files) {
         $typical = ($rms | Sort-Object)[[int]($nb / 2)]
         $threshold = [Math]::Max($typical * 4, 600)
         $next = 0
+        $burst = -1
         for ($k = 0; $k -lt $nb; $k++) {
             if ($rms[$k] -lt $threshold -or $k * $block -lt $next) { continue }
-            $p = [Math]::Max(0, $k * $block - [int](0.15 * $rate))
-            $p = [Math]::Min($p, $s.Length - $rate)
-            $starts.Add($p)
             $next = $k * $block + [int](0.8 * $rate)
+            $loudest = 0.0
+            for ($j = $k; $j -lt [Math]::Min($nb, $k + 32); $j++) { if ($rms[$j] -gt $loudest) { $loudest = $rms[$j] } }
+            if ($loudest -lt $MinPeak) { continue }
+            $burst++
+            foreach ($pre in $PreRoll) {
+                $p = [Math]::Max(0, $k * $block - [int]($pre * $rate))
+                $p = [Math]::Min($p, $s.Length - $rate)
+                $starts.Add($p)
+                $tags.Add($(if ($PreRoll.Count -gt 1) { "$burst-$([int]($pre * 1000))ms" } else { "$burst" }))
+            }
         }
     }
     $n = 0
-    foreach ($p in $starts) { Write-Clip (Join-Path $OutDir "$Label.$name-$n.wav") $s $p; $n++ }
+    for ($i = 0; $i -lt $starts.Count; $i++) { Write-Clip (Join-Path $OutDir "$Label.$name-$($tags[$i]).wav") $s $starts[$i]; $n++ }
     Write-Host "$($f.Name): $n $Label clips"
     $total += $n
 }
