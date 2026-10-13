@@ -3,3 +3,4 @@
 # Update it together with FIRMWARE_VERSION in esp32_firmware.ino.
 Updates no longer fail when the home router is slow to find the server
 Clearer message when the device cannot reach the server
+Finds the screen by itself, whichever type of screen board is fitted

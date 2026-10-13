@@ -201,7 +201,7 @@ The backpack runs on 5 V and pulls SDA/SCL up to 5 V, so the I2C lines go throug
 | level shifter **LV1** | ESP32 **GPIO 21** (SDA) |
 | level shifter **LV2** | ESP32 **GPIO 22** (SCL) |
 
-The firmware uses I2C address `0x27`. If the screen lights up but stays blank, try `0x3F` in `esp32_firmware.ino`, then adjust the contrast trimmer on the backpack.
+The firmware finds the backpack at I2C address `0x27` (PCF8574T chip) or `0x3F` (PCF8574AT) by itself (firmware 3.3.1 and newer; the Serial Monitor prints which). If the backlight is on but no text appears at any contrast setting, the ESP32 is not reaching the LCD: check GPIO21 → LV1, GPIO22 → LV2, and the shifter's LV (3V3), HV (5V) and GND.
 
 ### Passive buzzer
 | Buzzer | Connect to |

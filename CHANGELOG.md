@@ -5,7 +5,7 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 ## [Unreleased]
 
 ### Fixed
-- **Updates on routers with flaky DNS (firmware 3.3.1):** the ESP32 adds 1.1.1.1 as a fallback DNS server and looks the update server up (up to 3 tries) before downloading. A failed lookup now says "Server not found" instead of "The download did not start".
+- **Updates on routers with flaky DNS (firmware 3.3.1):** the ESP32 adds 1.1.1.1 as a fallback DNS server and looks the update server up (up to 3 tries) before downloading. A failed lookup now says "Server not found" instead of "The download did not start". It also finds the LCD at I2C address 0x27 or 0x3F by itself (both backpack chips are common).
 
 ### Added
 - **Edge Impulse cough model (Edge AI 3.0.0):** the Pico now runs a neural network (Audio MFE + 1D CNN, int8) that tells a cough apart from talking, TV, laughing, throat clearing and traffic, instead of reacting to any loud sound.

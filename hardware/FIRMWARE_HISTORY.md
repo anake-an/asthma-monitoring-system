@@ -16,7 +16,7 @@ Raise `FIRMWARE_VERSION` and write `WHATS_NEW.txt` (what owners read in the upda
 
 | Firmware | Build | What changed |
 |---|---|---|
-| 3.3.1 | 261013 | Backup DNS server (1.1.1.1) and up to 3 lookups before an update download, so a router that misses one DNS answer no longer fails the update; "Server not found" when it cannot look the server up |
+| 3.3.1 | 261013 | Backup DNS server (1.1.1.1) and up to 3 lookups before an update download, so a router that misses one DNS answer no longer fails the update; "Server not found" when it cannot look the server up; finds the LCD at 0x27 or 0x3F by itself |
 | **3.3.0** | 261010.9 | Passes Edge AI updates on to the Pico; faster link to it (115200). **Needs Edge AI 2.0.0** (older Pico builds talk at 9600) |
 | 3.2.0 | 261010.8 | Night mode can be switched off per room in Smart Alerts |
 | 3.1.0 | 261010.7 | Start-up shows the firmware version and build; clearer update screens ("Updating 45%", "Don't unplug"); reports its build stamp |

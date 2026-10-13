@@ -106,7 +106,12 @@ void setBuzzer(bool on) {
 }
 
 DHT dht(DHTPIN, DHTTYPE);
-LiquidCrystal_I2C lcd(0x27, 16, 2);  // try 0x3F if the screen stays blank
+// The LCD's I2C backpack answers at 0x27 (PCF8574T chip) or 0x3F (PCF8574AT): setup() uses
+// whichever is there.
+LiquidCrystal_I2C lcdAt27(0x27, 16, 2);
+LiquidCrystal_I2C lcdAt3F(0x3F, 16, 2);
+LiquidCrystal_I2C *lcdPtr = &lcdAt27;
+#define lcd (*lcdPtr)
 
 // --- Identity / MQTT ---
 char device_token[7] = "";
@@ -724,6 +729,12 @@ void reportOta(const char *status, const char *error) {
   publishJson(topicEvents, doc);
 }
 
+/** True when a chip acknowledges this I2C address. */
+bool i2cAnswers(uint8_t address) {
+  Wire.beginTransmission(address);
+  return Wire.endTransmission() == 0;
+}
+
 /**
  * Adds a public DNS server (1.1.1.1) as the fallback. The router's DNS stays first; some routers
  * now and then stop answering, and the update download needs a fresh lookup of the server.
@@ -1060,6 +1071,14 @@ void setup() {
   digitalWrite(RED_LED_PIN, HIGH);  // red until connected
 
   Wire.begin(21, 22);
+  if (i2cAnswers(0x27)) {
+    Serial.println("LCD at I2C address 0x27");
+  } else if (i2cAnswers(0x3F)) {
+    lcdPtr = &lcdAt3F;
+    Serial.println("LCD at I2C address 0x3F");
+  } else {
+    Serial.println("No LCD answers at 0x27 or 0x3F: check SDA/SCL, and the level shifter's LV, HV and GND");
+  }
   lcd.init();
   lcd.backlight();
   createGlyphs();
