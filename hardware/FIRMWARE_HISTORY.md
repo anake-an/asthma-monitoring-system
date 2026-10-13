@@ -40,6 +40,7 @@ The module that listens for coughs. Same version style (`2.0.0 Build 261011`): `
 
 | Edge AI | Build | What changed |
 |---|---|---|
+| 3.0.1 | 261013 | Prints the cough score and microphone level (loudest 16 ms) on USB serial whenever a PC has the port open; replaces the DEBUG_SCORES switch |
 | **3.0.0** | 261011 | **Edge Impulse cough model**: a neural network tells coughs from other sounds (was a loudness check); the report carries a cough score. Model and results in `docs/EDGE_IMPULSE.md` |
 | 2.0.1 | 261010.5 | Repeats its version to the ESP32 every 10 minutes |
 | **2.0.0** | 261010.4 | Updates from the dashboard (through the ESP32); faster link (115200); reports its version. **One USB flash needed**, with Flash Size "2MB (Sketch: 1MB, FS: 1MB)" |

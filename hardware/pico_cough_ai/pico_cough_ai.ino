@@ -50,7 +50,7 @@
 #include <RespiroSync_Cough_inferencing.h>
 
 // Raise for every build you publish; CI adds the build stamp (build_info.h). See FIRMWARE_HISTORY.md.
-#define EDGE_AI_VERSION "3.0.0"
+#define EDGE_AI_VERSION "3.0.1"
 #if __has_include("build_info.h")
 #include "build_info.h"
 #endif
@@ -78,7 +78,6 @@ const unsigned long SETTLE_MS = 3000;      // ignore sound for this long after p
 // Loudness level 1-4 of a cough: the loudest 16 ms of the window against this RMS (16-bit,
 // about 75 dB SPL at the mic); level 2 from 2x, 3 from 4x, 4 from 6x.
 const float LEVEL_RMS = 1500.0f;
-#define DEBUG_SCORES 0  // 1: print every cough score on USB serial
 
 I2S i2s(INPUT);
 volatile bool micReady = false;
@@ -263,8 +262,8 @@ int getAudio(size_t offset, size_t length, float *out) {
   return 0;
 }
 
-/** Loudness level 1-4 from the loudest 16 ms block of the window. */
-int loudnessLevel() {
+/** RMS of the loudest 16 ms block of the window (16-bit samples). */
+float loudestRms() {
   float loudest = 0;
   for (int b = 0; b + 256 <= WINDOW; b += 256) {
     int64_t sumSq = 0;
@@ -272,7 +271,12 @@ int loudnessLevel() {
     float rms = sqrtf((float)sumSq / 256);
     if (rms > loudest) loudest = rms;
   }
-  float ratio = loudest / LEVEL_RMS;
+  return loudest;
+}
+
+/** Loudness level 1-4 from the loudest 16 ms block of the window. */
+int loudnessLevel() {
+  float ratio = loudestRms() / LEVEL_RMS;
   if (ratio >= 6) return 4;
   if (ratio >= 4) return 3;
   if (ratio >= 2) return 2;
@@ -311,14 +315,17 @@ void loop() {
   for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
     if (strcmp(result.classification[i].label, "cough") == 0) cough = result.classification[i].value;
   }
-#if DEBUG_SCORES
-  Serial.printf("cough %.2f (%d ms)\n", cough, result.timing.dsp + result.timing.classification);
-#endif
-
   // Two windows in a row (they overlap by half) must agree: one odd window is not enough.
   static float previous = 0;
   float score = (cough + previous) / 2;
   previous = cough;
+
+  // With a PC on the USB port (Serial Monitor at 115200 open), print what the microphone hears.
+  // "loudest" near 0 all the time means no signal from the microphone: check its wiring.
+  if (Serial) {
+    Serial.printf("cough %.2f  two-window %.2f  loudest %5.0f  (%d ms)\n", cough, score, loudestRms(),
+                  (int)(result.timing.dsp + result.timing.classification));
+  }
   if (score < COUGH_THRESHOLD || millis() < SETTLE_MS) return;
 
   unsigned long now = millis();
