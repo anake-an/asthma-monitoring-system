@@ -129,4 +129,39 @@ class DeviceMessageHandlerTest extends TestCase
         $this->assertStringContainsString('Not reported by device', $html);
         $this->assertStringContainsString('3 in the last 10 minutes', $html);
     }
+
+    public function test_coughs_held_while_offline_keep_their_time_and_never_alert(): void
+    {
+        $at = now()->subMinutes(40)->startOfSecond();
+        foreach (range(0, 3) as $i) { // a cluster that would alert if it were live
+            $this->send('events', ['event' => 'cough', 'level' => 1, 'confidence' => 0.9, 'ts' => $at->copy()->addSeconds($i * 20)->timestamp]);
+        }
+
+        $events = CoughEvent::orderBy('recorded_at')->get();
+        $this->assertCount(4, $events);
+        $this->assertTrue($events->first()->recorded_at->equalTo($at));
+        $this->assertTrue($events->every(fn ($e) => $e->severity == CoughEvent::SEVERITY_LOGGED));
+        Notification::assertNothingSent();
+    }
+
+    public function test_a_live_cough_uses_the_arrival_time_even_if_the_device_clock_is_off(): void
+    {
+        $this->send('events', ['event' => 'cough', 'level' => 1, 'confidence' => 0.7, 'ts' => now()->addMinutes(3)->timestamp]);
+        $this->send('events', ['event' => 'cough', 'level' => 1, 'confidence' => 0.7, 'ts' => now()->subDays(30)->timestamp]);
+
+        foreach (CoughEvent::all() as $event) {
+            $this->assertTrue($event->recorded_at->gt(now()->subMinute()));
+        }
+    }
+
+    public function test_an_edge_ai_module_that_stopped_answering_shows_as_not_connected(): void
+    {
+        $this->send('events', ['event' => 'hello', 'firmware' => '3.5.0', 'build' => '261014', 'edge_ai' => '3.2.0', 'edge_ai_build' => '261014']);
+        $this->assertSame('3.2.0', $this->device->fresh()->edge_ai_version);
+
+        $this->send('events', ['event' => 'hello', 'firmware' => '3.5.0', 'build' => '261014', 'edge_ai_lost' => true]);
+
+        $this->assertNull($this->device->fresh()->edge_ai_version);
+        $this->assertNull($this->device->fresh()->edge_ai_build);
+    }
 }

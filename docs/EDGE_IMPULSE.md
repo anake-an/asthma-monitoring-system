@@ -39,8 +39,10 @@ On the Pico (int8, EON Compiler): **258 ms** per window (MFE 250 ms + network 8 
 ## On the device
 
 - Core 1 records the microphone without a break into a 1 s ring buffer (24-bit samples to 16-bit with 4x gain, through a 200 Hz high-pass filter that removes mains hum and the DC offset; Edge AI 3.0.2).
-- Core 0 classifies the last second every 0.5 s. A cough is reported when the cough score, **averaged over two windows in a row**, reaches the room's threshold (0.6 until the ESP32 sends the room's value, Edge AI 3.1.0). Averaging cuts single-window false alarms.
-- One report per 1.5 s at most, nothing in the first 3 s after power-on. The report (`COUGH:<level>,<score>`) carries the loudness level 1-4 (loudest 16 ms of the window) and the averaged cough score.
+- Core 0 classifies the last second every **0.25 s** (Edge AI 3.2.0; about 140 ms of work each). A cough is reported when **at least 2 of the last 3 windows** reach the room's threshold (0.6 until the ESP32 sends the room's value). One odd window is not enough, and a short cough that one window catches only partly is not averaged away (the earlier rule, the average of 2 windows at 0.5 s, turned single windows of 0.80-0.87 into 0.48-0.55).
+- **Level guard** (3.2.0): a window with a clear burst whose loudest 16 ms is outside 2,500-12,000 (where the training coughs were) is scaled into that band (x0.33 to x6) before the model sees it. Distance and microphone placement matter less; windows without a burst are untouched. The loudness level sent with a cough is measured before the guard.
+- One report per 1.5 s at most, nothing in the first 3 s after power-on. The report (`COUGH:<level>,<score>`) carries the loudness level 1-4 (loudest 16 ms of the window) and the mean of the two highest of the last three scores.
+- A watchdog (8 s) restarts the Pico if its loop hangs or recording stops for 3 s. The ESP32 (3.5.0) reports the module as not connected after 25 minutes without a word from it.
 - **Possible coughs** (Edge AI 3.1.0): a score up to 0.15 under the threshold, in a window whose loudest 16 ms is at least 4x its typical level, is sent as `MAYBE:<level>,<score>`, at most one per 20 s. The dashboard shows it for review; it never alerts and counts only once confirmed.
 
 ## Learning from the reviews
@@ -65,8 +67,9 @@ Recording with the device itself (Edge AI 3.0.2 or newer, Windows PowerShell, no
 2. Record, from `hardware/tools`:
    - coughs: `.\record_audio.ps1 -Port COM4 -Seconds 20 -Out coughs-01.wav`, coughing every 2-3 s at different distances (0.5-2 m) and loudness; several people if possible. About 10 files.
    - everything else: `.\record_audio.ps1 -Port COM4 -Seconds 60 -Out room-01.wav` with talking (Malay and English), TV, fan, children playing, a quiet room, doors, laughing, throat clearing. About 10 files.
-3. Cut: `.\cut_clips.ps1 -In coughs-01.wav -Label cough -OutDir clips` (one clip per cough) and `.\cut_clips.ps1 -In room-01.wav -Label noise -OutDir clips` (every second). Listen to a few cough clips; delete any without a cough.
-4. Edge Impulse, Data acquisition, Upload data: the `clips` folder, "Automatically split between training and test", "Infer from filename".
+3. Cut: `.\cut_clips.ps1 -In coughs-01.wav -Label cough -OutDir clips` (one clip per cough) and `.\cut_clips.ps1 -In room-01.wav -Label noise -OutDir clips` (every second). Listen to a few cough clips; delete any without a cough. `-PreRoll` and `-Gain` add shifted and quieter copies.
+   - **Keep test clips honest:** the cutter writes `clips/info.labels`, where every clip carries its recording (metadata `recording`) and all clips of one recording share a category. With few recordings, choose the test ones yourself: e.g. `-Category testing` for one cough recording and one room recording, `-Category training` for the rest.
+4. Edge Impulse, Data acquisition, Upload data: the `clips` folder **including `info.labels`** (it sets the label and the training/test category of each clip). In the Classifier's advanced settings, set **Split train/validation set on metadata key** to `recording`, so no copy of a cough is used to validate itself.
 5. Generate features, retrain, Model testing, then deploy as below.
 
 ## Updating the model on the devices

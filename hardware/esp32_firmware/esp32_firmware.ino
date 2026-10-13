@@ -27,6 +27,7 @@
 #include <WiFi.h>
 #include <WiFiManager.h>  // https://github.com/tzapu/WiFiManager
 #include <EEPROM.h>
+#include <Preferences.h>  // the room's last limits, kept across restarts
 #include <ArduinoJson.h>
 #include "mqtt_client.h"  // ESP-IDF MQTT client (WebSockets + TLS)
 #include "esp_crt_bundle.h"
@@ -54,7 +55,7 @@
 // Firmware "3.1.0 Build 261011": the version is set here (major.feature.fix, history in
 // hardware/FIRMWARE_HISTORY.md); the build stamp (build date YYMMDD, ".2" for a second build that
 // day) is written by CI into build_info.h. A build made in the Arduino IDE says "dev".
-#define FIRMWARE_VERSION "3.4.0"
+#define FIRMWARE_VERSION "3.5.0"
 #if __has_include("build_info.h")
 #include "build_info.h"
 #endif
@@ -89,7 +90,7 @@ typedef StaticJsonDocument<512> Doc;  // the "ota" command carries a link and a 
 const float DUST_DIVIDER_RATIO = 1.5f;
 
 // Passive buzzer: it needs a square wave; a steady HIGH only clicks once.
-// Wired through a 220 ohm resistor so a magnetic buzzer stays within the pin's current limit.
+// Wired through a 240 ohm resistor so a magnetic buzzer stays within the pin's current limit.
 const unsigned int BUZZER_HZ = 2700;  // near the resonance of common 12 mm buzzers
 bool buzzerOn = false;
 
@@ -136,6 +137,44 @@ struct Thresholds {
 Thresholds thresholds;
 portMUX_TYPE thresholdsMux = portMUX_INITIALIZER_UNLOCKED;
 
+// The last limits from the cloud are kept in flash, so a restart without internet alarms on the
+// room's own limits instead of the defaults. Saved by loop() (not in the MQTT task) when they change.
+volatile bool thresholdsChanged = false;
+Preferences prefs;
+const uint32_t LIMITS_FORMAT = 1;  // raise when Thresholds changes shape: old saved limits are ignored
+
+void loadSavedThresholds() {
+  prefs.begin("limits", true);
+  Thresholds t;
+  bool ok = prefs.getUInt("format", 0) == LIMITS_FORMAT && prefs.getBytesLength("t") == sizeof(t)
+            && prefs.getBytes("t", &t, sizeof(t)) == sizeof(t);
+  prefs.end();
+  if (!ok) return;
+  t.doseDue = false;  // a reminder is only shown when the server says so now
+  portENTER_CRITICAL(&thresholdsMux);
+  thresholds = t;
+  portEXIT_CRITICAL(&thresholdsMux);
+  Serial.println("Limits loaded from the last cloud update");
+}
+
+void saveThresholdsIfChanged() {
+  if (!thresholdsChanged) return;
+  thresholdsChanged = false;
+  Thresholds t;
+  portENTER_CRITICAL(&thresholdsMux);
+  t = thresholds;
+  portEXIT_CRITICAL(&thresholdsMux);
+  prefs.begin("limits", false);
+  Thresholds saved;
+  bool same = prefs.getUInt("format", 0) == LIMITS_FORMAT && prefs.getBytes("t", &saved, sizeof(saved)) == sizeof(saved)
+              && memcmp(&saved, &t, sizeof(t)) == 0;
+  if (!same) {  // flash wears out: write only real changes
+    prefs.putUInt("format", LIMITS_FORMAT);
+    prefs.putBytes("t", &t, sizeof(t));
+  }
+  prefs.end();
+}
+
 // Commands are queued by the MQTT task and executed in loop()
 enum PendingCommand { CMD_NONE, CMD_FACTORY_RESET, CMD_BUZZER_ON, CMD_BUZZER_OFF };
 volatile PendingCommand pendingCommand = CMD_NONE;
@@ -158,6 +197,11 @@ const unsigned long EDGE_AI_BAUD = 115200;  // Edge AI 2.0.0 and newer (older bu
 char edgeAiVersion[16] = "";
 char edgeAiBuild[16] = "";
 bool helloAgain = false;  // send "hello" again (the Edge AI version became known or changed)
+// The module says hello every 10 minutes. Nothing at all from it for 25 minutes: it is reported as
+// not connected (the dashboard shows it), and asked again every 30 s until it answers.
+const unsigned long EDGE_AI_SILENT_MS = 25UL * 60000UL;
+unsigned long lastEdgeAiLineAt = 0;
+bool edgeAiLost = false;
 
 void saveConfigCallback() { shouldSaveConfig = true; }
 
@@ -215,6 +259,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         portENTER_CRITICAL(&thresholdsMux);
         thresholds = t;
         portEXIT_CRITICAL(&thresholdsMux);
+        thresholdsChanged = true;  // loop() saves them
         Serial.println("Thresholds updated from cloud");
       } else {
         const char *cmd = doc["command"] | "";
@@ -249,22 +294,79 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
   }
 }
 
-void publishJson(const char *topic, Doc &doc) {
-  if (!mqtt_connected) return;
+/** True when the message was handed to the MQTT client. */
+bool publishJson(const char *topic, Doc &doc) {
+  if (!mqtt_connected) return false;
   char buffer[256];
   size_t n = serializeJson(doc, buffer, sizeof(buffer));
-  esp_mqtt_client_publish(mqtt_client, topic, buffer, n, 1, 0);
+  // Queued for the MQTT task instead of sent from here: a slow network then never blocks loop(),
+  // which the loop watchdog would take for a hang.
+  return esp_mqtt_client_enqueue(mqtt_client, topic, buffer, n, 1, 0, true) >= 0;
+}
+
+// ---------- Coughs are held while the cloud is unreachable ----------
+// Each cough (and possible cough) waits here until it is sent, with the time it happened, so a
+// Wi-Fi drop at night does not lose it. The oldest is dropped when more than COUGH_QUEUE_SIZE wait.
+struct HeldCough {
+  uint32_t epoch;    // Unix time when it happened, 0 if the clock was not set yet
+  uint32_t atMs;     // millis() when it happened
+  uint8_t level;
+  float score;       // -1: not reported
+  bool possible;
+};
+const int COUGH_QUEUE_SIZE = 40;
+HeldCough coughQueue[COUGH_QUEUE_SIZE];
+int coughQueueFirst = 0, coughQueueCount = 0;
+
+void holdCough(int level, float score, bool possible) {
+  if (coughQueueCount == COUGH_QUEUE_SIZE) {  // full: drop the oldest
+    coughQueueFirst = (coughQueueFirst + 1) % COUGH_QUEUE_SIZE;
+    coughQueueCount--;
+  }
+  HeldCough &c = coughQueue[(coughQueueFirst + coughQueueCount) % COUGH_QUEUE_SIZE];
+  time_t now;
+  time(&now);
+  c.epoch = now >= 1704067200 ? (uint32_t)now : 0;  // 2024-01-01: the clock is set
+  c.atMs = millis();
+  c.level = level;
+  c.score = score;
+  c.possible = possible;
+  coughQueueCount++;
+}
+
+/** Send the held coughs, oldest first, once the cloud is reachable. */
+void sendHeldCoughs() {
+  while (coughQueueCount > 0 && mqtt_connected) {
+    HeldCough &c = coughQueue[coughQueueFirst];
+    Doc doc;
+    doc["event"] = "cough";
+    doc["level"] = c.level;
+    if (c.score >= 0) doc["confidence"] = c.score;  // the Edge AI module's cough score 0..1
+    if (c.possible) doc["possible"] = true;
+    time_t now;
+    time(&now);
+    uint32_t epoch = c.epoch;
+    if (!epoch && now >= 1704067200) epoch = (uint32_t)now - (millis() - c.atMs) / 1000;  // clock set since
+    if (epoch) doc["ts"] = epoch;  // the server uses it when the cough waited here (ESP32 3.5.0+)
+    if (!publishJson(topicEvents, doc)) return;  // try again on a later loop
+    coughQueueFirst = (coughQueueFirst + 1) % COUGH_QUEUE_SIZE;
+    coughQueueCount--;
+  }
 }
 
 // --- Sharp GP2Y1010AU0F / GP2Y1014AU0F, returns an estimated dust density in ug/m3 ---
 // Each unit has its own clean-air output (Voc; datasheet range 0-1.5 V), so a fixed
-// formula reads 0 on some sensors. The baseline is learned as the lowest averaged
-// reading since boot. Limitation: a unit that boots in dusty air under-reports until
-// it has seen cleaner air. Not size-selective, so this approximates PM2.5.
+// formula reads 0 on some sensors. The baseline is learned from the cleanest air seen: it goes
+// down only when three readings in a row are lower (one electrical glitch cannot pull it down for
+// good), and creeps up slowly while the air is close to it, following the sensor's drift.
+// Limitation: a unit that boots in dusty air under-reports until it has seen cleaner air.
+// Not size-selective, so this approximates PM2.5.
 const int DUST_SAMPLES = 25;                     // 25 LED pulses x 10 ms = 0.25 s per reading
 const float DUST_SENSITIVITY_V_PER_UG = 0.005f;  // datasheet typical: 0.5 V per 0.1 mg/m3
+const float DUST_BASELINE_RISE_V = 0.00002f;     // per reading near the baseline: ~0.024 V (5 ug/m3) per hour
 uint32_t lastDustPinMv = 0;                      // averaged reading at GPIO 35 (Serial log)
 float dustBaselineV = -1.0f;                     // learned clean-air voltage at the sensor
+float dustRecentV[3] = {-1.0f, -1.0f, -1.0f};    // the last three readings (V at the sensor)
 
 float readDustSensor() {
   uint32_t sumMv = 0;
@@ -279,22 +381,34 @@ float readDustSensor() {
   lastDustPinMv = sumMv / DUST_SAMPLES;
 
   float sensorVolts = (lastDustPinMv / 1000.0f) * DUST_DIVIDER_RATIO;
-  if (dustBaselineV < 0 || sensorVolts < dustBaselineV) dustBaselineV = sensorVolts;
-  return (sensorVolts - dustBaselineV) / DUST_SENSITIVITY_V_PER_UG;
+  dustRecentV[2] = dustRecentV[1];
+  dustRecentV[1] = dustRecentV[0];
+  dustRecentV[0] = sensorVolts;
+  if (dustBaselineV < 0) {
+    dustBaselineV = sensorVolts;  // first reading
+  } else if (dustRecentV[2] >= 0) {
+    float highestOfThree = max(dustRecentV[0], max(dustRecentV[1], dustRecentV[2]));
+    if (highestOfThree < dustBaselineV) dustBaselineV = highestOfThree;  // three lower readings in a row
+    else if (sensorVolts - dustBaselineV < 0.05f) dustBaselineV += DUST_BASELINE_RISE_V;  // clean air: drift
+  }
+  float density = (sensorVolts - dustBaselineV) / DUST_SENSITIVITY_V_PER_UG;
+  return density > 0 ? density : 0;
 }
 
 // --- MQ-135, returns an estimated CO2-equivalent ppm (NAN if there is no signal) ---
 // Datasheet-curve method used by the common MQ135 Arduino library: ppm = a * (Rs/R0)^b with
 // b = -2.769. The module's load resistor cancels out of Rs/R0, so it does not need to be known.
-// R0 is learned like the dust baseline: the cleanest air seen since boot (highest Rs) is taken
-// as fresh air at MQ135_CLEAN_AIR_PPM. Indoor air is usually above that, the sensor reacts to
-// many gases, and it drifts with temperature and humidity: an estimate, not a CO2 measurement.
+// R0 is learned like the dust baseline: the cleanest air seen (highest Rs, raised only by three
+// readings in a row, relaxing slowly while the air is close to it) is taken as fresh air at
+// MQ135_CLEAN_AIR_PPM. Indoor air is usually above that, the sensor reacts to many gases, and it
+// drifts with temperature and humidity: an estimate, not a CO2 measurement.
 const float MQ135_SUPPLY_V = 5.0f;          // MB-102 5 V rail
 const float MQ135_DIVIDER_RATIO = 1.5f;     // same 10k/20k divider as the dust sensor
 const float MQ135_CLEAN_AIR_PPM = 420.0f;   // outdoor CO2, the calibration point
 const float MQ135_CURVE_EXP = -2.769034857f;
 const int MQ135_SAMPLES = 10;
-float mq135CleanRsRatio = -1.0f;  // Rs/RL in the cleanest air seen since boot
+float mq135CleanRsRatio = -1.0f;  // Rs/RL in the cleanest air seen
+float mq135Recent[3] = {-1.0f, -1.0f, -1.0f};  // the last three Rs/RL values
 int lastMq135Raw = 0;             // averaged ADC value (Serial log)
 
 float readMq135Ppm() {
@@ -309,7 +423,16 @@ float readMq135Ppm() {
   if (v < 0.05f) return NAN;                                  // no signal (unpowered / unwired)
   if (v > MQ135_SUPPLY_V - 0.01f) v = MQ135_SUPPLY_V - 0.01f;
   float rsRatio = (MQ135_SUPPLY_V - v) / v;                   // Rs / RL
-  if (mq135CleanRsRatio < 0 || rsRatio > mq135CleanRsRatio) mq135CleanRsRatio = rsRatio;
+  mq135Recent[2] = mq135Recent[1];
+  mq135Recent[1] = mq135Recent[0];
+  mq135Recent[0] = rsRatio;
+  if (mq135CleanRsRatio < 0) {
+    mq135CleanRsRatio = rsRatio;  // first reading
+  } else if (mq135Recent[2] >= 0) {
+    float lowestOfThree = min(mq135Recent[0], min(mq135Recent[1], mq135Recent[2]));
+    if (lowestOfThree > mq135CleanRsRatio) mq135CleanRsRatio = lowestOfThree;  // cleaner, three times in a row
+    else if (rsRatio > 0.95f * mq135CleanRsRatio) mq135CleanRsRatio *= 0.99999f;  // near clean: follow the drift
+  }
   return MQ135_CLEAN_AIR_PPM * powf(rsRatio / mq135CleanRsRatio, MQ135_CURVE_EXP);
 }
 
@@ -409,6 +532,42 @@ struct Reading {
 // Readings over their limit (bits), set by readAndPublishTelemetry.
 const uint8_t ALARM_PM25 = 1, ALARM_GAS = 2, ALARM_TEMP = 4, ALARM_HUM = 8;
 uint8_t alarmMask = 0;
+
+// Each reading's alarm starts after ALARM_READINGS readings in a row over its limit (about 9 s,
+// on top of the 12 s average) and stops after ALARM_READINGS in a row under the limit minus a
+// margin. A reading hovering at its limit (humidity at 78-80 %, say) no longer switches it on and off.
+const int ALARM_READINGS = 3;
+bool alarmOn[4];
+int alarmOver[4], alarmUnder[4];
+
+/** One reading's alarm (index 0-3: dust, gas, temperature, humidity) after a new value. */
+bool alarmStep(int i, float value, float limit, float margin) {
+  if (!isnan(value) && value > limit) {
+    alarmOver[i]++;
+    alarmUnder[i] = 0;
+  } else if (isnan(value) || value < limit - margin) {  // a failed read counts as back to normal
+    alarmUnder[i]++;
+    alarmOver[i] = 0;
+  } else {  // between the limit and the margin: keep the current state
+    alarmOver[i] = 0;
+    alarmUnder[i] = 0;
+  }
+  if (!alarmOn[i] && alarmOver[i] >= ALARM_READINGS) alarmOn[i] = true;
+  if (alarmOn[i] && alarmUnder[i] >= ALARM_READINGS) alarmOn[i] = false;
+  return alarmOn[i];
+}
+
+// Holding the BOOT button for 2 s silences the buzzer for 10 minutes (the screen and LEDs still
+// show the alarm). It ends early when every alarm is over, so the next one sounds again.
+const unsigned long LONG_PRESS_MS = 2000;
+const unsigned long SILENCE_MS = 10UL * 60000UL;
+unsigned long silencedAt = 0;
+bool silenced = false;
+
+/** True while a deadline set from millis() has not passed yet (safe when millis() wraps). */
+bool notYet(unsigned long deadline, unsigned long now) {
+  return (long)(now - deadline) < 0;
+}
 
 const unsigned long PAGE_MS = 5000;            // each page stays 5 s
 const unsigned long WAKE_MS = 30000;           // screen stays lit 30 s at night after a wake-up
@@ -633,15 +792,24 @@ void updateDisplay() {
   if (alarmMask || cloudAlarm || coughing) wakeUntil = now + WAKE_MS;
 
   // Backlight: blinking for a new alarm, else off at night unless woken.
-  if (now < alarmFlashUntil) setBacklight(((alarmFlashUntil - now) / 200) % 2 == 0);
-  else setBacklight(!(screenLimits.nightMode && isNight()) || now < wakeUntil);
+  if (notYet(alarmFlashUntil, now)) setBacklight(((alarmFlashUntil - now) / 200) % 2 == 0);
+  else setBacklight(!(screenLimits.nightMode && isNight()) || notYet(wakeUntil, now));
 
   if (coughing) { drawCough(now - coughShownAt); return; }
-  if (alarmMask) { drawAlarms(alarmMask); return; }
-  if (cloudAlarm) { showScreen("!! ALERT !!", "From the app"); return; }
-  if (now < offlineUntil) { showScreen("Offline", "Alarms still on"); return; }
+  if (alarmMask) {
+    if (silenced && (now / ALARM_TURN_MS) % 2) {  // every other turn: how long it stays quiet
+      char l1[17];
+      snprintf(l1, sizeof(l1), "Quiet %lu min", (SILENCE_MS - (now - silencedAt)) / 60000 + 1);
+      showScreen("Alarm silenced", l1);
+    } else {
+      drawAlarms(alarmMask);
+    }
+    return;
+  }
+  if (cloudAlarm) { showScreen("!! ALERT !!", silenced ? "Quiet: BOOT held" : "From the app"); return; }
+  if (notYet(offlineUntil, now)) { showScreen("Offline", "Alarms still on"); return; }
   if (!everConnected && now - cloudStartedAt < 20000) { showLoading("Connecting cloud"); return; }
-  if (now < readyUntil) {
+  if (notYet(readyUntil, now)) {
     char l0[17];
     snprintf(l0, sizeof(l0), "Ready %c", ICON_HEART);
     showScreen(l0, "Monitoring room");
@@ -661,17 +829,38 @@ void updateDisplay() {
   }
 }
 
-/** BOOT button: lights the screen (night mode); when lit, shows the next page. */
+/**
+ * BOOT button. A short press lights the screen (night mode) or, when lit, shows the next page.
+ * Held for LONG_PRESS_MS while an alarm sounds: silences the buzzer (SILENCE_MS).
+ */
 void handleButton() {
   static bool wasDown = false;
-  static unsigned long changedAt = 0;
+  static unsigned long changedAt = 0, pressedAt = 0;
+  static bool held = false;  // this press already counted as a long press
+  unsigned long now = millis();
   bool down = digitalRead(WAKE_BUTTON_PIN) == LOW;
-  if (down == wasDown || millis() - changedAt < 50) return;  // debounce
+  if (down && wasDown && !held && now - pressedAt >= LONG_PRESS_MS) {
+    held = true;
+    wakeUntil = now + WAKE_MS;
+    if (alarmMask || cloudAlarm) {
+      silenced = true;
+      silencedAt = now;
+      setBuzzer(false);
+      Serial.println("Alarm silenced for 10 minutes (BOOT button)");
+    }
+    return;
+  }
+  if (down == wasDown || now - changedAt < 50) return;  // debounce
   wasDown = down;
-  changedAt = millis();
-  if (!down) return;
+  changedAt = now;
+  if (down) {  // acted on when released, so a long press is not also a short one
+    pressedAt = now;
+    held = false;
+    return;
+  }
+  if (held) return;
   bool wasDark = !backlightOn;
-  wakeUntil = millis() + WAKE_MS;
+  wakeUntil = now + WAKE_MS;
   if (wasDark) return;  // the first press only lights the screen
   bool doseDue;
   portENTER_CRITICAL(&thresholdsMux);
@@ -929,6 +1118,16 @@ void runEdgeAiOta() {
   delay(1500);
 }
 
+/** Nothing from the Edge AI module for EDGE_AI_SILENT_MS: report it as not connected. */
+void checkEdgeAi() {
+  if (!edgeAiVersion[0] || millis() - lastEdgeAiLineAt < EDGE_AI_SILENT_MS) return;
+  Serial.println("Edge AI module silent for 25 minutes: reported as not connected");
+  edgeAiVersion[0] = '\0';
+  edgeAiBuild[0] = '\0';
+  edgeAiLost = true;
+  helloAgain = true;  // tell the server
+}
+
 /** "VER?" to the Edge AI module until it has answered (at start-up, then every 30 s). */
 void askEdgeAi() {
   static unsigned long lastAsk = 0;
@@ -955,8 +1154,10 @@ void sendCoughThreshold() {
 
 /** Download, check and install the firmware the server announced, then restart into it. */
 void runOta() {
-  if (alarmMask || cloudAlarm) {
-    reportOta("failed", "An alarm is active on the device. Try again when it is over.");
+  // An update pauses the readings for up to a minute: not while the air is bad or the app sounds
+  // an alert. Temperature and humidity alarms (a warm or humid room for hours) do not block it.
+  if ((alarmMask & (ALARM_PM25 | ALARM_GAS)) || cloudAlarm) {
+    reportOta("failed", "A dust or gas alarm (or an alert from the app) is active on the device. Try again when it is over.");
     otaPending = false;
     return;
   }
@@ -1068,9 +1269,11 @@ void sayHello() {
     if (edgeAiVersion[0]) {
       doc["edge_ai"] = edgeAiVersion;
       doc["edge_ai_build"] = edgeAiBuild;
+    } else if (edgeAiLost) {
+      doc["edge_ai_lost"] = true;  // the dashboard shows the module as not connected
     }
     if (firstSinceBoot) doc["boot"] = true;
-    publishJson(topicEvents, doc);
+    if (publishJson(topicEvents, doc)) edgeAiLost = false;
     firstSinceBoot = false;
   }
   connectedBefore = mqtt_connected;
@@ -1092,6 +1295,7 @@ void setup() {
   Serial.begin(115200);
   Serial.println(FIRMWARE_TAG);
   EEPROM.begin(512);
+  loadSavedThresholds();  // the room's own limits until the cloud sends them again
 
   pinMode(DUST_LED_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
@@ -1198,6 +1402,9 @@ void setup() {
   esp_mqtt_client_start(mqtt_client);
   cloudStartedAt = millis();
   wakeUntil = millis() + WAKE_MS;  // lit for a while after a restart, also at night
+  // From here, a loop() that hangs for 5 s (a stuck I2C bus, say) restarts the device. Not during
+  // the Wi-Fi setup above, which may wait for minutes, nor during an update (see loop()).
+  enableLoopWDT();
 }
 
 unsigned long lastTelemetryMillis = 0;
@@ -1209,6 +1416,7 @@ void handlePicoMessage() {
   Serial2.setTimeout(50);  // an Edge AI update may have changed it
   String msg = Serial2.readStringUntil('\n');
   msg.trim();
+  if (msg.length()) lastEdgeAiLineAt = millis();  // the module is alive
   if (msg.startsWith("HELLO:")) {  // "HELLO:2.0.0 build 261011"
     String rest = msg.substring(6);
     int sep = rest.indexOf(" build ");
@@ -1232,12 +1440,8 @@ void handlePicoMessage() {
   int level = msg.substring(6, comma > 0 ? comma : msg.length()).toInt();
   float strength = comma > 0 ? msg.substring(comma + 1).toFloat() : -1;
 
-  Doc doc;
-  doc["event"] = "cough";
-  doc["level"] = level;
-  if (strength >= 0) doc["confidence"] = strength;  // the Edge AI module's cough score 0..1
-  if (possible) doc["possible"] = true;
-  publishJson(topicEvents, doc);
+  holdCough(level, strength, possible);  // sent now, or as soon as the cloud is back
+  sendHeldCoughs();
 
   Serial.printf("%s from Pico: level %d, score %.2f\n", possible ? "Possible cough" : "Cough", level, strength);
   if (possible) return;
@@ -1286,10 +1490,10 @@ void readAndPublishTelemetry() {
   reading.hum = hum;
 
   uint8_t mask = 0;
-  if (pm25 > t.pm25) mask |= ALARM_PM25;
-  if (!isnan(gasPpm) && gasPpm > t.mq135) mask |= ALARM_GAS;
-  if (!isnan(temp) && temp > t.temperature) mask |= ALARM_TEMP;
-  if (!isnan(hum) && hum > t.humidity) mask |= ALARM_HUM;
+  if (alarmStep(0, pm25, t.pm25, max(2.0f, t.pm25 * 0.05f))) mask |= ALARM_PM25;
+  if (alarmStep(1, gasPpm, t.mq135, t.mq135 * 0.05f)) mask |= ALARM_GAS;
+  if (alarmStep(2, temp, t.temperature, 0.5f)) mask |= ALARM_TEMP;
+  if (alarmStep(3, hum, t.humidity, 2.0f)) mask |= ALARM_HUM;
   alarmMask = mask;
 }
 
@@ -1303,9 +1507,12 @@ void updateOutputs() {
   digitalWrite(RED_LED_PIN, alarm || !mqtt_connected);
   digitalWrite(GREEN_LED_PIN, !alarm && mqtt_connected);
 
-  // Beep 150 ms every 2 s while an alarm is active, unless muted from the dashboard.
-  bool beep = alarm && !muted && (millis() % 2000) < 150;
-  if (millis() > coughDisplayUntil) setBuzzer(beep);
+  // Silenced with the BOOT button: for SILENCE_MS, or until every alarm is over.
+  if (silenced && (!alarm || millis() - silencedAt >= SILENCE_MS)) silenced = false;
+
+  // Beep 150 ms every 2 s while an alarm is active, unless muted from the dashboard or silenced here.
+  bool beep = alarm && !muted && !silenced && (millis() % 2000) < 150;
+  if (!notYet(coughDisplayUntil, millis())) setBuzzer(beep);
 }
 
 void loop() {
@@ -1329,8 +1536,15 @@ void loop() {
   retryClock();
   sayHello();
   confirmFirmware();
+  checkEdgeAi();
   askEdgeAi();
   sendCoughThreshold();
-  if (otaPending) runOta();
+  sendHeldCoughs();
+  saveThresholdsIfChanged();
+  if (otaPending) {
+    disableLoopWDT();  // a download may wait on the network for longer than the watchdog allows
+    runOta();
+    enableLoopWDT();
+  }
   delay(10);
 }

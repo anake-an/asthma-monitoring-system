@@ -166,6 +166,7 @@ class DeviceMessageHandler
         }
 
         $confidence = self::number($data['confidence'] ?? null, 0, 1);
+        [$recordedAt, $late] = self::eventTime($data);
 
         // A possible cough (the model was almost sure): kept for review only. It never alerts and is
         // not counted until a caregiver confirms it (CoughEvent::scopeNotFalseAlarm).
@@ -175,7 +176,20 @@ class DeviceMessageHandler
                 'severity' => CoughEvent::SEVERITY_LOGGED,
                 'confidence' => $confidence,
                 'is_possible' => true,
-                'recorded_at' => now(),
+                'recorded_at' => $recordedAt,
+            ]);
+
+            return;
+        }
+
+        // Held by the device while it was offline (ESP32 3.5.0+): stored at its own time, without an
+        // alert, since the moment to act on it has passed.
+        if ($late) {
+            CoughEvent::create([
+                'device_id' => $device->id,
+                'severity' => CoughEvent::SEVERITY_LOGGED,
+                'confidence' => $confidence,
+                'recorded_at' => $recordedAt,
             ]);
 
             return;
@@ -202,7 +216,7 @@ class DeviceMessageHandler
             'device_id' => $device->id,
             'severity' => $isAlert ? CoughEvent::SEVERITY_ALERT : CoughEvent::SEVERITY_LOGGED,
             'confidence' => $confidence,
-            'recorded_at' => now(), // same clock as $since above
+            'recorded_at' => $recordedAt, // now, or a few minutes ago when the device held it
         ])->refresh(); // load DB defaults (is_verified, inhaler_used)
 
         // Cooldown: at most one notification per device per window, to every recipient.
@@ -237,6 +251,10 @@ class DeviceMessageHandler
         $edgeAi = is_string($data['edge_ai'] ?? null) && self::isVersion($data['edge_ai']) ? $data['edge_ai'] : null;
         if ($edgeAi !== null) {
             $changes += ['edge_ai_version' => $edgeAi, 'edge_ai_build' => self::build($data['edge_ai_build'] ?? null)];
+        } elseif (($data['edge_ai_lost'] ?? false) === true) {
+            // The ESP32 heard nothing from the module for 25 minutes (3.5.0+): Rooms shows
+            // "Not connected" until it answers again.
+            $changes += ['edge_ai_version' => null, 'edge_ai_build' => null];
         }
 
         if ($device->ota_status === 'updating') {
@@ -251,6 +269,28 @@ class DeviceMessageHandler
             }
         }
         $device->forceFill($changes)->save();
+    }
+
+    /** A cough that waited on the device longer than this gets no alert. */
+    public const LATE_AFTER_MINUTES = 5;
+
+    /**
+     * When a cough happened: the device's own time ("ts", Unix seconds) when it held the event for
+     * more than a minute (offline), within the last 7 days; otherwise the arrival time, so a device
+     * clock that is a little off never moves live events. Returns [time, late].
+     */
+    private static function eventTime(array $data): array
+    {
+        $now = now();
+        $ts = $data['ts'] ?? null;
+        if (is_int($ts) || (is_float($ts) && is_finite($ts))) {
+            $at = \Illuminate\Support\Carbon::createFromTimestamp((int) $ts, $now->getTimezone());
+            if ($at->lt($now->copy()->subMinute()) && $at->gt($now->copy()->subDays(7))) {
+                return [$at, $at->lt($now->copy()->subMinutes(self::LATE_AFTER_MINUTES))];
+            }
+        }
+
+        return [$now, false];
     }
 
     private static function isVersion(string $version): bool
