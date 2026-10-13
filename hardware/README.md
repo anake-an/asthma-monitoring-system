@@ -36,7 +36,7 @@ The Raspberry Pi Pico (the **Edge AI** module) listens for coughs, so the ESP32 
 *   **Training data, settings and results:** [`docs/EDGE_IMPULSE.md`](../docs/EDGE_IMPULSE.md) (93 % on validation, 86 % on unseen test sounds).
 *   **Core:** use the **arduino-pico** core by Earle Philhower ("Raspberry Pi Pico/RP2040" in Boards Manager). The sketches use its `I2S i2s(INPUT)` API.
 *   **Library (USB flashing only):** copy `libraries/RespiroSync_Cough_inferencing` into `Documents/Arduino/libraries`. GitHub Actions uses it straight from the repo.
-*   **Checking it:** set `DEBUG_SCORES 1` and open the Serial Monitor (115200) to see every cough score.
+*   **Checking it:** plug the Pico into a PC (VSYS wire off first) and open the Serial Monitor (115200): every half second it prints the cough score and the microphone level ("loudest"; near 0 all the time means no signal from the microphone).
 
 ---
 

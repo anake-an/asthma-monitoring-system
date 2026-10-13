@@ -245,7 +245,7 @@ Green = connected and normal. Red = alarm, or not connected to the broker. With 
 
 Test each part on its own before adding the next. It makes faults easy to find.
 
-1. **Pico + INMP441** on the Pico's own USB. Copy `hardware/libraries/RespiroSync_Cough_inferencing` into `Documents/Arduino/libraries`, then flash `pico_cough_ai.ino` with **Flash Size "2MB (Sketch: 1MB, FS: 1MB)"**. To check the microphone, set `DEBUG_SCORES 1`, open the Serial Monitor (115200) and cough: the cough score rises towards 1, and stays low for talking. Then set `DEBUG_SCORES` back to 0 and flash again.
+1. **Pico + INMP441** on the Pico's own USB. Copy `hardware/libraries/RespiroSync_Cough_inferencing` into `Documents/Arduino/libraries`, then flash `pico_cough_ai.ino` with **Flash Size "2MB (Sketch: 1MB, FS: 1MB)"**. To check the microphone, open the Serial Monitor (115200) and cough: every half second it prints the cough score (towards 1 for a cough, low for talking) and the microphone level ("loudest"; near 0 all the time means no signal from the microphone).
 2. **ESP32 alone** on USB. Fill `secrets.h`, choose **Partition Scheme "Minimal SPIFFS (1.9MB APP with OTA)"**, flash with *Erase All Flash Before Sketch Upload* enabled (the first time only: it also erases the token and Wi-Fi), pair it from the dashboard, and check that it appears online.
 3. Plug in the **DC adapter** (MB-102 on 5 V) and add the **DHT22**, **LEDs**, **buzzer** and **LCD** (with the level shifter). Reset the ESP32 after the MB-102 is on. Temperature and humidity should appear on the LCD and the dashboard.
 4. Add the **MQ-135** and the **Sharp sensor**. Readings should appear within a few seconds. Gas shows a 3-minute warm-up countdown, and the MQ-135 drifts during its first day.
