@@ -16,6 +16,7 @@ $ErrorActionPreference = 'Stop'
 $rate = 16000
 $block = 256
 New-Item -ItemType Directory -Force $OutDir | Out-Null
+$OutDir = (Resolve-Path $OutDir).Path  # .NET file calls resolve relative paths from elsewhere
 
 function Read-Wav([string]$path) {
     $b = [IO.File]::ReadAllBytes($path)
