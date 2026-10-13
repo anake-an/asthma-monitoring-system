@@ -50,7 +50,7 @@
 #include <RespiroSync_Cough_inferencing.h>
 
 // Raise for every build you publish; CI adds the build stamp (build_info.h). See FIRMWARE_HISTORY.md.
-#define EDGE_AI_VERSION "3.0.1"
+#define EDGE_AI_VERSION "3.0.2"
 #if __has_include("build_info.h")
 #include "build_info.h"
 #endif
@@ -68,10 +68,12 @@ const int SAMPLE_RATE = EI_CLASSIFIER_FREQUENCY;     // 16 kHz, as the model was
 const int WINDOW = EI_CLASSIFIER_RAW_SAMPLE_COUNT;   // 1 s of sound per classification
 const int STEP = WINDOW / 2;                         // a new classification every 0.5 s
 
-// INMP441 samples are 24-bit in a 32-bit slot. Shifting right by 13 gives 16-bit samples with
-// 8x gain: the INMP441 is quiet (94 dB SPL = -26 dBFS) next to the phone and lab recordings the
-// model learnt from. Retune together with the model once it is trained on this microphone.
-const int MIC_SHIFT = 13;
+// INMP441 samples are 24-bit in a 32-bit slot. Shifting right by 14 gives 16-bit samples with
+// 4x gain. Measured on the device: at 8x a cough at arm's length reached ~10,000 (loudest 16 ms)
+// and the model scored it 0.00; at 1x it sank to the noise floor; at 4x coughs land near the
+// level of the training coughs. Keep it equal when recording training data (record_audio.ps1
+// records exactly what the model hears).
+const int MIC_SHIFT = 14;
 const float COUGH_THRESHOLD = 0.6f;        // cough score, averaged over two windows in a row
 const unsigned long DEBOUNCE_MS = 1500;    // one cough = one event
 const unsigned long SETTLE_MS = 3000;      // ignore sound for this long after power-on
@@ -217,7 +219,22 @@ void setup() {
 }
 
 // ---------- Core 1: records the microphone without a break ----------
+// 2nd-order Butterworth high-pass at HIGH_PASS_HZ. It removes mains hum (50 Hz and its harmonics,
+// measured on the first device at about 10x the level of everything above 1 kHz), rumble and the
+// microphone's DC offset. A cough's sound is mostly 300-4000 Hz.
+const float HIGH_PASS_HZ = 200.0f;
+float hpB0, hpB1, hpB2, hpA1, hpA2;
+
 void setup1() {
+  const float w0 = 2.0f * (float)M_PI * HIGH_PASS_HZ / SAMPLE_RATE;
+  const float alpha = sinf(w0) / (2.0f * 0.70710678f);  // Q = 1/sqrt(2)
+  const float a0 = 1.0f + alpha;
+  hpB0 = (1.0f + cosf(w0)) / 2.0f / a0;
+  hpB1 = -2.0f * hpB0;
+  hpB2 = hpB0;
+  hpA1 = -2.0f * cosf(w0) / a0;
+  hpA2 = (1.0f - alpha) / a0;
+
   i2s.setBCLK(I2S_BCLK);
   i2s.setDATA(I2S_DATA);
   i2s.setBitsPerSample(32);  // INMP441 sends 24-bit samples in 32-bit slots
@@ -235,12 +252,16 @@ void loop1() {
     delay(100);
     return;
   }
-  static int32_t dc = 0;  // the microphone's DC offset, followed slowly
+  static float x1 = 0, x2 = 0, y1 = 0, y2 = 0;  // high-pass filter state
   int32_t left = 0, right = 0;
   i2s.read32(&left, &right);         // blocking; L/R tied to GND => data is on the left slot
-  int32_t s = left >> 8;             // 24-bit signed sample
-  dc += (s - dc) >> 10;
-  s = (s - dc) >> (MIC_SHIFT - 8);   // to 16-bit with gain
+  float x = (float)(left >> 8);      // 24-bit signed sample
+  float y = hpB0 * x + hpB1 * x1 + hpB2 * x2 - hpA1 * y1 - hpA2 * y2;
+  x2 = x1;
+  x1 = x;
+  y2 = y1;
+  y1 = y;
+  int32_t s = (int32_t)(y * (1.0f / (1 << (MIC_SHIFT - 8))));  // to 16-bit with gain
   if (s > 32767) s = 32767;
   if (s < -32768) s = -32768;
   ring[samplesRecorded % WINDOW] = (int16_t)s;
@@ -283,8 +304,43 @@ int loudnessLevel() {
   return 1;
 }
 
+/**
+ * USB command "rec <seconds>" (1-60): stream that much raw audio, exactly as the model hears it
+ * (16-bit little-endian, 16 kHz), framed as "REC <samples>\n" + data + "\nEND\n". Used by
+ * hardware/tools/record_audio.ps1 to record training data with this microphone.
+ */
+void handleUsbCommand() {
+  if (!Serial.available()) return;
+  Serial.setTimeout(50);
+  String cmd = Serial.readStringUntil('\n');
+  cmd.trim();
+  if (!cmd.startsWith("rec ") || !micReady) return;
+  long seconds = cmd.substring(4).toInt();
+  if (seconds < 1 || seconds > 60) return;
+  const uint32_t total = (uint32_t)seconds * SAMPLE_RATE;
+  Serial.printf("REC %lu\n", (unsigned long)total);
+  uint32_t pos = samplesRecorded, sent = 0;
+  while (sent < total) {
+    uint32_t avail = samplesRecorded - pos;
+    if (avail == 0) {
+      delay(1);
+      continue;
+    }
+    if (avail > (uint32_t)WINDOW / 2) pos = samplesRecorded - WINDOW / 2;  // USB fell behind: skip ahead
+    uint32_t idx = pos % WINDOW;
+    uint32_t run = min(samplesRecorded - pos, (uint32_t)(WINDOW - idx));
+    run = min(run, total - sent);
+    run = min(run, (uint32_t)512);
+    Serial.write((const uint8_t *)(ring + idx), run * sizeof(int16_t));
+    pos += run;
+    sent += run;
+  }
+  Serial.print("\nEND\n");
+}
+
 void loop() {
   handleLink();
+  handleUsbCommand();
   helloNowAndThen();
   if (!micReady) {
     delay(10);

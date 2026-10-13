@@ -44,10 +44,9 @@ The Raspberry Pi Pico (the **Edge AI** module) listens for coughs, so the ESP32 
 
 The model was trained on public recordings (see `docs/EDGE_IMPULSE.md`). Recordings made with the device's own INMP441 make it fit the real rooms:
 
-1. **Flash the data collector:** `pico_cough_ai/data_collection/data_collection.ino` streams 16 kHz audio over USB, converted exactly like the Edge AI firmware does it.
-2. **Stream to Edge Impulse:** install the CLI (`npm install -g edge-impulse-cli`) and run `edge-impulse-data-forwarder --frequency 16000`; it links the Pico to the "RespiroSync Cough" project.
-3. **Record:** coughs labelled `cough`, and 5-10 minutes of the home labelled `noise` (talking in Malay and English, TV, fan, children playing, quiet).
-4. **Retrain and test** in the Studio, then export the **Arduino library** and ship it as an Edge AI update (steps in `docs/EDGE_IMPULSE.md`).
+1. **Record with the device itself** (Edge AI 3.0.2+): `hardware/tools/record_audio.ps1` saves what the microphone hears as a WAV file, and `cut_clips.ps1` cuts it into 1-second clips (steps in `docs/EDGE_IMPULSE.md`).
+2. **Record:** coughs labelled `cough`, and 5-10 minutes of the home labelled `noise` (talking in Malay and English, TV, fan, children playing, quiet). Upload the clips to the "RespiroSync Cough" project.
+3. **Retrain and test** in the Studio, then export the **Arduino library** and ship it as an Edge AI update (steps in `docs/EDGE_IMPULSE.md`).
 
 ---
 
