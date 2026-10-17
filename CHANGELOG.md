@@ -4,6 +4,9 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Security
+- **Tunnel token out of the command line:** cloudflared now reads its token from `TUNNEL_TOKEN` in its environment, filled from `CLOUDFLARE_TOKEN` in `.env` as before. It no longer shows in `docker ps` or in the container's command, which anything that can list containers could read.
+
 ### Robustness (firmware 3.5.0, Edge AI 3.2.0)
 - **No coughs lost offline:** the ESP32 holds coughs and possible coughs (up to 40) with the time they happened and sends them when the connection is back. The server stores a cough with its own time (`ts`) when it waited more than a minute, and gives no alert for one older than 5 minutes.
 - **Calmer local alarms:** an alarm starts after 3 readings in a row over its limit and stops after 3 under the limit minus a margin (dust 5 % / 2 µg/m³, gas 5 %, 0.5 °C, 2 % humidity). Holding BOOT for 2 s silences the buzzer for 10 minutes ("Alarm silenced" on the LCD); it ends early when the alarm is over.

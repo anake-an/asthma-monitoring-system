@@ -121,7 +121,11 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: cloudflared_tunnel
     restart: unless-stopped
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TOKEN}
+    # The token goes in the environment, not the command line, so it never
+    # shows in docker ps or in the container's command.
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TOKEN}
 
   scheduler:
     image: webdevops/php:8.2-alpine
