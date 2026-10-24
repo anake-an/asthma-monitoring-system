@@ -6,6 +6,10 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ### Security
 - **Tunnel token out of the command line:** cloudflared now reads its token from `TUNNEL_TOKEN` in its environment, filled from `CLOUDFLARE_TOKEN` in `.env` as before. It no longer shows in `docker ps` or in the container's command, which anything that can list containers could read.
+- **Dashboard on Next.js 16.4.3 and React 19** (was Next.js 14.2.35, React 18). Next.js 14 gets no more security fixes, and its open advisories include critical remote code execution in the Image Optimization API (GHSA-2xp9-vwfh-vxw4, GHSA-2464-fhr4-w9xw). `npm audit` now lists only 3 moderate advisories, all in Tailwind CSS 3's build tooling.
+    - The frontend container runs Node 22; Node 20 is end of life.
+    - `next build` uses Turbopack; the CSS is now in `.next/static/chunks/`.
+    - `npm run lint` runs ESLint 9 directly (`eslint.config.mjs`), since Next.js 16 removed `next lint`.
 
 ### Robustness (firmware 3.5.0, Edge AI 3.2.0)
 - **No coughs lost offline:** the ESP32 holds coughs and possible coughs (up to 40) with the time they happened and sends them when the connection is back. The server stores a cough with its own time (`ts`) when it waited more than a minute, and gives no alert for one older than 5 minutes.
