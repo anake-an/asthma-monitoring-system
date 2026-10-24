@@ -4,6 +4,10 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Fixed
+- **StandBy follows the dashboard:** with the device off, StandBy kept showing its last dust and temperature reading and "Monitoring Active". It now uses the dashboard's rule (no reading for 20 s by the server's clock is offline), shows "--" and "Device Offline", and shows a cough the same way as the dashboard (the newest unreviewed one, for 2 hours) instead of any cough in the last 12 hours. Both screens read the rules from `lib/deviceStatus.ts`.
+- **No service worker errors from other sites:** the service worker now passes only this site's requests through, so a blocked Cloudflare analytics beacon no longer shows as an uncaught error in the console.
+
 ### Security
 - **Tunnel token out of the command line:** cloudflared now reads its token from `TUNNEL_TOKEN` in its environment, filled from `CLOUDFLARE_TOKEN` in `.env` as before. It no longer shows in `docker ps` or in the container's command, which anything that can list containers could read.
 - **Dashboard on Next.js 16.4.3 and React 19** (was Next.js 14.2.35, React 18). Next.js 14 gets no more security fixes, and its open advisories include critical remote code execution in the Image Optimization API (GHSA-2xp9-vwfh-vxw4, GHSA-2464-fhr4-w9xw). `npm audit` now lists only 3 moderate advisories, all in Tailwind CSS 3's build tooling.

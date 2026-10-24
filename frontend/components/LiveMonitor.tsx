@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import InhalerTracker from "./InhalerTracker";
+import { coughIsRecent, readingIsStale } from "@/lib/deviceStatus";
 import { dustLevel, DUST_BANDS_NOTE } from "@/lib/dustBands";
 import { barPercent, readingLevel, LEVEL_STYLE, type Level } from "@/lib/readingStatus";
 import { GAS_NOTE } from "@/lib/gas";
@@ -84,12 +85,8 @@ export default function LiveMonitor() {
       const latestLog = logs[0];
       setData(latestLog);
 
-      // Offline = no reading for 20 s (the ESP32 sends every 3 s). Measured against the server's
-      // clock (X-Server-Time, else the Date header) so a wrong clock on the viewer's computer
-      // cannot make the device flicker between online and offline.
-      const serverNow = Number(res.headers.get("X-Server-Time")) || Date.parse(res.headers.get("Date") ?? "") || Date.now();
-      const recordedAtUtc = latestLog.recorded_at.endsWith('Z') ? latestLog.recorded_at : latestLog.recorded_at + 'Z';
-      setIsOffline((serverNow - new Date(recordedAtUtc).getTime()) / 1000 > 20);
+      // Offline = no reading for 20 s, by the server's clock (lib/deviceStatus.ts)
+      setIsOffline(readingIsStale(latestLog.recorded_at, res));
     };
 
     const fetchData = async () => {
@@ -118,9 +115,7 @@ export default function LiveMonitor() {
           const coughData = await coughRes.json();
           if (!active) return;
           if (coughData.data && coughData.data.length > 0) {
-            const latestEvent = coughData.data[0];
-            const diffHours = (new Date().getTime() - new Date(latestEvent.recorded_at).getTime()) / (1000 * 60 * 60);
-            setCoughDetected(diffHours < 2);
+            setCoughDetected(coughIsRecent(coughData.data[0].recorded_at));
           } else {
             setCoughDetected(false); // none, or all reviewed
           }
