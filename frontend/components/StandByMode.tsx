@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { coughIsRecent, readingIsStale } from "@/lib/deviceStatus";
 import { readingLevel } from "@/lib/readingStatus";
 import { useRooms, withDevice } from "@/lib/rooms";
 
@@ -14,6 +15,7 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
   const { deviceId } = useRooms(); // same room as the dashboard
   const [time, setTime] = useState<Date | null>(null);
   const [data, setData] = useState<Telemetry | null>(null);
+  const [isOffline, setIsOffline] = useState(true);
   const [config, setConfig] = useState({ temperature_threshold: 35, pm25_threshold: 35, humidity_threshold: 75 });
   const [coughDetected, setCoughDetected] = useState(false);
   const [isPortrait, setIsPortrait] = useState(false);
@@ -50,6 +52,7 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
     // Clock initialization and interval
     setTime(new Date());
     setData(null); // another room: nothing of the previous one
+    setIsOffline(true);
     setCoughDetected(false);
     const clockInterval = setInterval(() => setTime(new Date()), 1000);
 
@@ -71,7 +74,9 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
 
         if (res.ok) {
           const logs = await res.json();
-          if (logs.length > 0) setData(logs[0]);
+          // Same offline rule as the dashboard: no reading for 20 s, by the server's clock
+          setData(logs.length > 0 ? logs[0] : null);
+          setIsOffline(logs.length === 0 || readingIsStale(logs[0].recorded_at, res));
         }
 
         const confRes = await fetch(withDevice("/api/config", deviceId), {
@@ -86,15 +91,13 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
           });
         }
 
-        const coughRes = await fetch(withDevice("/api/cough-events?per_page=1", deviceId), {
+        // Same cough rule as the dashboard: the newest unreviewed cough, for 2 h
+        const coughRes = await fetch(withDevice("/api/cough-events?per_page=1&unreviewed=1", deviceId), {
           headers: { "Authorization": `Bearer ${token}`, "Accept": "application/json" }
         });
         if (coughRes.ok) {
           const coughData = await coughRes.json();
-          if (coughData.data && coughData.data.length > 0) {
-            const diff = (new Date().getTime() - new Date(coughData.data[0].recorded_at).getTime()) / (1000 * 60 * 60);
-            setCoughDetected(diff < 12);
-          }
+          setCoughDetected(Boolean(coughData.data && coughData.data.length > 0 && coughIsRecent(coughData.data[0].recorded_at)));
         }
       } catch (err) {}
     };
@@ -129,6 +132,17 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
     if (temp === null) return { color: "text-zinc-500", bg: "bg-zinc-500/10", border: "border-zinc-500/20", glow: "shadow-zinc-500/10" };
     return STANDBY_STYLE[readingLevel("temperature", temp, config.temperature_threshold)];
   };
+
+  // The cards show a reading only while the device is online, like the dashboard.
+  const live = isOffline ? null : data;
+  // Status pill: offline wins, as on the dashboard; "waiting" is a room with no reading yet.
+  const status = isOffline && data ? "offline" : coughDetected ? "cough" : !data ? "waiting" : "active";
+  const PILL = {
+    offline: { text: "Device Offline", ring: "bg-zinc-100 dark:bg-white/5 border-zinc-300 dark:border-white/10 shadow-white/5", dot: "bg-zinc-500", ping: "" },
+    cough: { text: "Cough-like Sound Detected", ring: "bg-red-500/10 border-red-500/30 shadow-red-500/20", dot: "bg-red-500", ping: "bg-red-400" },
+    waiting: { text: "Awaiting Sensor Data", ring: "bg-zinc-100 dark:bg-white/5 border-zinc-300 dark:border-white/10 shadow-white/5", dot: "bg-orange-500", ping: "bg-orange-400" },
+    active: { text: "Monitoring Active", ring: "bg-zinc-100 dark:bg-white/5 border-zinc-300 dark:border-white/10 shadow-white/5", dot: "bg-emerald-500", ping: "bg-emerald-400" },
+  }[status];
 
   return (
     <div 
@@ -183,13 +197,13 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
           <div className="flex flex-row gap-6 justify-end">
             
             {/* PM2.5 Widget */}
-            <div className={`backdrop-blur-2xl border rounded-[32px] p-8 flex flex-col items-center justify-center min-w-[170px] transition-all duration-700 shadow-2xl ${data ? getAqiInfo(data.pm25_level).bg + ' ' + getAqiInfo(data.pm25_level).border + ' ' + getAqiInfo(data.pm25_level).glow : 'bg-zinc-100 dark:bg-white/5 border-zinc-300 dark:border-white/10'}`}>
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`mb-3 ${data ? getAqiInfo(data.pm25_level).color : 'text-zinc-600 dark:text-zinc-400'}`}>
+            <div className={`backdrop-blur-2xl border rounded-[32px] p-8 flex flex-col items-center justify-center min-w-[170px] transition-all duration-700 shadow-2xl ${live ? getAqiInfo(live.pm25_level).bg + ' ' + getAqiInfo(live.pm25_level).border + ' ' + getAqiInfo(live.pm25_level).glow : 'bg-zinc-100 dark:bg-white/5 border-zinc-300 dark:border-white/10'}`}>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`mb-3 ${live ? getAqiInfo(live.pm25_level).color : 'text-zinc-600 dark:text-zinc-400'}`}>
                 <path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2"/>
               </svg>
-              {data ? (
-                <span className={`text-6xl lg:text-7xl font-semibold tracking-tight ${getAqiInfo(data.pm25_level).color}`}>
-                  {Number(data.pm25_level).toFixed(1)}
+              {live ? (
+                <span className={`text-6xl lg:text-7xl font-semibold tracking-tight ${getAqiInfo(live.pm25_level).color}`}>
+                  {Number(live.pm25_level).toFixed(1)}
                 </span>
               ) : (
                 <span className="text-6xl text-zinc-600">--</span>
@@ -198,13 +212,13 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
             </div>
 
             {/* Temperature Widget */}
-            <div className={`backdrop-blur-2xl border rounded-[32px] p-8 flex flex-col items-center justify-center min-w-[170px] transition-all duration-700 shadow-2xl ${data ? getTempInfo(data.temperature).bg + ' ' + getTempInfo(data.temperature).border + ' ' + getTempInfo(data.temperature).glow : 'bg-zinc-100 dark:bg-white/5 border-zinc-300 dark:border-white/10'}`}>
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`mb-3 ${data ? getTempInfo(data.temperature).color : 'text-zinc-600 dark:text-zinc-400'}`}>
+            <div className={`backdrop-blur-2xl border rounded-[32px] p-8 flex flex-col items-center justify-center min-w-[170px] transition-all duration-700 shadow-2xl ${live ? getTempInfo(live.temperature).bg + ' ' + getTempInfo(live.temperature).border + ' ' + getTempInfo(live.temperature).glow : 'bg-zinc-100 dark:bg-white/5 border-zinc-300 dark:border-white/10'}`}>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`mb-3 ${live ? getTempInfo(live.temperature).color : 'text-zinc-600 dark:text-zinc-400'}`}>
                 <path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"></path>
               </svg>
-              {data ? (
-                <span className={`text-6xl lg:text-7xl font-semibold tracking-tight ${getTempInfo(data.temperature).color}`}>
-                  {data.temperature === null ? "--" : Math.round(data.temperature)}
+              {live ? (
+                <span className={`text-6xl lg:text-7xl font-semibold tracking-tight ${getTempInfo(live.temperature).color}`}>
+                  {live.temperature === null ? "--" : Math.round(live.temperature)}
                 </span>
               ) : (
                 <span className="text-6xl text-zinc-600">--</span>
@@ -214,21 +228,13 @@ export default function StandByMode({ onWake }: { onWake: () => void }) {
           </div>
 
           {/* AI Status Pill */}
-          <div className={`rounded-full px-6 py-4 border backdrop-blur-2xl flex items-center justify-center gap-3 transition-colors duration-700 shadow-2xl ${
-            coughDetected 
-            ? 'bg-red-500/10 border-red-500/30 shadow-red-500/20' 
-            : 'bg-zinc-100 dark:bg-white/5 border-zinc-300 dark:border-white/10 shadow-white/5'
-          }`}>
+          <div className={`rounded-full px-6 py-4 border backdrop-blur-2xl flex items-center justify-center gap-3 transition-colors duration-700 shadow-2xl ${PILL.ring}`}>
             <span className="relative flex h-3 w-3">
-              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${coughDetected ? 'bg-red-400' : !data ? 'bg-orange-400' : 'bg-emerald-400'}`}></span>
-              <span className={`relative inline-flex rounded-full h-3 w-3 ${coughDetected ? 'bg-red-500' : !data ? 'bg-orange-500' : 'bg-emerald-500'}`}></span>
+              {PILL.ping && <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${PILL.ping}`}></span>}
+              <span className={`relative inline-flex rounded-full h-3 w-3 ${PILL.dot}`}></span>
             </span>
             <p className="text-sm font-medium tracking-wide text-zinc-800 dark:text-zinc-200">
-              {coughDetected 
-                ? "Cough-like Sound Detected" 
-                : !data 
-                  ? "Awaiting Sensor Data"
-                  : "Monitoring Active"}
+              {PILL.text}
             </p>
           </div>
         </div>

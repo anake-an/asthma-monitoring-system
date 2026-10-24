@@ -9,8 +9,11 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
+// Same-origin requests only. Another site's request (Cloudflare's analytics beacon, often blocked
+// by the browser) is left to the browser, so a block there is not an uncaught error here.
 self.addEventListener('fetch', (event) => {
-  event.respondWith(fetch(event.request));
+  if (new URL(event.request.url).origin !== self.location.origin) return;
+  event.respondWith(fetch(event.request).catch(() => Response.error()));
 });
 
 self.addEventListener('push', (event) => {
