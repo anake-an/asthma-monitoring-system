@@ -131,7 +131,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -149,7 +149,7 @@ jobs:
       - name: Status colours are in the built CSS
         run: |
           for c in bg-emerald-400 bg-amber-400 bg-red-400; do
-            grep -rqF ".$c{" .next/static/css || { echo "missing CSS class $c"; exit 1; }
+            grep -rqF ".$c{" .next/static || { echo "missing CSS class $c"; exit 1; }
           done
 
   firmware-esp32:

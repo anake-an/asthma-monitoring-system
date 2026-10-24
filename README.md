@@ -3,7 +3,7 @@
 ![Version](https://img.shields.io/badge/version-v6.2.0-blue)
 ![Firmware](https://img.shields.io/badge/firmware-3.5.0-informational)
 ![Edge AI](https://img.shields.io/badge/Edge%20AI-3.2.0-informational)
-![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)
+![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)
 ![Laravel](https://img.shields.io/badge/Laravel-12-red.svg)
 ![Python](https://img.shields.io/badge/Python-3.10-yellow.svg)
 ![Docker](https://img.shields.io/badge/Docker-Compose-blue.svg)
