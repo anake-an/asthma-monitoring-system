@@ -168,7 +168,7 @@ Wire the INMP441 as in the table above (GP13, GP14, GP15, 3V3 (OUT) on pin 36, G
 
 A new MQ-135 needs about **24-48 hours** of heating before its readings settle.
 
-**Estimated ppm:** the firmware converts the reading to the sensor's resistance and applies the MQ-135 datasheet curve, calibrating against the cleanest air seen since power-on (taken as fresh air, 420 ppm CO₂). For the best estimate, power the device up in a well-ventilated room. The value is a CO₂-equivalent estimate: the sensor also reacts to other gases and drifts with temperature and humidity. The module's load resistor cancels out of the calculation, so its value does not matter.
+**Estimated ppm:** the firmware converts the reading to the sensor's resistance and applies the MQ-135 datasheet curve, calibrating against the cleanest air seen since power-on (taken as fresh air, 420 ppm CO₂). For the best estimate, power the device up in a well-ventilated room. The value is a CO₂-equivalent estimate: the sensor also reacts to other gases and drifts with temperature and humidity. The module's load resistor cancels out of the calculation, so its value does not matter. A loose AO wire reads like very clean air; firmware 3.5.1 ignores such a jump unless it holds for a minute, and heals a wrong reference by itself over a few hours. Pressing EN (a restart) relearns it at once.
 
 ### Sharp GP2Y1010AU0F dust sensor (bare, 6-wire cable)
 Pin 1 is marked on the sensor's connector. Cable colours vary between suppliers, so count from the connector, not the colours.

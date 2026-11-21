@@ -155,10 +155,13 @@ jobs:
   firmware-esp32:
     name: ESP32 firmware compiles (core ${{ matrix.core }})
     runs-on: ubuntu-latest
+    # 3.3.12 is the core the published firmware is built with (firmware-deploy). 'latest' is an early
+    # warning for the next core (4.0.0 removed mbedtls/sha256.h): it shows up red but never blocks.
+    continue-on-error: ${{ matrix.core == 'latest' }}
     strategy:
       fail-fast: false
       matrix:
-        core: ['2.0.17', 'latest']
+        core: ['2.0.17', '3.3.12', 'latest']
     steps:
       - uses: actions/checkout@v5
 
@@ -304,7 +307,7 @@ jobs:
         if: steps.check.outputs.esp32 == 'true'
         run: |
           arduino-cli core update-index --additional-urls "$ESP32_INDEX"
-          arduino-cli core install esp32:esp32 --additional-urls "$ESP32_INDEX"
+          arduino-cli core install esp32:esp32@3.3.12 --additional-urls "$ESP32_INDEX"  # pinned: a new major core never reaches devices untested
           arduino-cli lib install WiFiManager ArduinoJson "DHT sensor library" "Adafruit Unified Sensor" "LiquidCrystal I2C"
           umask 077
           {

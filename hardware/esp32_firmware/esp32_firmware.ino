@@ -38,8 +38,13 @@
 #include "esp_https_ota.h"      // cloud firmware updates
 #include "esp_ota_ops.h"
 #include "esp_netif.h"          // DNS servers (useDnsServers)
-#include "mbedtls/sha256.h"     // checks Edge AI updates before they are installed
+// SHA-256 checks Edge AI updates before they are installed.
+#if __has_include("mbedtls/sha256.h")  // cores 2.x and 3.x
+#include "mbedtls/sha256.h"
 #include "mbedtls/version.h"
+#define SHA256_CTX mbedtls_sha256_context
+#define SHA256_INIT(c) mbedtls_sha256_init(c)
+#define SHA256_FREE(c) mbedtls_sha256_free(c)
 #if MBEDTLS_VERSION_MAJOR < 3  // core 2.x (ESP-IDF 4.4): the *_ret functions
 #define SHA256_STARTS(c) mbedtls_sha256_starts_ret(c, 0)
 #define SHA256_UPDATE(c, d, n) mbedtls_sha256_update_ret(c, d, n)
@@ -49,13 +54,22 @@
 #define SHA256_UPDATE(c, d, n) mbedtls_sha256_update(c, d, n)
 #define SHA256_FINISH(c, out) mbedtls_sha256_finish(c, out)
 #endif
+#else  // core 4.x (ESP-IDF 6, Mbed TLS 4): only the PSA Crypto API is left
+#include "psa/crypto.h"
+#define SHA256_CTX psa_hash_operation_t
+#define SHA256_INIT(c) do { *(c) = psa_hash_operation_init(); psa_crypto_init(); } while (0)
+#define SHA256_STARTS(c) psa_hash_setup(c, PSA_ALG_SHA_256)
+#define SHA256_UPDATE(c, d, n) psa_hash_update(c, d, n)
+#define SHA256_FINISH(c, out) do { size_t shaLen; psa_hash_finish(c, out, 32, &shaLen); } while (0)
+#define SHA256_FREE(c) psa_hash_abort(c)
+#endif
 #include "secrets.h"            // MQTT_URI, MQTT_USERNAME, MQTT_PASSWORD
 
 // Raise this for every build you publish (php artisan firmware:publish reads it from the file).
 // Firmware "3.1.0 Build 261011": the version is set here (major.feature.fix, history in
 // hardware/FIRMWARE_HISTORY.md); the build stamp (build date YYMMDD, ".2" for a second build that
 // day) is written by CI into build_info.h. A build made in the Arduino IDE says "dev".
-#define FIRMWARE_VERSION "3.5.0"
+#define FIRMWARE_VERSION "3.5.1"
 #if __has_include("build_info.h")
 #include "build_info.h"
 #endif
@@ -402,13 +416,25 @@ float readDustSensor() {
 // readings in a row, relaxing slowly while the air is close to it) is taken as fresh air at
 // MQ135_CLEAN_AIR_PPM. Indoor air is usually above that, the sensor reacts to many gases, and it
 // drifts with temperature and humidity: an estimate, not a CO2 measurement.
+// A loose or badly seated AO wire reads like very clean air (a high Rs), and a reference learned
+// from it made every later reading look many times dirtier (3.5.1). So a reference more than
+// MQ135_MAX_STEP times cleaner is only taken once the readings have stayed there, steady, for
+// MQ135_JUMP_READINGS readings in a row; and while every reading sits far below the reference
+// (estimate above about 2,900 ppm), the reference moves slowly towards them, halving the gap in
+// about 6 hours, so a wrong reference heals by itself. A restart relearns it at once.
 const float MQ135_SUPPLY_V = 5.0f;          // MB-102 5 V rail
 const float MQ135_DIVIDER_RATIO = 1.5f;     // same 10k/20k divider as the dust sensor
 const float MQ135_CLEAN_AIR_PPM = 420.0f;   // outdoor CO2, the calibration point
 const float MQ135_CURVE_EXP = -2.769034857f;
 const int MQ135_SAMPLES = 10;
+const float MQ135_STEADY = 1.3f;            // three readings within 30 % of each other count as steady
+const float MQ135_MAX_STEP = 2.0f;          // a cleaner reference up to 2x is taken at once
+const int MQ135_JUMP_READINGS = 20;         // a bigger jump needs 20 steady readings (~1 min)
+const float MQ135_FAR = 0.5f;               // readings below half the reference Rs (~2,900 ppm est.)
+const float MQ135_RELAX = 0.999904f;        // pull the reference towards them: half the gap in ~6 h
 float mq135CleanRsRatio = -1.0f;  // Rs/RL in the cleanest air seen
 float mq135Recent[3] = {-1.0f, -1.0f, -1.0f};  // the last three Rs/RL values
+int mq135JumpCount = 0;           // steady readings in a row more than MQ135_MAX_STEP times cleaner
 int lastMq135Raw = 0;             // averaged ADC value (Serial log)
 
 float readMq135Ppm() {
@@ -430,8 +456,21 @@ float readMq135Ppm() {
     mq135CleanRsRatio = rsRatio;  // first reading
   } else if (mq135Recent[2] >= 0) {
     float lowestOfThree = min(mq135Recent[0], min(mq135Recent[1], mq135Recent[2]));
-    if (lowestOfThree > mq135CleanRsRatio) mq135CleanRsRatio = lowestOfThree;  // cleaner, three times in a row
-    else if (rsRatio > 0.95f * mq135CleanRsRatio) mq135CleanRsRatio *= 0.99999f;  // near clean: follow the drift
+    float highestOfThree = max(mq135Recent[0], max(mq135Recent[1], mq135Recent[2]));
+    bool steady = highestOfThree <= MQ135_STEADY * lowestOfThree;
+    bool bigJump = lowestOfThree > MQ135_MAX_STEP * mq135CleanRsRatio;
+    mq135JumpCount = (bigJump && steady) ? mq135JumpCount + 1 : 0;
+    if (lowestOfThree > mq135CleanRsRatio) {
+      // Cleaner, three times in a row: taken at once if the step is small, else only once it holds.
+      if (!bigJump || mq135JumpCount >= MQ135_JUMP_READINGS) {
+        mq135CleanRsRatio = lowestOfThree;
+        mq135JumpCount = 0;
+      }
+    } else if (rsRatio > 0.95f * mq135CleanRsRatio) {
+      mq135CleanRsRatio *= 0.99999f;  // near clean: follow the drift
+    } else if (highestOfThree < MQ135_FAR * mq135CleanRsRatio) {
+      mq135CleanRsRatio *= MQ135_RELAX;  // far below for a long time: the reference is probably wrong
+    }
   }
   return MQ135_CLEAN_AIR_PPM * powf(rsRatio / mq135CleanRsRatio, MQ135_CURVE_EXP);
 }
@@ -1061,8 +1100,8 @@ void runEdgeAiOta() {
     return;
   }
 
-  mbedtls_sha256_context sha;
-  mbedtls_sha256_init(&sha);
+  SHA256_CTX sha;
+  SHA256_INIT(&sha);
   SHA256_STARTS(&sha);
   uint8_t chunk[256];
   uint32_t sent = 0;
@@ -1096,7 +1135,7 @@ void runEdgeAiOta() {
 
   uint8_t digest[32];
   SHA256_FINISH(&sha, digest);
-  mbedtls_sha256_free(&sha);
+  SHA256_FREE(&sha);
   char hex[65];
   for (int i = 0; i < 32; i++) snprintf(hex + i * 2, 3, "%02x", digest[i]);
   if (!ok || strcasecmp(hex, otaJob.sha256) != 0) {

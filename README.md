@@ -1,7 +1,7 @@
 # 🫁 RespiroSync: AI-Powered Asthma Monitoring System
 
 ![Version](https://img.shields.io/badge/version-v6.2.0-blue)
-![Firmware](https://img.shields.io/badge/firmware-3.5.0-informational)
+![Firmware](https://img.shields.io/badge/firmware-3.5.1-informational)
 ![Edge AI](https://img.shields.io/badge/Edge%20AI-3.2.0-informational)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)
 ![Laravel](https://img.shields.io/badge/Laravel-12-red.svg)
