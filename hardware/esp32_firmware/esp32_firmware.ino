@@ -38,8 +38,13 @@
 #include "esp_https_ota.h"      // cloud firmware updates
 #include "esp_ota_ops.h"
 #include "esp_netif.h"          // DNS servers (useDnsServers)
-#include "mbedtls/sha256.h"     // checks Edge AI updates before they are installed
+// SHA-256 checks Edge AI updates before they are installed.
+#if __has_include("mbedtls/sha256.h")  // cores 2.x and 3.x
+#include "mbedtls/sha256.h"
 #include "mbedtls/version.h"
+#define SHA256_CTX mbedtls_sha256_context
+#define SHA256_INIT(c) mbedtls_sha256_init(c)
+#define SHA256_FREE(c) mbedtls_sha256_free(c)
 #if MBEDTLS_VERSION_MAJOR < 3  // core 2.x (ESP-IDF 4.4): the *_ret functions
 #define SHA256_STARTS(c) mbedtls_sha256_starts_ret(c, 0)
 #define SHA256_UPDATE(c, d, n) mbedtls_sha256_update_ret(c, d, n)
@@ -48,6 +53,15 @@
 #define SHA256_STARTS(c) mbedtls_sha256_starts(c, 0)
 #define SHA256_UPDATE(c, d, n) mbedtls_sha256_update(c, d, n)
 #define SHA256_FINISH(c, out) mbedtls_sha256_finish(c, out)
+#endif
+#else  // core 4.x (ESP-IDF 6, Mbed TLS 4): only the PSA Crypto API is left
+#include "psa/crypto.h"
+#define SHA256_CTX psa_hash_operation_t
+#define SHA256_INIT(c) do { *(c) = psa_hash_operation_init(); psa_crypto_init(); } while (0)
+#define SHA256_STARTS(c) psa_hash_setup(c, PSA_ALG_SHA_256)
+#define SHA256_UPDATE(c, d, n) psa_hash_update(c, d, n)
+#define SHA256_FINISH(c, out) do { size_t shaLen; psa_hash_finish(c, out, 32, &shaLen); } while (0)
+#define SHA256_FREE(c) psa_hash_abort(c)
 #endif
 #include "secrets.h"            // MQTT_URI, MQTT_USERNAME, MQTT_PASSWORD
 
@@ -1086,8 +1100,8 @@ void runEdgeAiOta() {
     return;
   }
 
-  mbedtls_sha256_context sha;
-  mbedtls_sha256_init(&sha);
+  SHA256_CTX sha;
+  SHA256_INIT(&sha);
   SHA256_STARTS(&sha);
   uint8_t chunk[256];
   uint32_t sent = 0;
@@ -1121,7 +1135,7 @@ void runEdgeAiOta() {
 
   uint8_t digest[32];
   SHA256_FINISH(&sha, digest);
-  mbedtls_sha256_free(&sha);
+  SHA256_FREE(&sha);
   char hex[65];
   for (int i = 0; i < 32; i++) snprintf(hex + i * 2, 3, "%02x", digest[i]);
   if (!ok || strcasecmp(hex, otaJob.sha256) != 0) {
