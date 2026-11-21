@@ -1,6 +1,7 @@
 # What owners see under "What's new" when this firmware is offered as an update.
 # One short point per line, in plain words (no technical terms). Lines starting with # are ignored.
 # Update it together with FIRMWARE_VERSION in esp32_firmware.ino.
+Gas reading no longer gets stuck far too high after a loose sensor wire
 Coughs heard while the internet is down are kept and sent when it is back
 Calmer alarms: no more switching on and off when a reading sits right at its limit
 Hold the BOOT button for 2 seconds to silence an alarm for 10 minutes

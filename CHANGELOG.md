@@ -5,6 +5,7 @@ All notable changes to RespiroSync. Format based on [Keep a Changelog](https://k
 ## [Unreleased]
 
 ### Fixed
+- **Gas reading stuck far too high (firmware 3.5.1):** the ESP32 takes the cleanest air it has seen as 420 ppm. A loose MQ-135 output wire reads like very clean air, so a few readings through it set a reference that made every later reading look about 15 times dirtier (6,000 ppm in a normal room) until a restart. A reference more than twice as clean is now taken only after a minute of steady readings, and a reference that every reading stays far below moves towards them by itself (half the gap in about 6 hours).
 - **StandBy follows the dashboard:** with the device off, StandBy kept showing its last dust and temperature reading and "Monitoring Active". It now uses the dashboard's rule (no reading for 20 s by the server's clock is offline), shows "--" and "Device Offline", and shows a cough the same way as the dashboard (the newest unreviewed one, for 2 hours) instead of any cough in the last 12 hours. Both screens read the rules from `lib/deviceStatus.ts`.
 - **No service worker errors from other sites:** the service worker now passes only this site's requests through, so a blocked Cloudflare analytics beacon no longer shows as an uncaught error in the console.
 
